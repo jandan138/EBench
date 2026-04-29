@@ -101,7 +101,52 @@ A full validation pass takes roughly **30 minutes on 8× RTX 4090**. Detailed se
 
 ## Baselines
 
-Reference policies live under `baselines/<name>/`, each with its own README and a `gmp eval`-compatible entry point. EBench has been validated on **π0**, **π0.5**, **XVLA**, and **InternVLA-A1** — see the [leaderboard](https://internrobotics.shlab.org.cn/eval) for current standings and per-axis diagnostic reports.
+Reference policies live under `baselines/<name>/`, each with its own README and a `gmp eval`-compatible entry point. EBench has been validated on **π0**, **π0.5**, **X-VLA**, and **InternVLA-A1** — see the [leaderboard](https://internrobotics.shlab.org.cn/eval) for current standings and per-axis diagnostic reports.
+
+Each baseline ships its upstream code as a `third_party/` git submodule and layers an EBench-specific entry point on top. Initialize the submodules first:
+
+```bash
+git submodule update --init --recursive
+```
+
+### openpi (π0 / π0.5)
+
+Submodule lives at `baselines/openpi/third_party/openpi`; EBench-specific configs and the eval client are layered under `baselines/openpi/{src,scripts}/`. See [`baselines/openpi/README.md`](baselines/openpi/README.md) for the full walkthrough.
+
+```bash
+# After configuring paths/tokens in scripts/launch_pi_onlineeval.sh:
+bash scripts/launch_pi_onlineeval.sh
+```
+
+### X-VLA
+
+```bash
+# 1. Install deps
+pip install -r baselines/X-VLA/requirements.txt
+
+# 2. Run eval (each WORKER_ID is a separate inference worker)
+MODEL_PATH=/path/to/xvla \
+BASE_URL=https://internrobotics.shlab.org.cn/eval \
+RUN_ID=my_first_run \
+TOKEN=<your-token> \
+WORKER_IDS=0 \
+  bash scripts/run_xvla_eval.sh
+```
+
+### InternVLA-A1
+
+Submodule lives at `baselines/InternVLA-A1/third_party/InternVLA-A1`. See [`baselines/InternVLA-A1/README.md`](baselines/InternVLA-A1/README.md) for the full walkthrough.
+
+```bash
+# 1. Install upstream deps from third_party/InternVLA-A1/README.md
+# 2. Pull the checkpoint
+huggingface-cli download hxma/EBench-Generalist-InternVLA-A1 \
+  --repo-type model \
+  --local-dir baselines/InternVLA-A1/checkpoints/EBench-Generalist-InternVLA-A1
+
+# 3. Run eval
+cd baselines/InternVLA-A1 && bash eval_pjsim.sh
+```
 
 To plug your own model in, follow the contract documented at [Integrate Your Own Model](https://internrobotics.github.io/EBench-doc/evaluation/custom-model/).
 
