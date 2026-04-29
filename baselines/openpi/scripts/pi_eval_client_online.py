@@ -114,12 +114,8 @@ if __name__ == "__main__":
             if obs[ids]["obs"]["reset"]:
                 pass
             action_chunk = pi0_client.get_action(obs)
-            for action in action_chunk:
-                obs, eval_finished = eval_client.step(action)
-                if eval_finished:
-                    break
-                if obs[ids]["obs"]["reset"]: 
-                    break
+            obs, eval_finished = eval_client.step(action_chunk)
+            
     finally:
         eval_client.close()
 
