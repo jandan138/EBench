@@ -39,8 +39,8 @@ Please make sure that the model path, dataset path, environment settings, and ou
 
 The post-trained OpenPI models on EBench are available at:
 
-- [$\pi_{0.5}$ EBench Generalist](https://huggingface.co/william-g/pi05-ebench-generalist/tree/main)
-- [$\pi_{0}$ EBench Generalist](https://huggingface.co/william-g/pi0-ebench-generalist/tree/main)
+- [π0.5 EBench Generalist](https://huggingface.co/william-g/pi05-ebench-generalist/tree/main)
+- [π0 EBench Generalist](https://huggingface.co/william-g/pi0-ebench-generalist/tree/main)
 
 Download the desired checkpoint and update the model path in:
 
