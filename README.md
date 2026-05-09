@@ -113,6 +113,11 @@ git submodule update --init --recursive
 
 Submodule lives at `baselines/openpi/third_party/openpi`; EBench-specific configs and the eval client are layered under `baselines/openpi/{src,scripts}/`. See [`baselines/openpi/README.md`](baselines/openpi/README.md) for the full walkthrough.
 
+The post-trained OpenPI models on EBench are available at:
+
+- [$\pi_{0.5}$ EBench Generalist](https://huggingface.co/william-g/pi05-ebench-generalist/tree/main)
+- [$\pi_{0}$ EBench Generalist](https://huggingface.co/william-g/pi0-ebench-generalist/tree/main)
+
 ```bash
 # After configuring paths/tokens in scripts/launch_pi_onlineeval.sh:
 bash scripts/launch_pi_onlineeval.sh
