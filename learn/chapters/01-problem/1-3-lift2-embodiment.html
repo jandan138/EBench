@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>本体 lift2：双臂 + 移动底盘 + 4 相机 · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="1-3">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 1 · Manipulation &amp; VLA · 1-3</div>
+        <h1>本体 lift2：双臂 + 移动底盘 + 4 相机</h1>
+        <p class="lede">前两节我们谈的都是「策略」这个大脑。现在该认识它的<i>身体</i>了。EBench 所有任务都跑在同一个本体上——<span class="term">lift2</span>。把它的相机、关节、状态字段认全，你才读得懂后面任何一段 observation 与 action。</p>
+
+        <h2 id="who-is-lift2">lift2 是谁</h2>
+        <p><span class="term">lift2</span> 是 EBench 的统一本体：一个 <b>dual-arm（双臂）+ 移动底盘（mobile base）</b>的机器人。「dual-arm」意味着它有左右两条手臂、两个夹爪，能做需要双手配合的操作；「mobile base」意味着它不是钉在桌前的——它能<b>开着底盘走动</b>。所有 26 个任务、所有 baseline 的评测，都在这一个本体上进行。统一本体是 EBench 能做<b>跨任务能力诊断</b>的前提：身体不变，变的只有任务，分数差异才干净地归因到「能力」而非「换了个机器人」。</p>
+
+        <h2 id="cameras">四只眼睛：4 个 480×640 相机</h2>
+        <p>lift2 配 <b>4 个相机视角</b>，分辨率均为 <b>480×640</b>，数据录制帧率 <b>15 fps</b>。四个视角各有分工：</p>
+        <table>
+          <thead><tr><th>视角</th><th>字段</th><th>大致作用</th></tr></thead>
+          <tbody>
+            <tr><td><code>top</code></td><td><code>video.top_view</code></td><td>俯视主视角，看全局布局。</td></tr>
+            <tr><td><code>left</code></td><td><code>video.left_view</code></td><td>偏向左臂工作区的细节。</td></tr>
+            <tr><td><code>right</code></td><td><code>video.right_view</code></td><td>偏向右臂工作区的细节。</td></tr>
+            <tr><td><code>overlook</code></td><td><code>video.overlook_view</code></td><td>更高的俯瞰，覆盖移动范围。</td></tr>
+          </tbody>
+        </table>
+        <p>每帧是 <code>(480, 640, 3)</code> 的 <span class="term">uint8</span> RGB。多相机不是奢侈——双臂操作和移动都需要从多个角度消解遮挡、判断深度。VLA 把这几路图一起送进 VLM 骨干当视觉输入（<a href="1-2-what-is-vla.html">1.2</a>）。</p>
+
+        <h2 id="state">状态由哪些数字组成</h2>
+        <p>除了图像，lift2 还把自己的<b>本体感知</b>（proprioception）作为观测的一部分。下表是它的 observation modality 全集——这张表你会在 Part 4 反复回来查：</p>
+        <table>
+          <thead><tr><th>字段</th><th>shape</th><th>含义</th></tr></thead>
+          <tbody>
+            <tr><td><code>state.joints</code></td><td>(12,)</td><td>双臂关节角：左 6 + 右 6。</td></tr>
+            <tr><td><code>state.gripper</code></td><td>(4,)</td><td>夹爪状态（双爪）。</td></tr>
+            <tr><td><code>state.base</code></td><td>(3,)</td><td>底盘位姿 <span class="term-i">x, y, theta</span>（平面位置 + 朝向）。</td></tr>
+            <tr><td><code>state.ee_pose</code></td><td>(14,)</td><td>双臂末端位姿：每臂 [pos(3) + quat(4)]，两臂共 2×7=14。</td></tr>
+            <tr><td><code>video.{cam}_view</code></td><td>(480,640,3) uint8</td><td>4 路相机 RGB（top/left/right/overlook）。</td></tr>
+            <tr><td><code>instruction</code></td><td>str</td><td>自然语言任务指令。</td></tr>
+            <tr><td><code>timestep</code></td><td>int</td><td>当前步序号。</td></tr>
+            <tr><td><code>reset</code></td><td>bool</td><td>是否是 episode 首步（首步为 True）。</td></tr>
+          </tbody>
+        </table>
+
+        <div class="callout note">
+          <div class="c-h">为什么有了 joints 还要 ee_pose</div>
+          <p><code>state.joints</code>（关节空间）和 <code>state.ee_pose</code>（笛卡尔末端空间）描述的是同一件事的两种坐标——前者是各关节的角度，后者是末端执行器在世界里的位置+姿态（用四元数表示朝向）。不同模型偏好不同空间：有的在关节空间出动作，有的在 ee_pose 空间出动作（<span class="term">control_type</span> 决定，见 <a href="../04-engine/4-3-action-vector.html">4.3</a>）。EBench 两套都给你，省得自己做正运动学换算。</p>
+        </div>
+
+        <h2 id="why-mobile">移动让问题难在哪</h2>
+        <p>注意那个 <code>state.base</code>——它是 lift2 区别于普通桌面机械臂的关键。多了一个能动的底盘，问题<b>难度跳了一档</b>。</p>
+
+        <div class="bridge rl">
+          <div class="c-h"><span class="tag">从 RL 看</span> horizon 变长、动作空间扩维、误差更易复合</div>
+          <p>移动底盘带来三重困难。其一，<b>horizon 变长</b>：很多任务得「先走过去再操作」，决策序列里多了一整段导航，episode 更长。其二，<b>动作空间扩维</b>：策略不止要控制双臂关节，还要输出底盘运动 $\Delta x, \Delta y, \Delta\text{yaw}$。其三，也是最致命的——<b>compounding error 的舞台更大</b>：底盘走偏一点，后续整个操作的视角和相对位姿全变了，behavior cloning 的 covariate shift（<a href="1-1-rl-to-bc.html">1.1</a>）在导航段尤其容易雪崩。「先把车开到正确的地方」这件看似简单的事，恰恰是 mobile manipulation 的难点之一。</p>
+        </div>
+
+        <div class="bridge g103">
+          <div class="c-h"><span class="tag">从 GAMES103 看</span> base 是平面刚体，ee_pose 是带朝向的位姿</div>
+          <p><code>state.base = (x, y, theta)</code> 正是你熟悉的<b>平面刚体</b>位形——两个平移自由度加一个绕竖轴的旋转。<code>ee_pose</code> 里的 quaternion 则是你在仿真里表示三维旋转的老朋友：用四元数避免欧拉角的万向锁。底盘在仿真里就是被 PhysX 当作一个带约束的刚体推进的（<a href="../02-sim/2-1-isaac-sim.html">2.1</a>）。</p>
+        </div>
+
+        <h2 id="action-preview">动作侧先打个照面</h2>
+        <p>身体能感知（observation），自然也要能动作（action）。lift2 的动作会同时覆盖<b>双臂关节 + 双夹爪 + 底盘运动</b>，并且支持关节空间或末端位姿两种控制方式、相对或绝对两种参照。具体到那个 16-D / 19-D 的动作向量、<code>base_motion</code>、<code>is_rel</code> / <code>base_is_rel</code> 这些契约细节，是 <a href="../04-engine/4-3-action-vector.html">4.3</a> 的主菜——这里先埋个伏笔：记住<b>动作和状态并不是镜像</b>（比如底盘动作往往是<i>增量</i>，状态是<i>绝对</i>位姿），这个错位会在 Part 4 让不止一个人踩坑。</p>
+
+        <h2 id="whats-next">这一节你需要带走的</h2>
+        <p>lift2 是 EBench 的统一本体：dual-arm + 移动底盘 + 4 个 480×640 相机（top/left/right/overlook，15 fps）。状态由 <code>state.joints(12)</code> / <code>gripper(4)</code> / <code>base(3, x,y,theta)</code> / <code>ee_pose(14)</code> 加四路图像、指令、timestep、reset 组成。移动底盘让 horizon 更长、动作空间更大、compounding error 的舞台更大——这正是「mobile manipulation」难的地方。</p>
+        <p>到这里 Part 1 收束：我们走完了从 RL 到 behavior cloning、到生成式策略、到 VLA、再到承载它的身体 lift2。接下来 Part 2 钻进地基——这一切运行其上的<b>仿真栈</b>：Isaac Sim、cuRobo、GenManip 与 LeRobot 数据。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/flow-matching-ode.js"></script>
+  <script src="../../assets/js/widgets/action-chunking.js"></script>
+  <script src="../../assets/js/widgets/eval-flow.js"></script>
+  <script src="../../assets/js/widgets/action-dissector.js"></script>
+  <script src="../../assets/js/widgets/capability-radar.js"></script>
+  <script src="../../assets/js/widgets/task-taxonomy.js"></script>
+  <script src="../../assets/js/widgets/moe-attention.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Compounding error → action chunking (ACT) · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="5-1">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 5 · VLA 理论 · 5-1</div>
+        <h1>Compounding error → action chunking (ACT)</h1>
+        <p class="lede">这一 Part 开始拆 VLA 的「发动机」。我们从一个看似工程、实则深刻的设计开始：为什么 π0 系列<b>一次预测 50 个未来动作</b>，而不是像经典控制那样一步一动？答案要从一个所有模仿学习者都怕的幽灵讲起——<span class="term">compounding error</span>。</p>
+
+        <h2 id="compounding-error">滚雪球的误差：covariate shift</h2>
+        <p>先把问题摆清楚。我们训练一个策略 $\pi_\theta(a\mid s)$，靠的是<b>模仿</b>专家轨迹（<span class="term">behavior cloning</span>），不是奖励信号。训练时，策略看到的状态 $s$ 全部来自<i>专家</i>走过的分布；但部署时，策略看到的状态来自<i>它自己</i>走出来的轨迹。这两个分布只要有一点点偏差，麻烦就开始了。</p>
+        <p>设想第一步策略有一个微小误差 $\epsilon$。这个误差把机器人推到一个<b>稍微偏离专家分布</b>的状态 $s_1'$。在 $s_1'$ 上，策略的预测<i>更不准</i>了——因为它训练时见过的类似状态更少。于是第二步误差更大，把机器人推到 $s_2''$，更陌生……误差像滚雪球一样累积。这就是著名的 <span class="term">covariate shift</span>：随时间步推进，状态分布越漂越远，单步误差被<b>放大成轨迹级灾难</b>。理论上，长度为 $T$ 的 episode，朴素 BC 的误差上界随 $T$ 呈<b>二次</b>增长 $O(T^2 \epsilon)$，而不是你希望的线性。</p>
+
+        <div class="bridge rl">
+          <div class="c-h"><span class="tag">从 RL 看</span> 这正是 DAgger 想解决的那个分布漂移</div>
+          <p>你在 RL / 模仿学习里一定见过这个：BC 的训练分布是 $d^{\pi^\star}$（专家诱导的状态分布），测试分布是 $d^{\pi_\theta}$（学生诱导的），两者不匹配。<span class="term">DAgger</span> 的做法是反复让学生上场、再请专家在学生遇到的新状态上重新标注，把训练分布<b>拉回</b>到 $d^{\pi_\theta}$。但 DAgger 需要在线查询专家，对真实机器人很贵。<b>Action chunking 是另一条路</b>：不去修分布，而是<b>缩短「需要做决策的次数」</b>，从根上削减误差累积的项数。</p>
+        </div>
+
+        <h2 id="chunking">Action chunking：把决策 horizon 砍短</h2>
+        <p>关键洞察来自 <span class="term">ACT</span>（<span class="term-i">Action Chunking with Transformers</span>，ALOHA 项目，Tony Zhao 等）。它的做法极简单：<b>不要每步预测一个动作，而是一次预测未来 $H$ 个动作</b>。</p>
+        <div class="math-block">$$ A_t = \pi_\theta(o_t) = [\,a_t,\; a_{t+1},\; \dots,\; a_{t+H-1}\,] $$</div>
+        <p>$A_t$ 就是一个 <span class="term">action chunk</span>：以当前观测 $o_t$ 为条件，一口气吐出一段长度 $H$ 的动作序列。π0 取 $H=50$，控制频率 50Hz——也就是一次推理覆盖<b>未来约 1 秒</b>的动作。</p>
+        <p>为什么这能压住 compounding error？因为<b>策略真正「做决策」的时刻变少了</b>。原来每一步都要重新看状态、重新推理，每一次推理都是一次注入误差、引发 covariate shift 的机会。现在把 $H$ 步打包，有效决策点从 $T$ 个缩到 $T/H$ 个。误差累积的项数直接除以 $H$，雪球还没滚起来就被打断。更妙的是：chunk 内部的动作是<b>同一次推理一起生成</b>的，它们天然连贯、平滑，不会出现两次独立决策之间的抖动或自相矛盾。</p>
+
+        <div class="callout note">
+          <div class="c-h">为什么不能 $H$ 越大越好？</div>
+          <p>极端情况下 $H=T$ 就是「看一眼初始状态，闭眼把整条轨迹做完」——这显然不行，因为环境是有反馈的：物体会滑、抓取会失败、底盘会偏。chunk 越长，策略对中途变化越<b>迟钝</b>。所以 $H$ 是一个 tradeoff 旋钮，下面我们就来调它。</p>
+        </div>
+
+        <h2 id="receding-horizon">开环执行 + replan：receding horizon</h2>
+        <p>有了一段 chunk，怎么执行？最朴素的办法是把 50 个动作全部开环（open-loop）执行完，再推下一段。但这样在 chunk 的<b>尾部</b>策略已经「盲飞」很久，反应最差。实践中采用的是 <span class="term">receding horizon</span>（滚动时域）策略：<b>只执行 chunk 的前一部分，就丢掉剩余、用新观测重新推理</b>。</p>
+        <p>具体到 π0 报告的数字：</p>
+        <ul>
+          <li><b>20Hz</b> 机器人：每段 chunk 执行 16/50 步后重推，相当于约每 <b>0.8s</b> replan 一次。</li>
+          <li><b>50Hz</b> 机器人：每段执行 25 步后重推，相当于约每 <b>0.5s</b> replan 一次。</li>
+        </ul>
+        <p>这就像汽车导航：你规划了一整条路线（整段 chunk），但只按前面几步开，每隔一会儿就<b>根据当前位置重新规划</b>。这样既享受了 chunk 带来的平滑与短 horizon，又保留了对环境变化的反应能力。下面这个部件让你亲手调 $H$、调执行步数、再加一个扰动，看 receding horizon 怎么把机器人「拉回正轨」。</p>
+
+        <div class="lab">
+          <div class="lab-h"><span class="lab-tag">interactive</span><span class="lab-t">receding horizon：chunk 长度 / 执行步数 / 扰动</span></div>
+          <div class="lab-body" data-widget="action-chunking"></div>
+          <div class="lab-cap">调 $H$（chunk 长度）与每段执行步数。加一个扰动，观察：长 chunk 更平滑但纠偏慢，短执行步数 replan 更勤、反应更快。</div>
+        </div>
+
+        <h2 id="ensembling">一个反直觉的发现：temporal ensembling 反而变差</h2>
+        <p>ACT 原作还提了一招叫 <span class="term">temporal ensembling</span>：因为相邻时刻预测的 chunk 在时间上<b>有重叠</b>（$t$ 时刻预测了 $a_{t+1}$，$t{+}1$ 时刻又预测了一次 $a_{t+1}$），可以把对同一时刻的多次预测做加权平均，理论上能降方差、更平滑。听起来很美。</p>
+        <div class="bridge g103">
+          <div class="c-h"><span class="tag">从 GAMES103 看</span> 平均不是免费的：它引入相位滞后</div>
+          <p>对运动量做时间平均，本质是一个低通滤波。在仿真里你调过积分器和阻尼就知道：滤波能压抑高频抖动，但也会<b>钝化响应、引入相位滞后</b>——平均窗口里掺进了「过时」的预测。当策略本身已经够准、chunk 已经够平滑时，再叠一层平均，弊大于利。</p>
+        </div>
+        <p>π0 团队试了 temporal ensembling，结论是：在他们的设置下<b>反而让性能变差</b>，于是弃用。最终方案就是上面说的——<b>chunk 开环执行一段，然后 receding-horizon replan</b>，不做跨 chunk 的平均。这是一个值得记住的工程教训：理论上「应该更好」的技巧，在真实分布和真实控制频率下未必成立，要用实验说话。</p>
+
+        <h2 id="tradeoff">长 chunk vs 短 chunk：一张 tradeoff 表</h2>
+        <p>把这一节的 tradeoff 收成一张表，方便你在读 baseline 代码时对号入座：</p>
+        <table>
+          <thead><tr><th>维度</th><th>长 chunk / 执行更多</th><th>短 chunk / replan 更勤</th></tr></thead>
+          <tbody>
+            <tr><td>平滑度</td><td>更平滑（同次推理连贯）</td><td>易在 replan 点出现小不连续</td></tr>
+            <tr><td>反应速度</td><td>慢，对扰动/失败迟钝</td><td>快，能及时纠偏</td></tr>
+            <tr><td>covariate shift</td><td>决策点少，累积误差少</td><td>决策点多，暴露给漂移更多</td></tr>
+            <tr><td>推理开销</td><td>低（推理次数少）</td><td>高（频繁重推）</td></tr>
+          </tbody>
+        </table>
+        <p>这也解释了为什么不同部署目标用不同的数字。openpi 的 benchmark 微调里，<span class="term">pi05_libero</span> 用 $H=10$、<span class="term">pi05_droid</span> 用 $H=16$（action_dim=32）——任务越需要实时反应、控制越精细，就把 chunk 调短一点。EBench 的 baseline 同样有 <span class="term-i">chunk 模式</span>与 <span class="term-i">step 模式</span>之分，以及 <code>used_chunk_size</code> 这类旋钮，我们在 <a href="../04-engine/4-4-chunk-step.html">4.4</a> 已从评测引擎角度见过它，这里补上了背后的「为什么」。</p>
+
+        <h2 id="whats-next">这一节你需要带走的</h2>
+        <p>三句话：(1) BC 的死穴是 <b>compounding error / covariate shift</b>——单步误差把状态推离训练分布，误差随 $T$ 滚雪球；(2) <b>action chunking</b> 一次预测 $H$ 个动作，把有效决策点从 $T$ 缩到 $T/H$，从根上削减累积、并让动作更平滑；(3) 执行上用 <b>receding horizon</b>——只执行前一段、用新观测 replan，在「平滑」与「反应」之间取平衡，π0 弃用了 temporal ensembling。</p>
+        <p>但我们还欠一个关键问题：这「一段 50 个动作」到底是<i>怎么被生成出来</i>的？早期 VLA 把动作离散成 token 自回归吐出，π0 认为这不适合高频灵巧控制。下一节，我们进入本书的数学高潮——<span class="term">flow matching</span>：用解一个 ODE 的方式，从纯噪声里「积分」出一整段连续动作。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/flow-matching-ode.js"></script>
+  <script src="../../assets/js/widgets/action-chunking.js"></script>
+  <script src="../../assets/js/widgets/eval-flow.js"></script>
+  <script src="../../assets/js/widgets/action-dissector.js"></script>
+  <script src="../../assets/js/widgets/capability-radar.js"></script>
+  <script src="../../assets/js/widgets/task-taxonomy.js"></script>
+  <script src="../../assets/js/widgets/moe-attention.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

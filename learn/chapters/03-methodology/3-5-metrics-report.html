@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>指标与诊断报告（愿景 vs 现实） · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="3-5">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 3 · Benchmark 方法论 · 3-5</div>
+        <h1>指标与诊断报告（愿景 vs 现实）</h1>
+        <p class="lede">方法论的最后一块拼图：把前面所有 episode 的分数，<i>聚合</i>成一个 leaderboard 数字，再<i>展开</i>成一份可读的诊断报告。聚合的部分有干净的公式与代码事实；展开的部分则横着一道最需要诚实对待的<b>愿景 vs 现实</b>裂缝。这一节我们两件事都讲清楚。</p>
+
+        <h2 id="aggregation">从 per-episode 到 leaderboard：聚合公式</h2>
+        <p>3.3 已经定义了最底层的量：一次 episode 的 <span class="term">task score</span> ∈ [0,1]，由部分分与时序条件算出。往上聚合只有两步，都很朴素：</p>
+        <div class="math-block">$$\text{track\_score}(\text{track},\text{split}) = \frac{1}{N}\sum_{i=1}^{N}\text{score}_i \,,\qquad \text{score}_i\in[0,1]$$</div>
+        <p>其中 $N$ 是该 <span class="term">track</span> / <span class="term">split</span> 下所有 episode 的数量。也就是说，<b>track score = 该 track/split 全部 episode 分数的平均</b>。再往上，<span class="term">leaderboard</span> 把各 track 的 track score 做聚合，得到排行榜上那个对外的数字。</p>
+        <p>注意这条链路的方向：底层是<i>细腻</i>的（连续部分分、时序门控），越往上越<i>压扁</i>（平均、再聚合）。leaderboard 那个数，正是 0.1 里我们抱怨的「贫穷的标量」——它本身没错，错的是<b>只看它</b>。诊断报告存在的全部意义，就是把这条聚合链<i>反向</i>展开回去，让你看见平均值底下的结构。</p>
+
+        <h2 id="report-vision">愿景里的诊断报告：radar / heatmap / transfer curve</h2>
+        <p>README 与线上平台描绘的诊断报告，正是 3.1–3.4 那套哲学的可视化落点，典型有三种图：</p>
+        <ul>
+          <li><b>radar</b>（雷达图）——沿 3.1 的能力轴（Scene·Atomic Skill·Horizon·Precision·Mobility）展开的 capability profile，一眼看出强弱形状。</li>
+          <li><b>heatmap</b>（热力图）——任务 × 维度的二维网格，定位「具体哪个任务在哪个条件下塌了」，比雷达更细。</li>
+          <li><b>transfer curve</b>（迁移曲线）——沿 3.4 的泛化轴，画出从 in-distribution 到 OOD（Object/Background/Instruction/Mixed）的<i>掉分曲线</i>，量化泛化代价。</li>
+        </ul>
+        <p>这三种图合起来，就是把上面那个被平均压扁的标量，沿能力轴和泛化轴<b>重新摊开</b>——从「你考了多少分」变成「你在哪强、在哪崩、换了环境掉多少」。</p>
+
+        <h2 id="vision-vs-reality">愿景 vs 现实：必须说清的口径</h2>
+        <p>这里是本节、也是整个 Part 3 最需要你记住的一点。上面那套 radar / heatmap / transfer curve <b>出现在 README 与线上 leaderboard 平台</b>的描述里，是 EBench 对外展示的产品愿景；但当前线上 <span class="term">docs</span> 的 challenge 页<b>并未列出</b>这些诊断图作为已交付的评测产物。换句话说：</p>
+
+        <div class="callout note">
+          <div class="c-h">口径澄清：诊断报告，愿景 ≠ docs 现实</div>
+          <p><b>能验证的现实（docs / 代码）：</b>评测确实产出 per-episode task score ∈ [0,1]、按 track/split 平均成 track score、再聚合上 leaderboard（提交流程见 <a href="../04-engine/4-5-gmp-cli.html">4.5</a>）。这条<b>标量聚合链是地面真相</b>。<br><br>
+          <b>属于愿景的部分：</b>radar / heatmap / transfer curve 这类<b>多轴诊断可视化</b>，以及 3.1 的 5 能力轴、3.4 的 4 泛化轴，来自 <b>README / paper / 线上平台</b>的描述，docs 的 challenge 页<b>未将其列为</b>当前已交付口径。把它们当成「EBench 想给你的诊断报告长什么样」，而不是「现在 docs 上就能拉到的现成报表」。<br><br>
+          一句话：<b>分数和排名是现实，分轴诊断画像是愿景</b>。本书一路这么标注，就是不想让你把蓝图当成已完工的房子。</p>
+        </div>
+
+        <p>为什么要这么较真？因为如果你照着 README 的雷达图去预期「提交后能自动拿到一张五轴画像」，再对着 docs 发现只有几个聚合数字，你会以为是自己用错了——其实只是愿景跑在了 docs 前面。讲清这条裂缝，你才能<i>正确地</i>使用 EBench：用它确凿的标量评测，同时理解它正朝着分轴诊断演进。</p>
+
+        <h2 id="whats-next">这一节你需要带走的 · Part 3 收束</h2>
+        <p>记住这条聚合链：<b>per-episode score ∈ [0,1] → track score = 平均 → leaderboard 聚合</b>，这是现实；radar / heatmap / transfer curve 这套分轴诊断报告是<b>愿景</b>，docs challenge 页尚未列出。整个 Part 3 的方法论，就是为「把一个数摊成一张可信的画像」铺设坐标——能力轴（3.1）、track/split 隔离（3.2）、任务与打分（3.3）、泛化轴（3.4）、聚合与报告（3.5）。</p>
+        <p>方法论讲的是「测什么、怎么算」。可这一切要真的跑起来，得有一个把 Isaac Sim 当黑盒、用 client–server 喂观测收动作的<b>评测引擎</b>。Part 4 我们就钻进那台引擎，从「为什么是 client–server」开始。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/flow-matching-ode.js"></script>
+  <script src="../../assets/js/widgets/action-chunking.js"></script>
+  <script src="../../assets/js/widgets/eval-flow.js"></script>
+  <script src="../../assets/js/widgets/action-dissector.js"></script>
+  <script src="../../assets/js/widgets/capability-radar.js"></script>
+  <script src="../../assets/js/widgets/task-taxonomy.js"></script>
+  <script src="../../assets/js/widgets/moe-attention.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

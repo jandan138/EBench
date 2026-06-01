@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>cuRobo：GPU 运动规划与 IK · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="2-2">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 2 · Simulation Stack · 2-2</div>
+        <h1>cuRobo：GPU 运动规划与 IK</h1>
+        <p class="lede">Isaac Sim 给了我们一个能步进、能渲染的世界，但世界里的机械臂不会自己动。要让 lift2 的手臂从 A 点平滑地够到 B 点、还不撞到桌上的东西，需要解 <span class="term">IK</span> 和做轨迹优化——这正是 <span class="term">cuRobo</span> 的活。它的特别之处：把这套经典的「约束求解 / 优化」整体搬上 GPU，快到可以批量生成成千上万条专家轨迹。</p>
+
+        <h2 id="what-is-curobo">cuRobo 提供什么</h2>
+        <p><span class="term">cuRobo</span>（来自 <span class="term">NVlabs</span>）是一个 CUDA 加速的运动生成库。它把机器人运动里最吃算力的几件事全部 GPU 并行化：</p>
+        <ul>
+          <li><b>FK / IK</b>——正运动学（关节角 → 末端位姿）与逆运动学（目标位姿 → 关节角），批量求解；</li>
+          <li><b>collision checking</b>——在解的过程中实时判断是否与环境/自身碰撞；</li>
+          <li><b>trajectory optimization</b>——把「从起点到目标、避障、平滑」整体当一个优化问题来解，输出一整条可执行轨迹。</li>
+        </ul>
+        <p>关键直觉是：传统 IK / planner 往往是 CPU 上的串行迭代，一次解一个；cuRobo 把同一个求解器写成 CUDA kernel，<b>一次并行解上万个</b>。当你要为 EBench 的数据集生成 rule-based 专家轨迹时，这个并行度就是生产力。</p>
+
+        <div class="bridge g103">
+          <div class="c-h"><span class="tag">从 GAMES103 看</span> IK 与轨迹优化 = 你熟悉的约束求解 / 优化</div>
+          <p>IK 本质是解一个<b>约束满足</b>问题：在关节空间里找一组 $q$，使 $\mathrm{FK}(q)$ 等于目标末端位姿——这跟你在仿真里解约束（让接触/铰接满足几何条件）是同一类数学。轨迹优化则更直接：定义一个含「贴近目标 + 远离障碍 + 平滑」的目标函数，用迭代优化器去最小化它。cuRobo 求的「平滑」目标常是 <span class="term">minimum-jerk</span>（最小化加加速度），让轨迹像被熨过一样顺——和你做样条插值时追求 $C^2$ 连续是一个动机。</p>
+        </div>
+
+        <h2 id="numbers">几个让你有体感的数字</h2>
+        <p>cuRobo 的卖点是「快」，而快到什么程度决定了它能不能撑起大规模数据生成。记住这几个量级：</p>
+        <table>
+          <thead><tr><th>能力</th><th>性能</th><th>备注</th></tr></thead>
+          <tbody>
+            <tr><td><span class="term">IK</span> 吞吐</td><td>~37,000 / s</td><td>比 <span class="term">TracIK</span> 快约 23×</td></tr>
+            <tr><td>collision-free <span class="term">IK</span></td><td>~7,600 / s</td><td>带避障约束的 IK</td></tr>
+            <tr><td>整条 <span class="term">motion-gen</span></td><td>≈ 30 ms</td><td>在单卡 RTX 4090 上，minimum-jerk 轨迹</td></tr>
+          </tbody>
+        </table>
+        <p>「一条完整的避障平滑轨迹只要约 30ms」意味着：在仿真里给机械臂规划一次取放，几乎是即时的。把它乘以 GPU 的并行度，就能理解为什么 EBench 能批量产出几千条 episode 的 rule-based 轨迹。</p>
+
+        <h2 id="representation">它怎么表示机器人和世界</h2>
+        <p>要在 GPU 上把碰撞检测做快，cuRobo 用了两套刻意简化的几何表示——这也是它快的工程秘密：</p>
+        <ul>
+          <li><b>机器人</b>用<span class="term">球近似（sphere approximation）</span>：把每节连杆近似成一串球。球与任何东西的距离测试是<b>解析的</b>（球心距减半径），极其便宜，天然适合 GPU 大规模并行。</li>
+          <li><b>world（环境）</b>支持多种表示：<span class="term">cuboid</span>（长方体）/ <span class="term">mesh</span>（网格）/ <span class="term">depth</span>（深度图）/ <span class="term">ESDF</span>（Euclidean Signed Distance Field，欧氏符号距离场）。其中 ESDF 把空间每点到最近障碍的距离预存成场，查询时直接采样——避障代价从「逐三角形求交」降成「查一次场」。</li>
+        </ul>
+        <p>于是碰撞检测退化成「机器人的一堆球 vs 世界的距离场/几何」，这种结构正是 GPU 喜欢的：大量独立、同构、可并行的距离查询。</p>
+
+        <div class="callout note">
+          <div class="c-h">为什么球近似不会太粗糙</div>
+          <p>球近似偏<b>保守</b>——用球包住连杆，宁可把碰撞判得严一点，也不会漏判穿模。对「生成可执行专家轨迹」这个用途，保守是优点：宁可绕远一点，也不要规划出一条实际会撞的轨迹。</p>
+        </div>
+
+        <h2 id="optimizers">优化器：L-BFGS 与 MPPI</h2>
+        <p>轨迹优化这个非凸问题，cuRobo 主要用两类求解器，二者互补：</p>
+        <ul>
+          <li><span class="term">L-BFGS</span>——一个准牛顿（quasi-Newton）的<b>基于梯度</b>的优化器。利用目标函数的梯度信息快速收敛到局部最优，适合把一条大致可行的轨迹「精修」到平滑最优。</li>
+          <li><span class="term">MPPI</span>（Model Predictive Path Integral）——一个<b>采样式</b>的优化器：撒一批带噪的候选轨迹，按代价加权平均出更优的一条。它不需要梯度、对非光滑代价更鲁棒，擅长跳出局部极小。</li>
+        </ul>
+        <p>典型用法是两者配合：采样式方法负责「找到大致正确的解区域」，梯度式方法负责「在该区域里磨到最优且平滑」。最终产出一条 minimum-jerk 的、避障的、可在 Isaac Sim 里直接回放的轨迹。</p>
+
+        <div class="bridge g103">
+          <div class="c-h"><span class="tag">从 GAMES103 看</span> 你解过同形状的优化</div>
+          <p>L-BFGS 就是你做隐式积分 / 能量最小化时遇到的那类<b>无约束（或软约束）梯度优化</b>——用 Hessian 的近似加速收敛。MPPI 则像一个<b>随机搜索</b>版本的最优控制：与其求导，不如撒样本、按代价加权。把这两个套在「轨迹的代价 = 贴目标 + 避障 + 平滑」上，就是 cuRobo 的 motion-gen。你缺的从来不是数学，只是「它在 GPU 上批量跑」这层工程。</p>
+        </div>
+
+        <h2 id="role-in-ebench">它在 EBench 里的角色：生成专家与遥操轨迹</h2>
+        <p>cuRobo 在 EBench 里不直接参与<b>评测</b>——评测时跑的是你的 VLA 策略。它的舞台在<b>数据生成</b>这一侧：在 Isaac Sim 的 USD 场景里，给定一个任务目标（把苹果放进果盘），cuRobo 解 IK 找到抓取/放置的关节配置，再做轨迹优化连成一条平滑无碰撞的运动——这就是一条 <span class="term">rule-based</span> 专家轨迹的骨架。</p>
+        <p>EBench 数据集里的 <span class="term">long_horizon</span> 与 <span class="term">simple_pnp</span> 两个子集就是这样脚本化生成的（下一两节会细看）；它们因此<b>干净、平滑</b>，是模仿学习的高质量监督。而 <span class="term">teleop_tasks</span> 子集来自人类遥操作，轨迹会带抖动迟疑——两者的轨迹「手感」差异，正源于「cuRobo 优化出来的」与「人手摇出来的」这条根本区别。我们在 <a href="2-4-lerobot-dataset.html">2.4</a> 把这个对比讲透。</p>
+
+        <h2 id="whats-next">这一节你需要带走的</h2>
+        <p>cuRobo 是 GPU 加速的运动生成库：批量 FK/IK（~37k/s）、collision-free IK（~7.6k/s）、整条 motion-gen ≈30ms@4090。它用球近似表示机器人、cuboid/mesh/depth/ESDF 表示世界，用 L-BFGS / MPPI 优化出 minimum-jerk 轨迹。在 EBench 里，它是 rule-based 专家轨迹的生产者。本质上，IK = 约束求解、轨迹优化 = 你学过的优化，只是被搬上了 GPU。</p>
+        <p>有了世界（Isaac Sim）和会动的机器人（cuRobo），下一步是把整套仿真<b>封装成一个可远程调用的黑盒服务器</b>——这就是 <span class="term">GenManip</span>。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/flow-matching-ode.js"></script>
+  <script src="../../assets/js/widgets/action-chunking.js"></script>
+  <script src="../../assets/js/widgets/eval-flow.js"></script>
+  <script src="../../assets/js/widgets/action-dissector.js"></script>
+  <script src="../../assets/js/widgets/capability-radar.js"></script>
+  <script src="../../assets/js/widgets/task-taxonomy.js"></script>
+  <script src="../../assets/js/widgets/moe-attention.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

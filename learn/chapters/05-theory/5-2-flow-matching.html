@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Flow matching / rectified flow 的数学 · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="5-2">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 5 · VLA 理论 · 5-2</div>
+        <h1>Flow matching / rectified flow 的数学</h1>
+        <p class="lede">这是全书的数学高潮。我们要回答上一节欠下的问题：那「一段 50 个连续动作」到底是<i>怎么生成</i>的？π0 的答案是 <span class="term">flow matching</span>——把生成一段动作，变成<b>从纯噪声出发、解一个常微分方程、把噪声「流」成动作</b>。你在 GAMES103 学的数值积分，和在 RL 学的随机策略，到这里会漂亮地汇合。</p>
+
+        <h2 id="generative-vs-value">先定位：这是生成式策略，不是 value-based</h2>
+        <p>在你进入公式之前，先把它放进你的知识地图。VLA 的策略<b>不走 value 那条路</b>：没有 $Q$ 函数、没有 critic、没有 Bellman 方程、没有 TD error。它是一个<b>生成式、分布式的策略</b>，用<b>模仿 / behavior cloning</b> 训练，目标是从条件分布 $p(A_t\mid o_t)$ 里采样动作。</p>
+        <div class="bridge rl">
+          <div class="c-h"><span class="tag">从 RL 看</span> 最近的类比是 stochastic actor，但损失完全不同</div>
+          <p>如果硬要在 RL 谱系里找位置，flow-matching 策略最接近一个 <b>stochastic actor</b>：给定状态，输出一个<i>动作分布</i>而非单一动作。但它的训练信号<b>不是 policy gradient、不是 TD</b>，而是一个<b>去噪回归损失</b>（behavior cloning）。为什么非要分布式？因为专家数据里同一个状态常有<b>多种正确做法</b>（左手抓还是右手抓、从左绕还是从右绕）——这是 <span class="term-i">multimodal</span> 的。如果用普通回归（MSE）去拟合，模型会回归到这些模式的<b>均值</b>，得到一个「卡在中间、哪条路都不是」的废动作。生成式策略能把多模态分布<b>整个</b>表达出来。</p>
+        </div>
+        <p>先建立记号。一个 action chunk $A_t = [a_t,\dots,a_{t+H-1}]$（π0 取 $H=50$），条件是观测 $o_t = [\,I^1,\dots,I^n,\ \ell_t,\ q_t\,]$——多相机图像、语言 token、关节角 state。我们要学的是从 $o_t$ 到 $A_t$ 分布的一个采样器。</p>
+
+        <h2 id="two-clocks">两个时间轴：机器人步 $t$ 与 flow 时间 $\tau$</h2>
+        <p>这一节最容易把人绕晕的，是<b>有两个时间</b>，务必分清：</p>
+        <ul>
+          <li><b>机器人时间 $t$</b>（写成<b>下标</b>）：真实世界里的控制步，$A_t$ 是第 $t$ 步要执行的那一整段动作。它和物理、和 episode 有关。</li>
+          <li><b>flow 时间 $\tau \in [0,1]$</b>（写成<b>上标</b>）：一个<i>纯虚构的</i>生成内部时间。$\tau=0$ 是纯噪声，$\tau=1$ 是干净动作。它和物理无关，只存在于「把噪声变成动作」这个生成过程内部。</li>
+        </ul>
+        <p>记住：<b>下标 $t$ 是「哪一步」，上标 $\tau$ 是「生成进行到几成」</b>。$A_t^\tau$ 就是「第 $t$ 步的那段动作，在生成过程 $\tau$ 时刻的中间状态」。</p>
+
+        <h2 id="conditional-fm">Conditional flow matching = rectified flow</h2>
+        <p>核心想法：在<b>纯噪声分布</b> $N(0,I)$ 和<b>真实动作分布</b> $p(A_t\mid o_t)$ 之间，造一条<b>概率路径</b>，再训一个网络去学这条路径的「流速」。π0 用 <span class="term">conditional flow matching</span> 配线性高斯（OT，最优传输）概率路径——这个特定选择就是 <span class="term">rectified flow</span>（整流流）。</p>
+        <p>训练时，对一条真实样本 $A_t$，我们这样构造中间点。先采一份噪声 $\varepsilon \sim N(0,I)$，然后在噪声和真值之间<b>线性插值</b>：</p>
+        <div class="math-block">$$ A_t^\tau \;=\; \tau\, A_t \;+\; (1-\tau)\,\varepsilon $$</div>
+        <p>$\tau=0$ 时 $A_t^0=\varepsilon$（纯噪声），$\tau=1$ 时 $A_t^1=A_t$（真值），中间是一条<b>直线</b>。这条直线的速度（对 $\tau$ 求导）是个常量——这就是我们要网络去匹配的<b>目标向量场</b>：</p>
+        <div class="math-block">$$ u(A_t^\tau \mid A_t) \;=\; \frac{\mathrm{d} A_t^\tau}{\mathrm{d}\tau} \;=\; A_t - \varepsilon \;=\; -(\varepsilon - A_t) $$</div>
+        <p>π0 paper 把目标写成去噪场 $\varepsilon - A_t$（指向噪声的方向，符号约定问题，关键是「真值与噪声之差」这个常向量）。我们训一个网络 $v_\theta(A_t^\tau, o_t)$ 去回归它，损失就是一个朴素的 MSE：</p>
+        <div class="math-block">$$ L^\tau(\theta) \;=\; \mathbb{E}_{\,\varepsilon,\,A_t,\,o_t,\,\tau}\;\big\lVert\, v_\theta(A_t^\tau,\,o_t)\;-\;(\varepsilon - A_t) \,\big\rVert^2 $$</div>
+        <p>就这么简单——<b>没有对抗、没有 ELBO、没有配分函数</b>，就是「在每个噪声水平 $\tau$ 上，预测从这里指向真值（去噪）的方向」。$\tau$ 在训练时<b>从一个偏向小值（更噪）的 beta 分布采样</b>，让网络在「噪声大、最难」的区段多见样本、学得更稳。</p>
+        <div class="callout note">
+          <div class="c-h">和 diffusion 什么关系？</div>
+          <p>π0 paper 直接说：flow matching 是 <span class="term">diffusion</span> 的一个变体。两者都在「从噪声到数据」的路径上学一个场。区别在<b>路径形状</b>：标准 diffusion 的路径是弯曲的（由 SDE/特定 noise schedule 决定），而 <span class="term">rectified flow</span> 刻意把训练路径<b>拉成近乎直线</b>。直线意味着「流速近乎匀速」，这对推理是决定性的好处——下面就讲。</p>
+        </div>
+
+        <h2 id="inference-ode">推理 = 解一个 ODE：forward Euler</h2>
+        <p>训练学到了向量场 $v_\theta$，推理就是<b>反过来用它</b>：从纯噪声出发，顺着场<b>积分</b>到 $\tau=1$，积出来的就是一段干净动作。这是一个常微分方程（ODE）的初值问题：</p>
+        <div class="math-block">$$ A_t^0 \sim N(0,I), \qquad \frac{\mathrm{d} A_t^\tau}{\mathrm{d}\tau} = v_\theta(A_t^\tau,\, o_t) $$</div>
+        <p>用最朴素的数值积分器 <span class="term">forward Euler</span>，固定步长 $\delta$ 往前推：</p>
+        <div class="math-block">$$ A_t^{\tau+\delta} \;=\; A_t^\tau \;+\; \delta\, v_\theta(A_t^\tau,\, o_t) $$</div>
+        <p>π0 用 <b>10 步</b>积分（$\delta = 0.1$）：从 $\tau=0$ 走到 $\tau=1$，每步问一次网络「现在该往哪个方向流」，走 10 小步就到。10 次网络前向就生成完一整段 50 维动作 chunk——这正是实时高频控制能跑起来的关键。</p>
+
+        <div class="bridge g103">
+          <div class="c-h"><span class="tag">从 GAMES103 看</span> 你写过的 forward Euler，原样搬过来</div>
+          <p>$A^{\tau+\delta} = A^\tau + \delta\, v$ 是不是有点眼熟？这就是 GAMES103 第一节课的 <b>explicit Euler 积分</b>：$x_{n+1} = x_n + \Delta t\, \dot x_n$。你当时积分的是位置/速度，这里积分的是「动作向量在生成空间里的位置」，场 $v_\theta$ 就是那个「速度场」。当年你也学过：explicit Euler 在<b>弯曲、刚性</b>的场上会发散，要么减小步长、要么换高阶/隐式积分器。<span class="term">rectified flow</span> 的聪明之处正在这里——它把路径训成<b>近乎直线、流速近乎匀速</b>，于是 explicit Euler 用<b>极少的步数（10 步）</b>就能积得很准，不需要几百步。直线轨迹 = 大步长也稳，这是数值积分的常识。</p>
+        </div>
+
+        <div class="lab">
+          <div class="lab-h"><span class="lab-tag">interactive</span><span class="lab-t">从噪声积分出动作：Euler 步数、rectified vs diffusion</span></div>
+          <div class="lab-body" data-widget="flow-matching-ode"></div>
+          <div class="lab-cap">看 $A_t^0\sim N(0,I)$ 怎么沿向量场被 forward Euler 一步步积成动作 chunk。对比 rectified（近直线，少步即准）与 diffusion（弯路径，需更多步）；调步数感受精度/开销 tradeoff。</div>
+        </div>
+
+        <h2 id="kv-cache">一个工程巧思：观测前缀的 KV cache 复用</h2>
+        <p>注意一件事：那 10 步 Euler 里，<b>每一步</b>网络都要处理「观测 $o_t$ + 当前噪声动作 $A_t^\tau$」。但观测 $o_t$（一堆图像 + 语言 + state token）在 10 步里<b>是不变的</b>，只有 action token 在变。重复编码观测 10 次太浪费。</p>
+        <p>所以 π0 把<b>观测前缀 $o_t$ 的 attention KV cache 算一次、缓存住</b>，10 步积分里只重新计算 action token 那一小部分对前缀的 attention。观测前缀往往是 token 大头（多相机图像 patch 很多），这一招把 10 步推理的成本压到接近「1 次编码观测 + 10 次轻量 action 更新」。这也预告了下一节的主角——为什么 action token 值得用<b>一套独立的权重</b>（action expert）来处理，以及它们如何与观测 token <i>共享一次 attention</i>。</p>
+
+        <h2 id="whats-next">这一节你需要带走的</h2>
+        <p>把数学收成一条链：(1) 这是<b>生成式</b>策略，为表达 multimodal 动作而生，不是 value-based；(2) 在噪声 $\varepsilon$ 与真值 $A_t$ 之间走直线 $A_t^\tau=\tau A_t+(1-\tau)\varepsilon$，目标场是常向量 $\varepsilon-A_t$，损失就是 $L^\tau=\mathbb{E}\lVert v_\theta(A_t^\tau,o_t)-(\varepsilon-A_t)\rVert^2$；(3) 推理 = 解 ODE，<b>forward Euler</b> $A_t^{\tau+\delta}=A_t^\tau+\delta v_\theta$，π0 用 10 步、复用观测 KV cache；(4) <b>rectified flow 把路径拉直</b>，所以少步 Euler 也准——这是实时控制的命根子。</p>
+        <p>下一节，我们把镜头拉到承载这套 flow matching 的<i>网络结构</i>上：π0 怎么让同一个 transformer 既懂图文又出动作？答案叫 <span class="term">Transfusion</span> 与 <span class="term">action expert</span>。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/flow-matching-ode.js"></script>
+  <script src="../../assets/js/widgets/action-chunking.js"></script>
+  <script src="../../assets/js/widgets/eval-flow.js"></script>
+  <script src="../../assets/js/widgets/action-dissector.js"></script>
+  <script src="../../assets/js/widgets/capability-radar.js"></script>
+  <script src="../../assets/js/widgets/task-taxonomy.js"></script>
+  <script src="../../assets/js/widgets/moe-attention.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

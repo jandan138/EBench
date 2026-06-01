@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>3 tracks × 3 splits 与训练/测试隔离 · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="3-2">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 3 · Benchmark 方法论 · 3-2</div>
+        <h1>3 tracks × 3 splits 与训练/测试隔离</h1>
+        <p class="lede">上一节的 5 个能力轴是<i>愿景</i>。这一节我们落到<b>地面真相</b>：docs 与代码里真实存在的评测结构其实简洁得多——3 个 <span class="term">track</span> × 3 个 <span class="term">split</span>。它怎么切、为什么这么切，决定了你提交一次评测时到底在测什么。</p>
+
+        <h2 id="three-tracks">三个 track：按本体使用方式分</h2>
+        <p>docs 把 26 个任务组织进 3 个 <span class="term">track</span>，区分依据是「这台 <span class="term">lift2</span> 本体怎么被用」：</p>
+        <ul>
+          <li><span class="term">mobile_manip</span>——移动操作。机器人要先驱动底盘<i>走过去</i>，再操作。强调 Mobility 与「移动 + 操作」的协调。</li>
+          <li><span class="term">table_top_manip</span>——桌面操作。底盘基本不动，聚焦双臂在桌面上的灵巧与精度。</li>
+          <li><span class="term">generalist</span>——通才。一个模型同时面对前两类全部任务，考的是「不分工种」的综合泛化能力。</li>
+        </ul>
+        <p>注意 generalist 并不是第三批新任务，而是<b>不让你按 track 分头训练专用模型</b>——它把整个任务集合丢给同一个策略。这呼应了愿景里 Specialist vs Generalist 的对照：专才可以为某个 track 偏科调优，通才必须一碗水端平。</p>
+
+        <h2 id="train-subsets">各 track 对应的训练子集</h2>
+        <p>EBench 的训练数据（<a href="../02-sim/2-4-lerobot-dataset.html">2.4</a> 详拆）分三个子集，每个子集喂给哪些 track 是<b>对齐</b>好的——你为某个 track 训练时，用的就是该 track 声明覆盖的子集：</p>
+        <table>
+          <thead>
+            <tr><th>训练子集</th><th>来源</th><th>任务×条数 = episodes</th><th>覆盖 track</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><span class="term">long_horizon</span></td><td>rule-based / GenManip 脚本</td><td>9 × 200 = 1,800</td><td>mobile_manip + generalist</td></tr>
+            <tr><td><span class="term">simple_pnp</span></td><td>rule-based</td><td>10 × 200 = 2,000</td><td>mobile_manip + generalist</td></tr>
+            <tr><td><span class="term">teleop_tasks</span></td><td>人类遥操作</td><td>7 × 400 = 2,800</td><td>table_top_manip + generalist</td></tr>
+            <tr><td colspan="2"><b>合计</b></td><td><b>6,600 episodes（26 tasks，≈9.86M frames）</b></td><td>—</td></tr>
+          </tbody>
+        </table>
+        <p>读这张表有两个要点。其一，<b>generalist 覆盖全部三个子集</b>——通才看到的数据是专才的并集，这才公平。其二，灵巧的桌面任务（teleop_tasks）来自<i>人类遥操作</i>而非脚本，因此动作里天然带抖动/迟疑/停顿；mobile 类则来自 rule-based 脚本，更干净。子集来源不同，训练时的噪声特性也不同，这会一路影响到你的策略行为。</p>
+
+        <h2 id="three-splits">三个 split：训练/测试隔离的红线</h2>
+        <p>每个 track 又横向切成 3 个 <span class="term">split</span>。它们的角色完全不同：</p>
+        <table>
+          <thead>
+            <tr><th>split</th><th>角色</th><th>对你意味着什么</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><span class="term">val_train</span></td><td>开放验证（贴近训练分布）</td><td>可随便调，用来确认「我至少学会了训练里见过的东西」。</td></tr>
+            <tr><td><span class="term">val_unseen</span></td><td>开放验证（留出、未见）</td><td>可随便调，但它故意放了训练没见过的情形，用来<i>本地</i>估计泛化，不会泄露 test。</td></tr>
+            <tr><td><span class="term">test</span></td><td>留出测试（驱动 leaderboard）</td><td>这是<b>记分</b>的那一份。你反复在它上面调参，得到的数字就不再可信。</td></tr>
+          </tbody>
+        </table>
+        <p>这条切分背后是一条不容妥协的红线：<b>训练/测试隔离</b>。capability profile 要可信，前提是它反映<i>真实泛化</i>，而不是对评测分布的过拟合。如果开发者能在 test 上反复试错、挑出碰巧得分高的检查点，那张漂亮的雷达图测的就只是「在 test 上调参的能力」，毫无诊断价值。<span class="term">val_unseen</span> 的存在正是为了给你一个可以放心折腾的代理，让你不必去碰 test。</p>
+
+        <div class="bridge rl">
+          <div class="c-h"><span class="tag">从 RL 看</span> train / val / test 与泛化</div>
+          <p>这套切分你在监督学习与 RL 评测里都见过：train 拟合、validation 选模型与调超参、test 只看最终泛化。区别只在「分布偏移」是<b>具身</b>的——val_unseen 的「未见」不是换个随机种子，而是换了物体、背景或指令措辞（这正是下一节 <a href="3-4-generalization.html">3.4</a> 泛化轴的内容）。把 test 当成你只能查一次的留出集，是这条红线在工程上的全部含义。</p>
+        </div>
+
+        <div class="callout note">
+          <div class="c-h">口径提醒：split 细分仍是 WIP</div>
+          <p>3 tracks × 3 splits 的<b>结构</b>是 docs 的可验证事实，提交时也确实用 <code>ebench/&lt;track&gt;/&lt;split&gt;</code> 这样的路径（<a href="../04-engine/4-5-gmp-cli.html">4.5</a> 会用到）。但<b>每个 split 具体包含多少 episode、怎么细分</b>，当前 docs 标注为 <span class="term">WIP</span>（work-in-progress），尚未给出确定数字。本节表格里的 6,600 是<i>训练数据集</i>总量，不要把它当成某个 test split 的评测条数——二者是不同的东西。</p>
+        </div>
+
+        <h2 id="whats-next">这一节你需要带走的</h2>
+        <p>记住：评测结构是 <b>3 tracks（mobile_manip / table_top_manip / generalist）× 3 splits（val_train / val_unseen / test）</b>；训练子集与 track 对齐，generalist 看全集；val 开放可调、test 留出记分，这条隔离红线守的是 capability profile 的可信度；split 内部细分仍 WIP。</p>
+        <p>track 与 split 切的是「在哪个分布上测」。下一节我们钻进每个 track <i>内部</i>——26 个任务到底是哪些、分成哪三个 family，以及关键的：一次 episode 的分数 ∈ [0,1] 是怎么算出来的。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/flow-matching-ode.js"></script>
+  <script src="../../assets/js/widgets/action-chunking.js"></script>
+  <script src="../../assets/js/widgets/eval-flow.js"></script>
+  <script src="../../assets/js/widgets/action-dissector.js"></script>
+  <script src="../../assets/js/widgets/capability-radar.js"></script>
+  <script src="../../assets/js/widgets/task-taxonomy.js"></script>
+  <script src="../../assets/js/widgets/moe-attention.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GenManip：把仿真做成黑盒服务器 · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="2-3">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 2 · Simulation Stack · 2-3</div>
+        <h1>GenManip：把仿真做成黑盒服务器</h1>
+        <p class="lede">前两节我们有了世界（Isaac Sim）和会动的机器人（cuRobo）。但 Isaac Sim 4.1.0 / CUDA 12.1 / torch 2.4.0 这套重型依赖，没人想塞进自己的模型环境。<span class="term">GenManip</span> 的答案很干脆：把整台仿真器封进一个<b>黑盒服务器</b>，对外只露一组统一 API。EBench 的 server 端，就直接来自它。</p>
+
+        <h2 id="what-is-genmanip">GenManip 是什么</h2>
+        <p><span class="term">GenManip</span>（CVPR'25，arXiv 2506.10966，来自 InternRobotics）是一个基于 <span class="term">Isaac Sim</span> 的、<span class="term">LLM</span> 驱动的 <span class="term">instruction-following manipulation</span> 仿真平台。它要解决的问题是：研究 VLA 需要海量、多样、可复现的操作场景，而手工搭场景既慢又难规模化。GenManip 的思路是把「造场景」这件事<b>自动化</b>，并把「跑场景」这件事<b>服务化</b>。</p>
+        <p>对 EBench 来说，GenManip 不是一个旁支工具，而是它的<b>仿真后端本身</b>：EBench 的 server（你将来用 <code>ray_eval_server.py</code> 启动的那个）就建立在 GenManip 之上。理解 GenManip 的两条主线——<b>LLM 驱动的场景生成</b>与<b>黑盒统一 API</b>——就理解了 EBench 评测引擎的地基。</p>
+
+        <h2 id="llm-scene-gen">LLM 驱动的场景生成</h2>
+        <p>第一条主线是<b>怎么造出无穷多的场景</b>。GenManip 让 <span class="term">LLM</span> 来驱动场景生成：由语言模型决定场景里放什么物体、怎么摆、配什么指令（instruction），从而批量产出语义合理、又足够多样的 instruction-following 任务。这把「场景设计」从人工劳动变成了可程序化扩展的流程。</p>
+        <p>支撑这套生成的是一个<b>大物体库</b>：GenManip 带有 <b>10,000</b> 个标注过的 3D 物体。LLM 从这个库里挑选、组合、布置物体，再生成与之匹配的语言指令——「把香水放到化妆架上」这类任务，背后就是「香水」「化妆架」两个 3D 资产加一句生成的指令。物体多样性 × LLM 的组合能力，决定了任务空间的广度。</p>
+
+        <div class="callout note">
+          <div class="c-h">GenManip-Bench：它自带一套评测集</div>
+          <p>GenManip 还发布了 <span class="term">GenManip-Bench</span>，一套含 <b>200</b> 个任务的评测基准。可以把它看作 GenManip 自家的「考卷」；而 EBench 是在同一套仿真后端上，按自己的 track / split / 26 任务体系重新组织的另一份更聚焦移动操作的考卷。同源，但不同目的。</p>
+        </div>
+
+        <h2 id="black-box-api">黑盒统一 API</h2>
+        <p>第二条主线，也是对 EBench 最关键的一条：<b>把仿真做成黑盒</b>。GenManip 对外暴露一组<span class="term-i">统一</span>的 API——你给它动作，它回给你观测和奖励/得分，至于盒子里 Isaac Sim 怎么解析 USD、PhysX 怎么步进、RTX 怎么渲染，调用方<b>一概不需要知道</b>。仿真器的全部复杂度，连同它那套重依赖，被封在服务器进程里。</p>
+        <p>这正是 EBench <span class="term">client–server</span> 架构的来源：server 跑 GenManip / Isaac Sim（背着 CUDA 12.1 / torch 2.4.0），client 是一个极简的 <span class="term">genmanip-client</span> 包，装进你模型自己的环境。你的模型只通过统一 API 跟黑盒对话，永远不必把仿真依赖请进门。</p>
+
+        <div class="bridge g103">
+          <div class="c-h"><span class="tag">从 GAMES103 看</span> 把你的 simulate(state, action) 封成网络服务</div>
+          <p>你在 GAMES103 里反复调用的，其实是一个纯函数式的内核：<code>next_state = step(state, action)</code>。GenManip 做的事，就是把这个 <code>step</code>（加上渲染出观测、判定子目标得分）整体包成一个<b>进程外的服务</b>——你不再 import 它、在自己进程里跑，而是通过网络喊一句「这是我的 action」，它回「这是新 obs 和 done」。仿真的语义没变，变的只是边界：从函数调用变成了客户端-服务器调用。这一步抽象，是后面整个评测引擎能干净运转的前提。</p>
+        </div>
+
+        <h2 id="scale">规模：1,500 并发的压测</h2>
+        <p>「黑盒服务器」如果只能起一个实例，意义有限。GenManip 的硬实力在于<b>可大规模并发</b>：它曾压测到 <b>1,500</b> 个并发 Isaac Sim 实例，跑在 <b>500× RTX 4090</b> 上。这意味着场景生成与评测可以横向铺开——上千个仿真同时步进、批量出数据或批量评测。</p>
+        <p>把这个数字和上一节 cuRobo 的并行度、再往前 PhysX 的「上千 env GPU 并行」串起来看，你会发现整个仿真栈的设计哲学是一致的：<b>一切为大规模并行让路</b>。EBench 一次 full pass 能压到 ≈30 分钟 / 8× RTX 4090，正是这种可并发架构在评测侧的体现。</p>
+
+        <h2 id="why-blackbox-matters">为什么「黑盒」对评测至关重要</h2>
+        <p>你可能会问：服务化只是工程上的方便，跟「评测得不得分」有什么本质关系？关系很大，体现在两点上，二者都是<b>评测可信度</b>的支柱：</p>
+        <ul>
+          <li><b>依赖隔离（dependency isolation）</b>——仿真器钉死在 CUDA 12.1 / torch 2.4.0，而各家 VLA 模型对 torch / CUDA / transformers 版本的要求五花八门、常常互相冲突。若让模型和仿真共处一个环境，光是装环境就会打架，更别说复现。黑盒把这堵墙立起来：模型那侧爱用什么版本用什么版本，只要会说统一 API 即可。</li>
+          <li><b>可复现（reproducibility）</b>——评测的公平前提是「每个人面对的是同一个仿真」。把仿真封成一个版本固定、行为确定的服务，所有人对着同一个黑盒提交动作，得到的分数才可比、可复现。如果仿真逻辑散落在各人各自的环境里，分数就失去了横向对比的意义。</li>
+        </ul>
+        <p>换句话说：黑盒服务器不只是让你少装几个包，它是 leaderboard 能成立的<b>结构性保证</b>——隔离掉环境差异，把变量收敛到「你的模型有多强」这一个。这条逻辑我们会在 <a href="../04-engine/4-1-client-server.html">4.1</a> 从评测引擎的角度再讲一遍。</p>
+
+        <div class="callout">
+          <div class="c-h">一张地图：谁住在盒子的哪一侧</div>
+          <p><b>server 侧（黑盒内）</b>：Isaac Sim 4.1.0 + PhysX + RTX + GenManip 场景/任务逻辑 + cuRobo（数据生成时）。<b>client 侧（你的环境）</b>：genmanip-client（<code>gmp</code> CLI / <code>EvalClient</code>）+ 你的 VLA 模型。两侧只经统一 API 通信。</p>
+        </div>
+
+        <h2 id="whats-next">这一节你需要带走的</h2>
+        <p>GenManip（CVPR'25）是 EBench 的仿真后端：LLM 驱动场景生成、10,000 物体库、自带 GenManip-Bench 200 任务、最关键是把 Isaac Sim 封成<b>黑盒统一 API</b>，曾压测 1,500 并发 / 500× RTX 4090。黑盒之所以对评测重要，是因为它带来<b>依赖隔离</b>与<b>可复现</b>——这两者是 leaderboard 公平性的结构基础。</p>
+        <p>世界、机器人、服务器都齐了。最后一块仿真地基是<b>数据</b>：仿真生成的轨迹以什么格式存？EBench-Dataset 长什么样？下一节我们看 <span class="term">LeRobot</span> 格式与 EBench 的三个数据子集。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/flow-matching-ode.js"></script>
+  <script src="../../assets/js/widgets/action-chunking.js"></script>
+  <script src="../../assets/js/widgets/eval-flow.js"></script>
+  <script src="../../assets/js/widgets/action-dissector.js"></script>
+  <script src="../../assets/js/widgets/capability-radar.js"></script>
+  <script src="../../assets/js/widgets/task-taxonomy.js"></script>
+  <script src="../../assets/js/widgets/moe-attention.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>本地 vs online，读懂诊断报告 · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="7-2">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 7 · Capstone · 7-2</div>
+        <h1>本地 vs online，读懂诊断报告</h1>
+        <p class="lede">你的 <span class="term">ModelClient</span> 写好了。现在有两条路：在自己机器上起 server 跑<b>本地评测</b>，或登上 <span class="term">internrobotics.shlab.org.cn/eval</span> 打<b>online challenge</b>。两者契约相同、流程几乎一致，差别都在边界上。本节把这两条路并排放，再教你读懂跑完后那张诊断报告。</p>
+
+        <h2 id="local-flow">本地评测：自己当裁判</h2>
+        <p>本地评测你同时拥有 server 和 client。先起 server（它把 Isaac Sim 仿真当黑盒包起来，见 <a href="../04-engine/4-1-client-server.html">4.1</a>），再跑 client worker 去打。</p>
+
+        <div class="code" data-lang="bash"><div class="code-h"><span class="fn">本地评测：两个终端</span><button class="cp">复制</button></div><pre><code># 终端 A：起评测 server（GenManip / Isaac Sim 黑盒）
+python ray_eval_server.py --host 0.0.0.0 --port 8087 --no_save_process
+
+# 终端 B：提交一个 run，再跑 client worker 去打
+gmp submit ebench/table_top_manip/val_unseen --run_id my_first_run
+gmp eval -a r5a -g lift2 --worker_ids 0
+
+# 查进度 / 拿结果
+gmp status
+# 结果落在 saved/eval_results/&lt;task&gt;/&lt;run_id&gt;/
+</code></pre></div>
+
+        <p>几个要点：<span class="term">--no_save_process</span> 是 chunk 模式（<a href="../04-engine/4-4-chunk-step.html">4.4</a>）的前提；提交粒度可以是全部 <span class="term">ebench</span>、单 track（<span class="term">ebench/table_top_manip/val_unseen</span>）、甚至单任务（<span class="term">ebench/table_top_manip/test/collect_coffee_beans</span>）。跨机时给 client 加 <span class="term">--host &lt;ip&gt; --port &lt;port&gt;</span> 指向 server。一次 full pass 验证大约 <b>30 分钟 / 8× RTX 4090</b>——本地的好处是 <span class="term">val_train</span> / <span class="term">val_unseen</span> 全开放，可以随便调参、反复 debug。</p>
+
+        <div class="callout note">
+          <div class="c-h">本地评测里的"裁判"是谁</div>
+          <p>本地 server 用的是和官方同源的 GenManip 任务配置与打分逻辑（<a href="../03-methodology/3-3-tasks-scoring.html">3.3</a>），所以你本地看到的 <span class="term">val_unseen</span> 分数对 online 的 <span class="term">test</span> 有相当的预测力。但 <span class="term">test</span> split 本身是留出的，本地拿不到——这是 <a href="../03-methodology/3-2-tracks-splits.html">3.2</a> 训练/测试隔离的延续。</p>
+        </div>
+
+        <h2 id="online-flow">Online challenge：server 在云端</h2>
+        <p>online 时 server 不在你手里——它跑在平台云端，你只负责跑 client。流程多一步<b>登录拿 token</b>，然后把 client 指向平台返回的 <span class="term">endpoint</span>。</p>
+
+        <div class="code" data-lang="bash"><div class="code-h"><span class="fn">online challenge：注册一次 run</span><button class="cp">复制</button></div><pre><code># 1) 登录 internrobotics.shlab.org.cn/eval 拿 token，存到 $T
+# 2) 注册一次提交（当前线上仅开放 ebench_generalist）
+gmp online submit \
+  --base_url https://internrobotics.shlab.org.cn/eval \
+  --token $T \
+  --benchmark_set ebench_generalist \
+  --model_name my_vla --model_type VLA
+# 返回 task_id（即此次 run 的 run_id）+ endpoint
+</code></pre></div>
+
+        <div class="code" data-lang="python"><div class="code-h"><span class="fn">online challenge：用平台 endpoint 跑 client</span><button class="cp">复制</button></div><pre><code>from genmanip_client.eval_client import EvalClient
+
+client = EvalClient(
+    base_url=endpoint,        # 平台返回的 endpoint，不是本地 127.0.0.1
+    token=T,
+    run_id=task_id,           # 复用返回的 task_id
+    worker_ids=["0"],         # 最多 16 个并发 worker
+)
+obs = client.reset()
+done = False
+while not done:
+    if obs["0"]["obs"]["reset"]:
+        model.reset()
+    action = model.get_action(obs)   # 你在 7-1 写的那个
+    obs, done = client.step(action)
+client.close()
+# 全部跑完后：gmp online stop
+</code></pre></div>
+
+        <h2 id="diff-table">两条路的差异对照</h2>
+        <table>
+          <thead><tr><th>维度</th><th>本地评测</th><th>online challenge</th></tr></thead>
+          <tbody>
+            <tr><td>server 归谁</td><td>你自己起（<span class="term">ray_eval_server.py</span>）</td><td>平台云端，你只跑 client</td></tr>
+            <tr><td>入口 URL</td><td><span class="term">127.0.0.1:8087</span>（默认）</td><td>平台返回的 <span class="term">endpoint</span></td></tr>
+            <tr><td>鉴权</td><td>无</td><td>登录拿 <span class="term">token</span></td></tr>
+            <tr><td>可用 split</td><td><span class="term">val_train</span> / <span class="term">val_unseen</span> 开放</td><td>留出的 <span class="term">test</span>（驱动 leaderboard）</td></tr>
+            <tr><td>可用范围</td><td>全部 track / 单 track / 单任务</td><td>当前仅 <span class="term">ebench_generalist</span></td></tr>
+            <tr><td>并发上限</td><td>看你的 GPU（如 8× 4090）</td><td>最多 <b>16</b> 个 worker</td></tr>
+            <tr><td>断连规则</td><td>本地自管</td><td><b>10 分钟</b>无活动断连，同 <span class="term">task_id</span> 可续跑</td></tr>
+            <tr><td>用途</td><td>调参、debug、估分</td><td>正式上榜</td></tr>
+          </tbody>
+        </table>
+
+        <h2 id="etiquette">提交礼仪：别浪费配额</h2>
+        <p>online 是共享资源，几条规矩能让你跑得顺、也不挡别人：</p>
+        <ul>
+          <li><b>同 <span class="term">run_id</span> / <span class="term">task_id</span> 续跑</b>：worker 崩了、网断了、或你分批跑，重新连用<i>同一个</i> task_id，平台会把结果接着累计，而不是新开一次评测。别每次 retry 都 <span class="term">online submit</span> 一个新 run。</li>
+          <li><b>并发别超 16</b>：online 最多 16 个 worker。多进程跑就给每个进程不同的 <span class="term">worker_id</span>（<span class="term">["0"]</span>、<span class="term">["1"]</span>…，见 <a href="../04-engine/4-2-evalclient.html">4.2</a>），别让一个 run 申请超过上限。</li>
+          <li><b>留意 10 分钟断连</b>：连续 10 分钟没有活动（没 step）会被断开。模型加载慢、或单步推理太久卡住，都可能触发。先在本地把推理延迟压下来再上 online；client 出错时按契约<b>重建 client</b> 继续（三个 baseline 都带 reinit 重试逻辑，X-VLA 还暴露了 <span class="term">--client_reinit_retries/backoff</span>）。</li>
+          <li><b>跑完 <span class="term">gmp online stop</span></b>：正常结束后主动 stop，释放云端 worker。</li>
+        </ul>
+
+        <h2 id="read-report">读懂诊断报告</h2>
+        <p>跑完你会拿到一组数。怎么从中看出"我的模型强在哪、弱在哪"，而不是只盯一个总分？分三层看，并且<b>分清哪些是可验证事实、哪些是平台/愿景</b>（这条贯穿全书，见 <a href="../00-orientation/0-1-why-ebench.html">0.1</a> 和 <a href="../03-methodology/3-5-metrics-report.html">3.5</a>）。</p>
+
+        <h3 id="r-track">各 track 分数（地面真相）</h3>
+        <p>最硬的数是 <b>track score</b>：某 track/split 下所有 episode 的 <span class="term">task score</span>（每个 ∈ [0,1]，含子目标部分分与时序条件，见 <a href="../03-methodology/3-3-tasks-scoring.html">3.3</a>）取平均。leaderboard 聚合 track score。这是 docs 与代码里实打实存在的口径——三个 track（<span class="term">mobile_manip</span> / <span class="term">table_top_manip</span> / <span class="term">generalist</span>）各一个数，先看这三个数谁高谁低，就知道你的策略偏移动操作、偏桌面精细、还是偏综合泛化。</p>
+
+        <h3 id="r-transfer">val → test transfer（地面真相 + 一点平台）</h3>
+        <p>把你本地的 <span class="term">val_unseen</span> 分数和 online 的 <span class="term">test</span> 分数并排：两者接近，说明你的策略<b>真泛化</b>了；<span class="term">val</span> 高而 <span class="term">test</span> 掉得多，几乎一定是过拟合到了 val 分布或被你拿来调过参。这就是 <a href="../03-methodology/3-2-tracks-splits.html">3.2</a> 训练/测试隔离要守的东西。注意 split 的细分与每 track 的 episode 数在 docs 上仍标 <span class="term">WIP</span>，具体数字以平台为准。</p>
+
+        <h3 id="r-radar">capability radar / heatmap（平台 &amp; 愿景）</h3>
+        <p>那张沿多轴展开的 <span class="term">capability profile</span> 雷达图（<a href="../00-orientation/0-1-why-ebench.html">0.1</a> 里你玩过的那种）、以及任务级 heatmap、transfer curve——它们出现在 README 与线上<b>平台</b>页面上，是把 track score 进一步按"能力轴"分解的<b>愿景</b>呈现（5-axis atomic diagnostic / 4-axis generalization）。</p>
+
+        <div class="callout warn">
+          <div class="c-h">别把愿景当成 docs 里已落地的 API</div>
+          <p>README/paper 的 <b>5-axis diagnostic、794 task instances、Test-Mini</b> 是<i>愿景</i>语言；docs challenge 页当前并没有逐项列出这些 radar/heatmap 字段。读报告时：<b>track score 与 val→test 对比当作硬事实</b>去优化你的模型；雷达图/能力轴当作平台呈现层去<i>理解</i>方向，别照着某个轴名去硬抠数字。哪些是地面真相、哪些是愿景，<a href="../03-methodology/3-5-metrics-report.html">3.5</a> 讲得最细。</p>
+        </div>
+
+        <h2 id="takeaway">这一节你需要带走的</h2>
+        <p>本地与 online <b>契约一致、流程同形</b>，差别在：server 归谁、要不要 token、能碰哪个 split、并发/断连配额。读报告分三层——<b>track score</b> 和 <b>val→test transfer</b> 是硬事实，照它优化；<b>capability radar</b> 是平台/愿景呈现，照它理解方向。下一节是全书的收束：我们牵着一个 episode，从 reset 一路走到打分，把七个 Part 串成一条完整的线。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/flow-matching-ode.js"></script>
+  <script src="../../assets/js/widgets/action-chunking.js"></script>
+  <script src="../../assets/js/widgets/eval-flow.js"></script>
+  <script src="../../assets/js/widgets/action-dissector.js"></script>
+  <script src="../../assets/js/widgets/capability-radar.js"></script>
+  <script src="../../assets/js/widgets/task-taxonomy.js"></script>
+  <script src="../../assets/js/widgets/moe-attention.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

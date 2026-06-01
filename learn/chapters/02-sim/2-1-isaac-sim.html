@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Isaac Sim = USD + PhysX + RTX · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="2-1">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 2 · Simulation Stack · 2-1</div>
+        <h1>Isaac Sim = USD + PhysX + RTX</h1>
+        <p class="lede">这一 Part 是整个 benchmark 的<b>地基</b>。在 EBench 里没有真机器人——所有 episode 都跑在 <span class="term">NVIDIA Isaac Sim</span> 里。好消息是：你在 GAMES103 学的那套刚体、约束、时间步进，正是这台仿真器的内核。我们只需要把它「放大」成 GPU 并行，再罩上一层照片级渲染。</p>
+
+        <h2 id="what-is-isaac-sim">Isaac Sim 是什么</h2>
+        <p><span class="term">Isaac Sim</span> 是 NVIDIA 基于 <span class="term">Omniverse</span> 平台搭的机器人仿真应用。你可以把它理解成三层：底下是一套<b>统一的场景表示</b>，中间是一台<b>GPU 物理引擎</b>，外面包一层<b>光线追踪渲染器</b>。这三件套各管一摊，又必须精确地咬合在一起——它们分别是 <span class="term">USD</span>、<span class="term">PhysX SDK</span> 和 <span class="term">RTX Renderer</span>。</p>
+        <p>为什么 EBench 要选它，而不是 PyBullet / MuJoCo 这类更轻的引擎？核心理由有两个：一是 <span class="term">RTX</span> 能给出<b>逼真到可以喂给 VLA 视觉骨干</b>的合成图像（光照、材质、阴影都对），二是 PhysX 能在<b>一块 GPU 上同时步进上千个并行场景</b>，把 9.86M 帧这种量级的数据生成和评测做到可承受。一句话：这台仿真器是为「视觉 + 大规模并行」量身定做的。</p>
+
+        <div class="bridge g103">
+          <div class="c-h"><span class="tag">从 GAMES103 看</span> 你已经造过一台 Isaac Sim 的内核</div>
+          <p>GAMES103 上你亲手写过：rigid body 的位置/姿态积分、碰撞检测、用 impulse 或约束求解处理 contact、再到 articulated body（铰接体）的递归动力学。Isaac Sim 的 <span class="term">PhysX</span> 做的就是这件事——<b>同一套刚体 + 约束 + 接触的时间步进</b>。唯一的区别是工程规模：它把这套循环搬到 CUDA 上，对上千个并行 environment 一起步进。理论你已经懂了，剩下的是「并行」与「逼真渲染」这两顶帽子。</p>
+        </div>
+
+        <h2 id="usd">USD：场景是一份可交换的描述</h2>
+        <p><span class="term">USD</span>（Universal Scene Description，源自 Pixar）是 Isaac Sim 的「场景母语」。它不是物理引擎，而是一种<b>声明式的场景描述格式</b>：场景里有哪些物体、它们的网格/材质/变换、灯光、相机、以及——关键地——每个物体的<i>物理属性</i>。后者通过所谓 <span class="term">USD Physics schema</span> 挂在物体上：质量、碰撞体形状、关节类型、刚度阻尼等等，全部以结构化字段写进 USD 文件。</p>
+        <p>这一层的价值是<b>解耦与可交换</b>。一个 EBench 场景（厨房、桌面、一堆待操作的物体）就是一棵 USD 树；它可以被加载、克隆、修改、保存，而不依赖某一个具体引擎。EBench 的资产（场景、物体、本体 <span class="term">lift2</span>）都以 USD/USD-attached 形式存放在 🤗 <span class="term">EBench-Assets</span> 里——你下载下来的，本质就是一批 USD 描述加它们引用的网格与贴图。把 USD 想成「场景的源代码」，PhysX 与 RTX 是两个读这份源代码的<i>编译器</i>。</p>
+
+        <h2 id="physx">PhysX：GPU 并行的刚体、接触与 articulation</h2>
+        <p><span class="term">PhysX SDK</span> 是真正「动起来」的那一层。它把 USD 里的物理描述解析成自己的内部对象，然后按固定时间步推进动力学。它处理的东西你都认识：</p>
+        <ul>
+          <li><b>rigid body</b>——刚体的位置、速度、姿态积分；</li>
+          <li><b>contact</b>——碰撞检测加接触求解（穿插与摩擦），还能挂 <span class="term">contact sensor</span> 读接触力；</li>
+          <li><b>articulation</b>——铰接体（机械臂、夹爪）的关节链动力学，给关节施加 <span class="term">joint_position</span> 等控制目标。</li>
+        </ul>
+        <p>PhysX 的关键卖点是 <b>GPU 并行</b>：同一套求解器在 CUDA 上对成百上千个独立 environment 批量步进。这正是大规模数据生成（rule-based 轨迹）与并行评测（多个 worker 同时跑）能成立的物理基础。注意 lift2 是双臂 + 移动底盘的复杂 articulation，接触又是 manipulation 的核心——所以 PhysX 这层的接触/articulation 求解质量，直接决定了仿真里「抓得稳不稳」是否可信。</p>
+
+        <div class="callout note">
+          <div class="c-h">固定步长，和你写积分器时一样</div>
+          <p>PhysX 用<b>固定的物理时间步</b>推进（典型 1/60 s 或更细），与录制相机的 15 fps 是两个频率——物理步比渲染/录制更密。这跟你在 GAMES103 里把 <span class="term-i">substep</span> 拆细以保证数值稳定是同一个工程取舍：步长越小越稳，但越贵。</p>
+        </div>
+
+        <h2 id="rtx">RTX：把物理状态渲染成传感器</h2>
+        <p>第三件套 <span class="term">RTX Renderer</span> 负责「机器人看到什么」。它跑在 RTX GPU 的<b>实时光线追踪</b>上，做<span class="term">PBR</span>（physically based rendering，基于物理的渲染）：按真实的光照、材质 BRDF、反射阴影去算每个像素。对 VLA 来说这一步至关重要——模型的视觉骨干吃的是 RGB 图像，渲染越接近真实相机，<span class="term-i">sim-to-real</span> 的视觉 gap 就越小。</p>
+        <p>RTX 渲出来的不只是给人看的画面，而是<b>合成的传感器读数</b>：EBench 的 lift2 有 4 个 480×640 相机视角（<span class="term">top</span> / <span class="term">left</span> / <span class="term">right</span> / <span class="term">overlook</span>），每个视角都是 RTX 把当前物理状态渲染成的一帧 RGB；同样的机制也能合成 LiDAR / 深度。这些就是你将来在 obs 里拿到的 <span class="term">video.{cam}_view</span>（480, 640, 3, uint8）——它们诞生于此。</p>
+
+        <h2 id="loop">USD ↔ PhysX 的解析-步进-写回循环</h2>
+        <p>三件套不是各跑各的，而是被一条循环串起来。每个仿真步大致是：</p>
+        <ul>
+          <li><b>解析（parse）</b>：USD 里的 Physics schema 被解析成 PhysX 内部的刚体 / 关节 / 碰撞体对象；</li>
+          <li><b>步进（step）</b>：PhysX 在 GPU 上推进一步动力学——积分、解接触、施加关节控制；</li>
+          <li><b>写回（write-back）</b>：新状态（位姿、关节角、接触）写回 USD 这棵共享场景树；</li>
+          <li><b>读取（read）</b>：RTX 渲染器与上层 RL / 评测逻辑从 USD 读取最新状态——渲染器出图，评测逻辑判断子目标是否满足。</li>
+        </ul>
+        <p>USD 在这里是<b>共享的真相源（single source of truth）</b>：PhysX 写、RTX 与上层读，大家都对着同一棵场景树说话。理解了这个「解析 → 步进 → 写回 → 读取」的节拍，你就理解了 Isaac Sim 的全部骨架——剩下的一切（cuRobo 生轨迹、GenManip 当服务器、EBench 评测）都是在这条循环外面搭的脚手架。</p>
+
+        <div class="bridge g103">
+          <div class="c-h"><span class="tag">从 GAMES103 看</span> 这就是你的 simulation loop，外加一个渲染读出口</div>
+          <p>你写仿真作业时的循环是 <code>compute forces → integrate → handle collision → update state</code>，然后画一帧。Isaac Sim 的循环结构完全同构：<b>步进</b> = 你的 integrate + collision，<b>写回 USD</b> = 你更新顶点/位姿缓冲，<b>RTX 读取渲染</b> = 你那句 draw。区别只是：状态被沉淀进 USD 这个标准容器，渲染从你的简易 OpenGL 升级成了光追 PBR，而整条循环被批量复制到上千个并行 env。</p>
+        </div>
+
+        <h2 id="versions">版本与环境（你装的时候会撞到）</h2>
+        <p>地基也有它的「混凝土标号」。EBench 仿真栈固定在这组版本上，跨过它常会出现 CUDA / 驱动不兼容：</p>
+        <table>
+          <thead><tr><th>组件</th><th>版本</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td><span class="term">Isaac Sim</span></td><td>4.1.0</td><td>基于 Omniverse 的仿真应用</td></tr>
+            <tr><td><span class="term">CUDA</span></td><td>12.1</td><td>PhysX / RTX 的 GPU 计算基线</td></tr>
+            <tr><td><span class="term">torch</span></td><td>2.4.0</td><td>与 CUDA 12.1 配套的深度学习运行时</td></tr>
+          </tbody>
+        </table>
+        <p>这套版本由 server 端（来自 <span class="term">GenManip</span>，见 <a href="2-3-genmanip.html">2.3</a>）携带；client 端只装极简的 <span class="term">genmanip-client</span>，因此你的模型 env 不必跟这套 CUDA 12.1 / torch 2.4.0 强绑定——这正是 client–server 设计要解决的依赖冲突问题，我们在 <a href="../04-engine/4-1-client-server.html">4.1</a> 展开。</p>
+
+        <h2 id="whats-next">这一节你需要带走的</h2>
+        <p>Isaac Sim = <b>USD（场景描述）+ PhysX（GPU 并行物理）+ RTX（光追传感器合成）</b>，三者由「解析 → 步进 → 写回 → 读取」的循环串成，USD 是共享真相源。它的物理内核就是你在 GAMES103 学的刚体/约束/接触时间步进，只是并行到上千 env 又罩了照片级渲染。版本钉死在 Isaac Sim 4.1.0 / CUDA 12.1 / torch 2.4.0。</p>
+        <p>下一节，我们看一个跑在这条循环<i>之上</i>的工具：<span class="term">cuRobo</span>——它在 GPU 上做 IK 与轨迹优化，负责往这些 USD 场景里「生」出专家轨迹。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/flow-matching-ode.js"></script>
+  <script src="../../assets/js/widgets/action-chunking.js"></script>
+  <script src="../../assets/js/widgets/eval-flow.js"></script>
+  <script src="../../assets/js/widgets/action-dissector.js"></script>
+  <script src="../../assets/js/widgets/capability-radar.js"></script>
+  <script src="../../assets/js/widgets/task-taxonomy.js"></script>
+  <script src="../../assets/js/widgets/moe-attention.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

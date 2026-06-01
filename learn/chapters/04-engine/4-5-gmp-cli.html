@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>gmp CLI 与 online challenge · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="4-5">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 4 · Client–Server · 4-5</div>
+        <h1>gmp CLI 与 online challenge</h1>
+        <p class="lede">前四节讲的协议，最终都收束到一个命令行工具——<span class="term">gmp</span>（genmanip-client 提供的 CLI）。这一节把它落地：先走本地的完整流程（起 server → 提交 → 跑 client → 看结果），过一遍子命令清单，再走 online challenge 从拿 token 到出诊断报告的链路。Part 4 在这里收口，并把你交给后面三个 Part。</p>
+
+        <h2 id="local-flow">本地流程：从起 server 到看结果</h2>
+        <p>本地评测是「<a href="4-1-client-server.html">4.1</a> 的 client–server」最直接的体现：一边起仿真 server，一边用 <code>gmp</code> 提交任务并跑 client worker。完整四步：</p>
+
+        <div class="code" data-lang="bash"><div class="code-h"><span class="fn">本地评测：server + 提交 + client + 查看</span><button class="cp">复制</button></div><pre><code># 1. 起仿真 server（Isaac Sim 黑盒；chunk 模式需要 --no_save_process）
+python ray_eval_server.py --host 0.0.0.0 --port 8087 --no_save_process
+
+# 2. 提交一个评测任务：ebench/&lt;track&gt;/&lt;split&gt;
+#    track ∈ {mobile_manip, table_top_manip, generalist}
+#    split ∈ {val_train, val_unseen, test}
+gmp submit ebench/generalist/test --run_id my_first_run
+
+# 3. 跑 client worker（认领 worker 0；推理在你的模型 env 里）
+gmp eval -a r5a -g lift2 --worker_ids 0
+
+# 4. 查进度
+gmp status</code></pre></div>
+
+        <p>几个要点：</p>
+        <ul>
+          <li><span class="term">submit</span> 的目标可粗可细：<code>ebench</code> 跑全部；<code>ebench/&lt;track&gt;</code> 单 track；<code>ebench/&lt;track&gt;/&lt;split&gt;</code> 单 split；甚至单任务，如 <code>ebench/table_top_manip/test/collect_coffee_beans</code>。</li>
+          <li><span class="term">eval</span> 里 <code>-a r5a</code>（agent）、<code>-g lift2</code>（本体）指定要评的对象，<code>--worker_ids 0</code> 认领 worker（多 worker 并行见 <a href="4-4-chunk-step.html">4.4</a>）。</li>
+          <li><b>跨机</b>：server 在另一台机时，给 <code>gmp eval</code> 加 <code>--host &lt;ip&gt; --port &lt;port&gt;</code>（默认 <code>127.0.0.1:8087</code>）即可，协议不变。</li>
+          <li><b>结果路径</b>：跑完后结果落在 <code>saved/eval_results/&lt;task&gt;/&lt;run_id&gt;/</code>，<code>gmp status</code> 给进度，<code>run_id</code> 是你区分多次实验的标签。</li>
+        </ul>
+
+        <div class="callout note">
+          <div class="c-h">一次 full pass 的体量</div>
+          <p>跑满一个 track/split 的全部 episode 约需 <b>30 分钟 / 8× RTX 4090</b>（README 口径）。这个数字背后正是 <a href="4-4-chunk-step.html">4.4</a> 的多 worker 并行——有几张卡就开几个 worker 分担 episode。</p>
+        </div>
+
+        <h2 id="subcommands">gmp 子命令一览</h2>
+        <p><code>gmp</code> 是个小工具箱。常用子命令：</p>
+        <table>
+          <thead><tr><th>子命令</th><th>作用</th></tr></thead>
+          <tbody>
+            <tr><td><span class="term">submit</span></td><td>提交评测任务（<code>ebench</code> / 单 track / 单 split / 单任务）</td></tr>
+            <tr><td><span class="term">eval</span></td><td>启动 client worker 跑推理循环（<code>-a</code> / <code>-g</code> / <code>--worker_ids</code>）</td></tr>
+            <tr><td><span class="term">status</span></td><td>查看评测进度</td></tr>
+            <tr><td><span class="term">plot</span></td><td>绘制结果图表</td></tr>
+            <tr><td><span class="term">clean</span></td><td>清理产物（<code>--dry-run</code> 预演 / <code>--all</code> 全清）</td></tr>
+            <tr><td><span class="term">visualize</span></td><td>Rerun HTTPS viewer 可视化（需 Py3.11+ 与 <code>[visualize]</code> extra）</td></tr>
+          </tbody>
+        </table>
+        <p>常用选项横跨多个子命令：<code>--run_id</code>（实验标签）、<code>--host</code>/<code>--port</code>（server 地址，默认 <code>127.0.0.1:8087</code>）、<code>--worker_ids</code>（认领哪些 worker）、<code>--frame_save_interval</code>（每隔几帧存一次）、<code>--chunk_size</code>（chunk 模式整段长度，见 <a href="4-4-chunk-step.html">4.4</a>）。</p>
+
+        <h2 id="online">online challenge：连远端、出诊断报告</h2>
+        <p>本地能跑通后，把它推上 <span class="term">online challenge</span>（<code>internrobotics.shlab.org.cn/eval</code>）。线上平台 24/7 运行，在留出的 <span class="term">Test-Mini</span> 上评你的提交，并自动生成诊断报告（capability radar、validation→test transfer curve、generalization radar、task heatmap——这些是 README/平台口径的愿景报告，docs challenge 页未逐一列出，见 <a href="../03-methodology/3-5-metrics-report.html">3.5</a>）。整条链路：</p>
+
+        <div class="code" data-lang="bash"><div class="code-h"><span class="fn">online challenge：submit → 连 endpoint → 跑 → stop</span><button class="cp">复制</button></div><pre><code># 1. 登录 internrobotics.shlab.org.cn/eval 拿到 token，导出
+export T=&lt;your-token&gt;
+
+# 2. 在线提交（当前仅允许 benchmark_set = ebench_generalist）
+gmp online submit \
+  --base_url https://internrobotics.shlab.org.cn/eval \
+  --token $T \
+  --benchmark_set ebench_generalist \
+  --model_name my-model --model_type VLA
+#    -&gt; 返回一个 task_id（充当 run_id）和一个 endpoint
+
+# 3. 用返回的 endpoint + task_id 跑 EvalClient（最多 16 并发 worker）
+#    EvalClient(base_url=endpoint, token=$T, run_id=task_id, worker_ids=["0"])
+
+# 4. 结束
+gmp online stop</code></pre></div>
+
+        <p>线上几条必须记住的纪律：</p>
+        <ul>
+          <li><b>benchmark_set 限制</b>：当前仅允许 <span class="term">ebench_generalist</span>。</li>
+          <li><b>submit 的产物</b>：返回 <code>task_id</code>（之后充当 <code>run_id</code>）+ <code>endpoint</code>；你用它们构造 <code>EvalClient(base_url=endpoint, token=..., run_id=task_id, worker_ids=["0"])</code> 去连远端 server——和 <a href="4-2-evalclient.html">4.2</a> 的本地 EvalClient 同一个类，只是 base_url 指向云端、并带 token。</li>
+          <li><b>并发上限 16</b>：单次提交最多 16 个并发 worker（见 <a href="4-4-chunk-step.html">4.4</a>）。</li>
+          <li><b>10 分钟断连</b>：10 分钟无活动会被断开；但<b>同一个 <code>task_id</code> 可以续跑</b>，断了重连即可接着评，不必从头。</li>
+          <li><b>收尾</b>：评完用 <code>gmp online stop</code> 结束这次提交。</li>
+        </ul>
+
+        <div class="callout warn">
+          <div class="c-h">本地 vs online 的差别只在「连哪台 server」</div>
+          <p>别被两套命令吓到：协议是同一套。本地是 <code>EvalClient(base_url="http://127.0.0.1:8087", ...)</code> 连你自己起的 <code>ray_eval_server.py</code>；online 是 <code>EvalClient(base_url=endpoint, token=..., ...)</code> 连平台分配的远端 server。reset/step/close 循环、obs schema、action 契约——全都不变。online 只是多了 token、并发上限、断连续跑这几条平台约束。</p>
+        </div>
+
+        <h2 id="whats-next">Part 4 收口，去往后面三个 Part</h2>
+        <p>到这里，评测引擎的全貌齐了：<b>为什么 client–server</b>（4.1）、<b>EvalClient 与 obs</b>（4.2）、<b>action 契约</b>（4.3）、<b>chunk/step 与并行</b>（4.4）、<b>gmp 与 online</b>（4.5）。你现在能完整想象一个 episode 从 reset 到判分的全程，也能把任意模型接进这套协议。</p>
+        <p>但有一件事我们一直只点到为止：循环里那个 <code>model.get_action(obs)</code> 内部到底发生了什么？为什么要 action chunking、flow matching 怎么把噪声变成动作、action expert 是什么——这是 <a href="../05-theory/5-1-action-chunking.html">Part 5（VLA 理论）</a>。理论备齐后，<a href="../06-baselines/6-1-openpi.html">Part 6</a> 会把 π0/π0.5、X-VLA、InternVLA-A1 三条全链路逐个拆开，看它们如何各自把 19-D raw action 重排进同一契约；最后 <a href="../07-capstone/7-1-custom-model.html">Part 7</a> 让你亲手接入自己的模型、读懂诊断报告、追踪一个 episode 的全程。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/flow-matching-ode.js"></script>
+  <script src="../../assets/js/widgets/action-chunking.js"></script>
+  <script src="../../assets/js/widgets/eval-flow.js"></script>
+  <script src="../../assets/js/widgets/action-dissector.js"></script>
+  <script src="../../assets/js/widgets/capability-radar.js"></script>
+  <script src="../../assets/js/widgets/task-taxonomy.js"></script>
+  <script src="../../assets/js/widgets/moe-attention.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

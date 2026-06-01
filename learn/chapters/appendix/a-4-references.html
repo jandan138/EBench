@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>参考文献 References · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="a-4">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Appendix · a-4</div>
+        <h1>参考文献 References</h1>
+        <p class="lede">这本书背后的论文与官方资源，分成"论文"和"代码 / 文档 / 数据"两组列在这里，每条附一句它讲什么、以及在书里对应的章节。要查可点的链接地图，去 <a href="a-2-links.html">a-2</a>。</p>
+
+        <h2 id="papers">论文</h2>
+        <table>
+          <thead><tr><th>arXiv</th><th>标题 / 简称</th><th>讲什么 · 对应章节</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><a href="https://arxiv.org/abs/2410.24164" target="_blank" rel="noopener">2410.24164</a></td>
+              <td><b>π0</b>：A Vision-Language-Action Flow Model for General Robot Control</td>
+              <td>VLA = PaliGemma(3B) VLM + flow-matching action expert；action chunk H=50、推理 10 步 Euler。本书 flow matching / action expert 的主蓝本（<a href="../05-theory/5-2-flow-matching.html">5.2</a>、<a href="../05-theory/5-3-action-expert.html">5.3</a>、<a href="../06-baselines/6-1-openpi.html">6.1</a>）。</td>
+            </tr>
+            <tr>
+              <td><a href="https://arxiv.org/abs/2504.16054" target="_blank" rel="noopener">2504.16054</a></td>
+              <td><b>π0.5</b>：a VLA with Open-World Generalization</td>
+              <td>异构 co-training + 分层推理（离散高层子任务 → 连续低层 chunk）+ FAST 预训练/flow 后训练两阶段。面向"进全新家"的泛化（<a href="../05-theory/5-4-discrete-continuous.html">5.4</a>、<a href="../06-baselines/6-1-openpi.html">6.1</a>）。</td>
+            </tr>
+            <tr>
+              <td><a href="https://arxiv.org/abs/2505.23705" target="_blank" rel="noopener">2505.23705</a></td>
+              <td><b>Knowledge Insulation</b>（for VLA）</td>
+              <td>给 VLM 接随机初始化 action expert 会损害训练；做法是用 FAST 离散 token 微调 backbone，同时训 flow action expert 但 stop-gradient 不回流 backbone（<a href="../05-theory/5-4-discrete-continuous.html">5.4</a>）。</td>
+            </tr>
+            <tr>
+              <td><a href="https://arxiv.org/abs/2510.10274" target="_blank" rel="noopener">2510.10274</a></td>
+              <td><b>X-VLA</b></td>
+              <td>纯 soft-prompted 标准 Transformer encoder（24 层 hidden 1024）的 flow-matching VLA；soft prompt + domain_id 处理跨本体异构，PEFT ~1% 参数近 SOTA（<a href="../06-baselines/6-2-xvla.html">6.2</a>）。</td>
+            </tr>
+            <tr>
+              <td><a href="https://arxiv.org/abs/2601.02456" target="_blank" rel="noopener">2601.02456</a></td>
+              <td><b>InternVLA-A1</b>（InternRobotics）</td>
+              <td>统一 understanding / generation / action 的 Mixture-of-Transformers，三专家共享一次 unified self-attention；generation 专家做 visual foresight 世界模型想象。3B 版基于 Qwen3-VL-2B（<a href="../06-baselines/6-3-internvla-a1.html">6.3</a>）。</td>
+            </tr>
+            <tr>
+              <td><a href="https://arxiv.org/abs/2506.10966" target="_blank" rel="noopener">2506.10966</a></td>
+              <td><b>GenManip</b>（CVPR'25）</td>
+              <td>基于 Isaac Sim 的 LLM 驱动 instruction-following manipulation 仿真平台：10,000 标注 3D 物体、黑盒统一 API、压测过 1,500 并发实例。EBench server 端的来源（<a href="../02-sim/2-3-genmanip.html">2.3</a>）。</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="callout note">
+          <div class="c-h">书里引用但未单列的源头</div>
+          <p>正文还借用了两个奠基工作的概念：<b>ACT</b>（Action Chunking with Transformers，ALOHA / Tony Zhao）——action chunking 的出处（<a href="../05-theory/5-1-action-chunking.html">5.1</a>）；<b>Transfusion</b>——单 transformer 混合 flow-matching（连续）+ 交叉熵（离散）目标，π0 的 action expert 结构follow 它（<a href="../05-theory/5-3-action-expert.html">5.3</a>）。它们的细节请回各章查证。</p>
+        </div>
+
+        <h2 id="code">代码 / 文档 / 数据</h2>
+        <table>
+          <thead><tr><th>资源</th><th>链接</th><th>讲什么 · 对应章节</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><b>openpi</b></td>
+              <td><a href="https://github.com/Physical-Intelligence/openpi" target="_blank" rel="noopener">github.com/Physical-Intelligence/openpi</a></td>
+              <td>Physical Intelligence 的 π0 / π0.5 框架；EBench 的 openpi baseline 基于它，目前 action head 只支持 flow matching（<a href="../06-baselines/6-1-openpi.html">6.1</a>）。</td>
+            </tr>
+            <tr>
+              <td><b>cuRobo</b></td>
+              <td><a href="https://github.com/NVlabs/curobo" target="_blank" rel="noopener">github.com/NVlabs/curobo</a></td>
+              <td>NVlabs 的 CUDA 加速运动生成：GPU 并行 FK/IK（~37k IK/s）、碰撞检测、轨迹优化；在 Isaac Sim 场景里造专家/遥操轨迹（<a href="../02-sim/2-2-curobo.html">2.2</a>）。</td>
+            </tr>
+            <tr>
+              <td><b>LeRobot</b></td>
+              <td><a href="https://github.com/huggingface/lerobot" target="_blank" rel="noopener">github.com/huggingface/lerobot</a></td>
+              <td>HuggingFace 的机器人学习数据标准格式（Parquet + MP4 + metadata）；EBench-Dataset 用其 v2.1（<a href="../02-sim/2-4-lerobot-dataset.html">2.4</a>）。</td>
+            </tr>
+            <tr>
+              <td><b>Isaac Sim</b></td>
+              <td><a href="https://developer.nvidia.com/isaac/sim" target="_blank" rel="noopener">developer.nvidia.com/isaac/sim</a></td>
+              <td>NVIDIA 基于 Omniverse 的机器人仿真应用（USD + PhysX + RTX）；EBench server 的物理 + 渲染引擎（<a href="../02-sim/2-1-isaac-sim.html">2.1</a>）。</td>
+            </tr>
+            <tr>
+              <td><b>EBench docs</b></td>
+              <td><a href="https://internrobotics.github.io/EBench-doc" target="_blank" rel="noopener">internrobotics.github.io/EBench-doc</a></td>
+              <td>可验证事实的来源：ModelClient 契约、track/split、gmp CLI、custom-model / run-benchmark 指南（贯穿 Part 4 与 Part 7）。</td>
+            </tr>
+            <tr>
+              <td><b>Leaderboard / online</b></td>
+              <td><a href="https://internrobotics.shlab.org.cn/eval" target="_blank" rel="noopener">internrobotics.shlab.org.cn/eval</a></td>
+              <td>online challenge 登录、拿 token、提交上榜；capability profile 报告的平台呈现（<a href="../07-capstone/7-2-local-vs-online.html">7.2</a>、<a href="../03-methodology/3-5-metrics-report.html">3.5</a>）。</td>
+            </tr>
+            <tr>
+              <td><b>EBench-Assets</b></td>
+              <td><a href="https://huggingface.co/datasets/InternRobotics/EBench-Assets" target="_blank" rel="noopener">🤗 InternRobotics/EBench-Assets</a></td>
+              <td>场景 / 物体 / 任务资产（<a href="../02-sim/2-4-lerobot-dataset.html">2.4</a>）。</td>
+            </tr>
+            <tr>
+              <td><b>EBench-Dataset</b></td>
+              <td><a href="https://huggingface.co/datasets/InternRobotics/EBench-Dataset" target="_blank" rel="noopener">🤗 InternRobotics/EBench-Dataset</a></td>
+              <td>LeRobot v2.1 训练轨迹：6,600 episodes / ≈9.86M frames / 26 tasks，三子集 long_horizon / simple_pnp / teleop_tasks（<a href="../02-sim/2-4-lerobot-dataset.html">2.4</a>）。</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h2 id="note">关于 arXiv 编号</h2>
+        <p>上面的 arXiv 编号取自本书 FACTS。其中 InternVLA-A1（2601.02456）编号靠后、属较新工作；若链接暂未解析，以 <a href="a-2-links.html">a-2</a> 的官方 repo 为准。π0 系列与 GenManip 的编号均可在 arXiv 直接打开。</p>
+
+        <h2 id="next">回到附录其它页</h2>
+        <p>术语去 <a href="a-1-glossary.html">a-1</a>，repo/链接地图去 <a href="a-2-links.html">a-2</a>，obs/action/gmp 速查去 <a href="a-3-cheatsheet.html">a-3</a>。读到这里，整本《EBench 交互式教程》就全了——祝你上榜顺利。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/flow-matching-ode.js"></script>
+  <script src="../../assets/js/widgets/action-chunking.js"></script>
+  <script src="../../assets/js/widgets/eval-flow.js"></script>
+  <script src="../../assets/js/widgets/action-dissector.js"></script>
+  <script src="../../assets/js/widgets/capability-radar.js"></script>
+  <script src="../../assets/js/widgets/task-taxonomy.js"></script>
+  <script src="../../assets/js/widgets/moe-attention.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

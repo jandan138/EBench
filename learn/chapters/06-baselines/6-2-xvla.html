@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>X-VLA：soft prompt + domain_id · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="6-2">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 6 · Baseline 全链路 · 6-2</div>
+        <h1>X-VLA：soft prompt + domain_id</h1>
+        <p class="lede">π0 用一个 3B 的 PaliGemma 当骨干，靠庞大的预训练知识硬扛。X-VLA 走了一条相反的路：把骨干做得<i>极小极纯</i>，把"跨本体"的差异塞进几个可学习的向量里。理解它，等于理解一个问题——当你想让一个策略同时服务很多种机器人时，是该把差异写进权重，还是写进 prompt？</p>
+
+        <h2 id="model">模型层：soft-prompted Transformer 与 domain_id</h2>
+        <p>X-VLA（arXiv 2510.10274）是一个 <span class="term">flow-matching VLA</span>：和 π0 一样用 flow matching 出 action chunk（<a href="../05-theory/5-2-flow-matching.html">5.2</a>）。但它的骨干非常素——一个<b>纯 soft-prompted 的标准 Transformer encoder</b>，24 层、hidden 1024，没有 PaliGemma 那种庞大 VLM。视觉语言编码交给 <span class="term">Florence-Large</span>，骨干只负责把多模态 token 融合成动作。</p>
+        <p>它真正的招式是 <span class="term">soft prompt</span>。"硬 prompt"是你写给模型的文字；"软 prompt"是一组<b>可学习的 embedding 向量</b>，直接拼进 token 序列、随训练优化。X-VLA 给<b>每个数据源（embodiment）一套自己的 soft prompt</b>：</p>
+        <ul>
+          <li>这套 embodiment-specific 的 embedding 负责吸收"这个机器人/数据源特有"的差异；</li>
+          <li>剩下的共享骨干则学一套 <span class="term">embodiment-agnostic</span> 的策略——跨本体通用的"怎么操作"。</li>
+        </ul>
+        <p><span class="term">domain_id</span> 就是"选哪套 soft prompt"的索引。训练时不同数据源用不同 id；推理时你告诉它"我现在是哪个 domain"，它就取对应的那套 embedding。EBench 的 run.py 里这个值<b>恒为 0</b>——用默认那套 prompt。</p>
+
+        <div class="bridge rl">
+          <div class="c-h"><span class="tag">从 RL 看</span> 这是 multi-task 的 task embedding，搬到了 embodiment 上</div>
+          <p>在 multi-task RL 里，你常给策略喂一个 task id / task embedding，让一个网络条件化地解多个任务。X-VLA 把同样的思路用在<b>本体</b>上：domain_id 就是 embodiment 的条件变量，soft prompt 就是它对应的可学习 embedding。骨干学共性，prompt 记差异——和 multi-task RL 里"shared backbone + per-task head"的分工是同一个直觉，只是把 head 换成了拼在输入端的几个向量。</p>
+        </div>
+
+        <h2 id="two-stage">两阶段训练与 PEFT：~9M 参数接一个新机器人</h2>
+        <p>这个设计的回报在迁移阶段。X-VLA 分两阶段：</p>
+        <ul>
+          <li><b>预训练</b>：在 0.9B 帧 / 290K episodes / 7 个平台的混合数据上训共享骨干 + 各 domain 的 soft prompt。</li>
+          <li><b>迁移到新机器人</b>：<i>不</i>重训骨干。加一套新的 soft prompt，冻结骨干，只 <span class="term">PEFT</span>（parameter-efficient fine-tuning）那一小撮参数——论文报告仅 ~9M（约 1%）可训练参数就能逼近 SOTA。</li>
+        </ul>
+        <p>对照 π0.5 的 knowledge insulation（<a href="../05-theory/5-4-discrete-continuous.html">5.4</a>）：两者都在回答"怎么不破坏预训练知识地学新东西"，但答案相反——π0.5 用 stop-gradient 隔离 action expert 的梯度，X-VLA 干脆<b>冻结整个骨干</b>，只动 prompt。一个软隔离，一个硬冻结。</p>
+
+        <h2 id="load">代码层：AutoModel + inference_api</h2>
+        <p>现在打开 <span class="term">baselines/X-VLA/run.py</span>。第一个和 π0 截然不同的地方是<b>模型加载方式</b>：X-VLA 没有独立 model server，模型<b>直接加载进 eval client 进程</b>，用 HuggingFace 的 <span class="term">trust_remote_code</span> 机制：</p>
+
+        <div class="code" data-lang="python"><div class="code-h"><span class="fn">baselines/X-VLA/run.py</span><button class="cp">复制</button></div><pre><code>model = AutoModel.from_pretrained(
+    args.model_path, trust_remote_code=True, torch_dtype=torch.float32
+).to(device).eval()
+processor = AutoProcessor.from_pretrained(args.model_path, trust_remote_code=True)</code></pre></div>
+
+        <p><code>trust_remote_code=True</code> 意味着模型的自定义代码（包括那个 <code>inference_api</code> 方法）随 checkpoint 一起分发，<code>AutoModel</code> 动态加载执行。没有 WebSocket，没有第二个进程——推理就是一次本地方法调用。这让 X-VLA 的部署比 π0 简单一截，代价是模型 env 和 client env 必须能共存（X-VLA 的依赖恰好兼容 genmanip-client）。</p>
+
+        <h2 id="proprio">prep 进：proprio 缩放</h2>
+        <p>X-VLA 把所有低维状态拼成一个 <span class="term">proprio</span> 向量喂进去，但拼之前对底盘和夹爪做了<b>缩放</b>：</p>
+
+        <div class="code" data-lang="python"><div class="code-h"><span class="fn">baselines/X-VLA/run.py</span><button class="cp">复制</button></div><pre><code>c_joints = np.array(o["state.joints"], dtype=np.float32)
+c_base   = np.array(o["state.base"],   dtype=np.float32)
+p_base = c_base.copy()
+p_base[:2] *= 10.0     # x, y 放大 10 倍
+p_base[2]  /= 10.0     # theta 缩小 10 倍
+proprio = np.concatenate(
+    [c_joints, p_base, np.array(o["state.gripper"], dtype=np.float32) * 20.0]
+)
+action_chunk = model.inference_api(
+    payload={
+        "proprio": proprio,
+        "language_instruction": o["instruction"],
+        "image0": o["video.overlook_camera_view"],
+        "image1": o["video.left_camera_view"],
+        "image2": o["video.right_camera_view"],
+        "domain_id": 0,
+        "steps": 10,
+    },
+    processor=processor,
+)</code></pre></div>
+
+        <p>这些 magic number（base xy ×10、theta ÷10、gripper ×20）是为了把各通道的<b>数值量级</b>对齐到训练时 X-VLA 期望的尺度——底盘位移以米计是小数，乘 10 拉到和关节角可比的范围；夹爪开度同理乘 20。注意 <code>payload</code> 里那两个关键参数：<span class="term">domain_id: 0</span>（用默认 soft prompt）和 <span class="term">steps: 10</span>（flow matching 的 Euler 积分步数，和 π0 一样 10 步）。同样只用 overlook/left/right 三路图，丢弃 top 视角。</p>
+
+        <h2 id="rescale">prep 出：反缩放、gripper 阈值门控、base_is_rel=False</h2>
+        <p>出来的 chunk 要把刚才的缩放<b>反着除回去</b>，然后处理夹爪和底盘：</p>
+
+        <div class="code" data-lang="python"><div class="code-h"><span class="fn">baselines/X-VLA/run.py</span><button class="cp">复制</button></div><pre><code>action_chunk[:, 12:14] /= 10.0     # base x, y 反缩放
+action_chunk[:, 14]    *= 10.0     # base theta 反缩放
+action_chunk[:, 15:19] /= 20.0     # gripper 反缩放
+
+for act in action_chunk[:args.used_chunk_size]:
+    grip = ( ([act[15], act[16]] if act[15] &gt;= 0.001 else [-0.01, -0.01])
+           + ([act[17], act[18]] if act[17] &gt;= 0.001 else [-0.01, -0.01]) )
+    deploy_action_chunk.append({
+        "action": act[:6].tolist() + grip[:2] + act[6:12].tolist() + grip[2:],
+        "base_motion": act[12:15].tolist(),
+        "control_type": "joint_position",
+        "is_rel": False,
+        "base_is_rel": False,
+    })</code></pre></div>
+
+        <p><b>(1) gripper 阈值门控。</b>夹爪不直接用模型输出，而是过一道判断：若 <code>act[15] &gt;= 0.001</code> 就用预测值，否则强制成 <code>[-0.01, -0.01]</code>（明确"闭合/不动"）。这是把连续输出在很小的开度上<b>钳到一个确定状态</b>，避免夹爪在接近 0 的噪声里抖动。这是 X-VLA 特有的后处理风格——后面 InternVLA-A1 也门控夹爪，但用的是不同阈值和不同离散值。</p>
+        <p><b>(2) base_motion 的排布。</b>关节也要像 π0 那样重排成 <code>[左臂6, 左夹2, 右臂6, 右夹2]</code>；底盘则直接取 <code>act[12:15]</code>。</p>
+
+        <div class="callout warn">
+          <div class="c-h">X-VLA 独一份：base_is_rel = False（绝对底盘）</div>
+          <p>三个 baseline 里，<b>只有 X-VLA</b> 用 <code>base_is_rel: False</code>——它的 <code>base_motion</code> 是<b>绝对</b>底盘目标，而不是逐步增量。π0 和 InternVLA-A1 都是 <code>base_is_rel: True</code>（相对）。这意味着 X-VLA 的模型直接预测"底盘该到的绝对位姿"，仿真端不再做累积；而另两者预测的是相对位移，要靠仿真把 $\Delta$ 积回去。同一个 <code>base_motion</code> 字段，语义被一个布尔值彻底改写——这是 4.3 那个 action 向量解剖里最容易踩的坑。</p>
+        </div>
+
+        <h2 id="step-mode">step_mode：chunk 还是逐步</h2>
+        <p>X-VLA 的 run.py 用 <span class="term">--step_mode</span> 显式支持两种部署节奏，默认 <code>step</code>：</p>
+        <div class="code" data-lang="python"><div class="code-h"><span class="fn">baselines/X-VLA/run.py</span><button class="cp">复制</button></div><pre><code>if args.step_mode == "chunk":
+    obs, done = eval_client.step({wid: deploy_action_chunk})   # 整段一次发回
+else:
+    for action in deploy_action_chunk:                          # 逐步发，每步一次 step
+        obs, done = eval_client.step({wid: action})
+        if done or obs[wid]['obs'].get('reset', False):
+            break</code></pre></div>
+        <p><code>chunk</code> 模式把整段 <code>used_chunk_size</code>（默认 30）一次性发回，让仿真内部执行，省往返；<code>step</code> 模式逐个动作发，每步都能看到新 obs（但每次都用<b>同一段已推好的</b> chunk，并不重新推理——重新推理发生在外层 while 循环的下一轮）。<code>--used_chunk_size 30</code> 控制每次推理用前多少步。和 π0 一样，每次 <code>step</code> 都裹在 <code>try/except</code> 里，失败就走 <span class="term">recreate_eval_client</span>，按 <code>--client_reinit_retries</code> / <code>--client_reinit_backoff</code> 退避重连。</p>
+
+        <h2 id="launch">run_xvla_eval.sh：多 worker、GPU round-robin</h2>
+        <p>启动脚本比 π0 简单（没有 server 那一层），核心是按 <code>WORKER_IDS</code> 起多个进程，并用 <code>GPU_IDS</code> 做 round-robin 绑卡：</p>
+        <div class="code" data-lang="bash"><div class="code-h"><span class="fn">scripts/run_xvla_eval.sh</span><button class="cp">复制</button></div><pre><code>worker_ids=(${WORKER_IDS//,/ })
+gpu_ids=(${GPU_IDS//,/ })
+for i in "${!worker_ids[@]}"; do
+    wid="${worker_ids[$i]}"
+    env CUDA_VISIBLE_DEVICES=${gpu_ids[$((i % ${#gpu_ids[@]}))]} \   # round-robin 绑 GPU
+        python -u "$RUN_PY" \
+        --model_path "$MODEL_PATH" --base_url "$BASE_URL" \
+        --run_id "$RUN_ID" --token "$TOKEN" \
+        --worker_id "$wid" --step_mode "$STEP_MODE" &amp;
+    pids+=($!)
+done</code></pre></div>
+        <p><code>i % ${#gpu_ids[@]}</code> 是经典的 round-robin：worker 数多于 GPU 数时，多个 worker 轮流分到同一块卡。env 变量一目了然：<span class="term">MODEL_PATH</span> / <span class="term">BASE_URL</span> / <span class="term">RUN_ID</span> / <span class="term">TOKEN</span> / <span class="term">WORKER_IDS</span> / <span class="term">GPU_IDS</span> / <span class="term">STEP_MODE</span> / <span class="term">LOG_DIR</span>。脚本还带一个完整的 <code>cleanup</code> trap，会连同 CUDA 子进程一起 TERM/KILL——长跑评测里防僵尸进程的实用细节。多 host 时各 host 共享 <code>RUN_ID</code>、切分 <code>WORKER_IDS</code>，就能拼出更大的并行规模。</p>
+
+        <div class="callout">
+          <div class="c-h">小结：同一个契约，另一种性格</div>
+          <p>X-VLA 用极小骨干 + soft prompt 解跨本体，用 <code>trust_remote_code</code> 把模型塞进 client 进程，用一堆缩放/反缩放对齐量级，用阈值门控稳住夹爪，并且<b>独自</b>选择了绝对底盘 <code>base_is_rel=False</code>。它和 π0 共享同一个 EvalClient 契约，性格却完全不同。下一节的 InternVLA-A1 会引入第三种性格——<b>有状态的 action 队列</b>和一个会"想象未来画面"的世界模型。</p>
+        </div>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/flow-matching-ode.js"></script>
+  <script src="../../assets/js/widgets/action-chunking.js"></script>
+  <script src="../../assets/js/widgets/eval-flow.js"></script>
+  <script src="../../assets/js/widgets/action-dissector.js"></script>
+  <script src="../../assets/js/widgets/capability-radar.js"></script>
+  <script src="../../assets/js/widgets/task-taxonomy.js"></script>
+  <script src="../../assets/js/widgets/moe-attention.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

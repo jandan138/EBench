@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>The repo constellation · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="0-2">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 0 · Orientation · 0-2</div>
+        <h1>The repo constellation</h1>
+        <p class="lede">你 clone 的这个 repo 不是 EBench 的全部，它只是<i>前门</i>。EBench 真正的样子是一群仓库组成的<span class="term">constellation</span>——每个仓库管一摊事，彼此分工明确。这一节我们站到高处，把这张星图认全，你之后读任何一段代码、跑任何一条命令，都能立刻知道「它属于哪颗星」。</p>
+
+        <h2 id="why-many-repos">为什么不是一个仓库</h2>
+        <p>一个自然的疑问是：为什么不把所有东西塞进一个 repo？答案藏在 EBench 的运行方式里。EBench 跑在 <span class="term">NVIDIA Isaac Sim</span> 上，这是个又重又挑剔的仿真栈——它对 CUDA、PyTorch、各种 GPU 库的版本有强约束（<a href="../02-sim/2-1-isaac-sim.html">2.1</a> 会细讲）。而你要评测的 VLA 模型，自己也带一整套依赖：可能是某个版本的 <span class="term">transformers</span>、某套 flow-matching 的库、特定的 CUDA。把仿真和模型塞进同一个 Python 环境，<b>依赖几乎必然打架</b>。</p>
+        <p>EBench 的解法是 <span class="term">client–server</span>：让仿真当一个黑盒<i>服务器</i>独占自己的环境，模型当<i>客户端</i>住在自己的环境，两者只通过网络协议说话。这个切分是整套星座结构的根本理由，我们在 <a href="../04-engine/4-1-client-server.html">4.1</a> 会专门拆它的契约。先记住：仓库被拆成这么多颗星，本质上是为了<b>依赖隔离</b>。</p>
+
+        <div class="bridge rl">
+          <div class="c-h"><span class="tag">从 RL 看</span> environment 与 agent 的老分工</div>
+          <p>这其实是你早就熟悉的结构。RL 里 <span class="term">environment</span> 和 <span class="term">agent</span> 天然分离：env 负责 <code>step(action) → obs, reward, done</code>，agent 负责 <code>obs → action</code>。EBench 只是把这条边界<b>物理化</b>成进程/机器的边界——server 是 env，client 是 agent。你会发现 <code>reset()</code> / <code>step()</code> 这套接口几乎原封不动地出现在评测协议里。</p>
+        </div>
+
+        <h2 id="the-stars">星座成员一览</h2>
+        <p>下面这张表把 constellation 的每颗星列清楚——它是什么、归谁管、和别的星是什么关系。你现在不用记住细节，知道「有这么几颗星、各管一摊」就够了。</p>
+
+        <table>
+          <thead>
+            <tr><th>组件</th><th>位置</th><th>职责</th><th>关系</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><b>EBench</b><br><span class="term">（本 repo）</span></td>
+              <td>你现在所在的 repo</td>
+              <td>前门：baselines（π0/π0.5/X-VLA/InternVLA-A1）+ scripts + 本教程。是你日常工作的入口。</td>
+              <td>依赖 genmanip-client 当 client；连向 GenManip server。</td>
+            </tr>
+            <tr>
+              <td><b>GenManip</b></td>
+              <td><span class="term">InternRobotics/GenManip</span></td>
+              <td>server 端：Isaac Sim 仿真本体 + 任务配置 + 场景生成。把仿真当黑盒对外提供。</td>
+              <td>EBench 的 server 由它而来；独占重依赖环境。</td>
+            </tr>
+            <tr>
+              <td><b>genmanip-client</b></td>
+              <td><span class="term">InternRobotics/genmanip-client</span></td>
+              <td>极简客户端包：<span class="term">gmp</span> CLI + <span class="term">EvalClient</span>。装进模型自己的 env。</td>
+              <td>client↔server 协议的客户端实现；依赖极少，专为隔离设计。</td>
+            </tr>
+            <tr>
+              <td><b>EBench-Assets</b></td>
+              <td>🤗 <span class="term">InternRobotics/EBench-Assets</span></td>
+              <td>场景 / 物体 / 任务资产（USD 等）。server 加载它来搭出每个 episode 的世界。</td>
+              <td>被 GenManip server 消费。</td>
+            </tr>
+            <tr>
+              <td><b>EBench-Dataset</b></td>
+              <td>🤗 <span class="term">InternRobotics/EBench-Dataset</span></td>
+              <td><span class="term">LeRobot</span> 格式的训练轨迹（6,600 episodes）。你训练自己模型的燃料。</td>
+              <td>被 baselines 训练消费；与评测分开（<a href="../02-sim/2-4-lerobot-dataset.html">2.4</a>）。</td>
+            </tr>
+            <tr>
+              <td><b>docs</b></td>
+              <td><span class="term">internrobotics.github.io/EBench-doc</span></td>
+              <td>官方文档站：track/split 定义、命令、契约。本书「可验证事实」的主要来源。</td>
+              <td>描述所有星的对外行为。</td>
+            </tr>
+            <tr>
+              <td><b>leaderboard</b></td>
+              <td><span class="term">internrobotics.shlab.org.cn/eval</span></td>
+              <td>在线评测平台：拿 token、提交 online challenge、看诊断报告。</td>
+              <td>聚合 test split 的 track score 排名（<a href="../04-engine/4-5-gmp-cli.html">4.5</a>）。</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>EBench 由 <b>Shanghai AI Laboratory / InternRobotics</b> 出品，全称 <span class="term-i">Elemental Mobile Manipulation Benchmark</span>。把这七颗星连起来看，它们分成三层：<b>资产层</b>（Assets / Dataset 提供素材）、<b>引擎层</b>（GenManip server + genmanip-client 跑评测）、<b>门面层</b>（本 repo + docs + leaderboard 是你和别人的入口）。</p>
+
+        <h2 id="the-split">client–server 这条缝切在哪</h2>
+        <p>把刀切在 GenManip（server）和 genmanip-client（client）之间，是个深思熟虑的设计。注意 client 包<b>极简</b>——它几乎不带重依赖，只负责按协议收发 obs/action。重的东西（Isaac Sim、USD、PhysX、RTX 渲染）全锁在 server 那一侧。</p>
+        <p>好处很直接：你给模型搭环境时，<i>完全不必</i>装 Isaac Sim；server 升级 CUDA 也<i>不会</i>逼你的模型跟着改。两侧各自演化，靠一个稳定的网络契约对齐。这也是为什么验证一次 full pass 能干净地跑在 <b>8× RTX 4090</b> 上约 <b>30 分钟</b>——server 那侧把 GPU 并行的活儿全包了，client 只管推理。</p>
+
+        <div class="callout note">
+          <div class="c-h">先别急着记命令</div>
+          <p>这一节只画地图，不教操作。<span class="term">gmp submit</span> / <span class="term">gmp eval</span> 这些命令、<span class="term">EvalClient</span> 的 <code>reset/step/close</code> 用法、动作向量长什么样，全都留给 <b>Part 4（评测引擎）</b>。现在你只要能在脑子里画出这张星图：本 repo 是前门，GenManip 是黑盒 server，genmanip-client 是住进模型 env 的瘦客户端。</p>
+        </div>
+
+        <h2 id="whats-next">这一节你需要带走的</h2>
+        <p>EBench 不是单个 repo，而是一个分工明确的 constellation：本 repo 当前门，GenManip 当黑盒 server，genmanip-client 当瘦客户端，Assets/Dataset 供素材，docs/leaderboard 当对外门面。这一切的根本理由是 <b>client–server 依赖隔离</b>——让仿真和模型各活在自己的环境里。</p>
+        <p>地图认清了，下一节我们聊点更贴你的事：这本书<i>怎么读</i>。它有自己的结构、两座专门为你（带着 RL 和 GAMES103 底子）搭的桥、以及一套交互玩法。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/flow-matching-ode.js"></script>
+  <script src="../../assets/js/widgets/action-chunking.js"></script>
+  <script src="../../assets/js/widgets/eval-flow.js"></script>
+  <script src="../../assets/js/widgets/action-dissector.js"></script>
+  <script src="../../assets/js/widgets/capability-radar.js"></script>
+  <script src="../../assets/js/widgets/task-taxonomy.js"></script>
+  <script src="../../assets/js/widgets/moe-attention.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

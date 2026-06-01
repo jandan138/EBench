@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chunk vs step、receding horizon 与并行 · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="4-4">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 4 · Client–Server · 4-4</div>
+        <h1>Chunk vs step、receding horizon 与并行</h1>
+        <p class="lede">上一节末尾留了个问题：每个 step 只发一帧 action，还是一口气发一整段？这背后是两种评测模式（step 与 chunk）、一个来自 VLA 理论的核心直觉（receding horizon），以及 EBench 怎么把同一套循环并行到多个 worker。这一节把这三件事讲清楚。</p>
+
+        <h2 id="two-modes">两种模式：step 与 chunk</h2>
+        <p>现代 VLA 很少一次只预测一帧动作；它们做 <span class="term">action chunking</span>——一次推理吐出未来 H 帧（π0 的 H=50）。这跟评测协议产生了张力：模型脑子里是一整段，但 server 的 step 是一帧一帧推进的。EBench 给了两种对接方式。</p>
+        <p><b>step 模式</b>是最直白的：client 每个 server step 调一次模型的 <span class="term">get_action(obs)</span>，拿回一帧 action，发给 server，往返一次。即便模型内部预测了一整段，client 也可以自己缓存这段、每步 popleft 一帧出来——这时模型表面上仍是「一次推理一帧调用」的 <code>get_action</code> 接口（InternVLA-A1 的 action queue 就是 client 侧自缓存的典型）。</p>
+        <p><b>chunk 模式</b>更激进：client 实现 <span class="term">get_action_chunk(obs)</span>，一次性把<b>整段长度 <code>chunk_size</code> 的 action list</b> 交给 server；server 在自己内部把这一整段连续执行下去，<b>只在需要重新推理（re-inference）的那个点</b>才把观测回传给 client。中间那些步的 obs↔action 往返被整个省掉了。</p>
+
+        <div class="code" data-lang="python"><div class="code-h"><span class="fn">两种模型接口</span><button class="cp">复制</button></div><pre><code># step 模式：一次推理，返回一帧
+def get_action(self, obs):
+    return action            # 形如契约里的一帧
+
+# chunk 模式：一次推理，返回长度 chunk_size 的一整段
+def get_action_chunk(self, obs):
+    return [action_0, action_1, ..., action_{chunk_size-1}]</code></pre></div>
+
+        <div class="callout warn">
+          <div class="c-h">chunk 模式需要 server 端 --no_save_process</div>
+          <p>chunk 模式让 server 替你连续执行整段动作。要打开这条「省往返」的快路，server 必须以 <code>--no_save_process</code> 启动（见 <a href="4-5-gmp-cli.html">4.5</a> 的 <code>ray_eval_server.py</code> 命令）。没有它，server 会按逐步保存过程的方式运行，chunk 的批量执行优化就不成立。</p>
+        </div>
+
+        <p>取舍很清楚：<b>chunk 模式省网络往返、吞吐更高</b>，尤其当 server 远在另一台机、网络延迟不可忽略时收益最大；代价是这一整段执行期间 server 看到的是「开环」的——模型在段内不重新看世界。<b>step 模式</b>每步都能（最多）重新决策，反应更灵，但每帧一次往返，远程评测时延迟叠加得厉害。下面这个时序部件把两种模式的往返画在一起。</p>
+
+        <div class="lab">
+          <div class="lab-h"><span class="lab-tag">interactive</span><span class="lab-t">eval-flow：chunk 与 step 的往返对比</span></div>
+          <div class="lab-body" data-widget="eval-flow"></div>
+          <div class="lab-cap">切换 chunk / step：看 chunk 模式如何把整段执行收进 server 一侧、把中间往返压掉，只在 re-inference 点回传观测。</div>
+        </div>
+
+        <h2 id="receding-horizon">receding horizon：为什么是「开环执行 + replan」</h2>
+        <p>chunk 模式开环执行整段，会不会因为「执行期间不看世界」而失控？这正是 <span class="term">receding horizon</span>（滚动时域）这个直觉要回答的。它的核心想法：<b>预测一长段，但只执行其中前面一截，然后丢掉剩下的、用新观测重新预测</b>——决策点像一个不断向前滑的窗口。</p>
+        <p>为什么不每步都重新预测（即纯 step）？因为 action chunking 的全部意义，是用「更少、更稀疏的决策点」来对抗 <span class="term">compounding error / covariate shift</span>：单步误差会把机器人推到训练没见过的状态，误差滚雪球；预测整段、稀疏 replan 能缩短有效决策 horizon、让动作更平滑。但执行得太长又会反应迟钝。于是折中——执行一截就 replan。π0 的实测口径：20Hz 机器人执行 16/50 帧后每 0.8s 重推；50Hz 执行 25 帧后每 0.5s 重推（π0 还发现 ACT 的 temporal ensembling 反而更差，所以选了「开环执行 + replan」而非逐帧融合）。</p>
+
+        <div class="bridge rl">
+          <div class="c-h"><span class="tag">从 RL 看</span> 和 MPC 的滚动时域是同一招</div>
+          <p>receding horizon 这个名字你在最优控制 / MPC 里见过：求解一段 horizon 的最优序列，只执行第一步（或前几步），下一时刻拿新状态重解。VLA 的 chunk + replan 是它的学习版——「求解」换成了一次策略前向（flow matching 出 chunk，见 <a href="../05-theory/5-2-flow-matching.html">5.2</a>），但「预测一长段、只走一截、再重规划」的骨架完全一致。长 chunk = 更平滑但更迟钝；短 chunk = 反应快但 covariate shift 更多——这条 tradeoff 是 5.1 的主线。</p>
+        </div>
+
+        <p>这一节只建立直觉；receding horizon 的完整展开——它从 ACT 来、怎么对抗 compounding error、H 和 exec horizon 怎么选——在 <a href="../05-theory/5-1-action-chunking.html">5.1</a>，那里也有专门的 <code>action-chunking</code> 交互部件让你拨弄 H 与 exec 看效果。</p>
+
+        <h2 id="parallel">多 worker 并行</h2>
+        <p>一次 full pass（一个 track/split 的所有 episode）要跑很多 episode；串行会很慢。EBench 的并行模型很直接：<b>不同的推理进程认领不同的 <code>worker_id</code></b>，各自跑一条独立的 reset→obs→infer→step 循环，分担整体的 episode。这也解释了 <a href="4-2-evalclient.html">4.2</a> 里 obs 为什么要先按 <code>worker_id</code> 套一层——那层寻址就是为并行预留的。</p>
+        <p>具体怎么开：构造 <code>EvalClient</code> 时给不同进程不同的 <code>worker_ids</code>，或用 <code>gmp eval --worker_ids</code> 指定（见 <a href="4-5-gmp-cli.html">4.5</a>）。真实 baseline 就是这么做的：X-VLA 的 <code>run_xvla_eval.sh</code> 每个 <code>WORKER_ID</code> 起一个进程、<code>GPU_IDS</code> round-robin 分配显卡；openpi 起 N 个 model server 配并行 client。本地你有几张卡就能开几个 worker；这也是 README 里「30 分钟 / 8× RTX 4090」那个数字背后的并行度来源。</p>
+
+        <div class="callout note">
+          <div class="c-h">online 的并发上限是 16</div>
+          <p>本地并行的 worker 数受你的显卡数限制；但上线到 <span class="term">online challenge</span> 时，平台对单次提交<b>最多允许 16 个并发 worker</b>。这个上限和「10 分钟无活动断连」「同 task_id 续跑」一起，构成线上评测的并发约束——完整流程见下一节。</p>
+        </div>
+
+        <h2 id="takeaway">这一节你需要带走的</h2>
+        <p>三件事：(1) <b>step 模式</b>每步一往返、灵活；<b>chunk 模式</b>一次发整段、server 内执行、省往返，但需 server <code>--no_save_process</code>——对应模型侧的 <code>get_action</code> 与 <code>get_action_chunk</code>。(2) <b>receding horizon</b> = 预测一长段、只执行一截、用新观测 replan，是 chunk 开环执行不失控的关键，细节在 5.1。(3) <b>并行</b>靠不同进程认领不同 <code>worker_id</code>，本地随显卡数，online 最多 16 并发。</p>
+        <p>下一节是 Part 4 的收口：把上面这一切串成可以敲进终端的命令——<span class="term">gmp</span> CLI 的本地流程、子命令一览，以及 online challenge 从拿 token 到出诊断报告的完整链路。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/flow-matching-ode.js"></script>
+  <script src="../../assets/js/widgets/action-chunking.js"></script>
+  <script src="../../assets/js/widgets/eval-flow.js"></script>
+  <script src="../../assets/js/widgets/action-dissector.js"></script>
+  <script src="../../assets/js/widgets/capability-radar.js"></script>
+  <script src="../../assets/js/widgets/task-taxonomy.js"></script>
+  <script src="../../assets/js/widgets/moe-attention.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

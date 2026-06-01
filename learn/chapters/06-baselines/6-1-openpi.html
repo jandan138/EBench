@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>π0 / π0.5（openpi） · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="6-1">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 6 · Baseline 全链路 · 6-1</div>
+        <h1>π0 / π0.5（openpi）</h1>
+        <p class="lede">Part 5 我们把 flow matching、action chunking、action expert 一行行公式推完了。现在到了兑现承诺的时刻：这些理论，在真实的 <span class="term">openpi</span> baseline 里到底长成什么样的代码？我们从最"教科书"的那个开始——π0 / π0.5。它会让你看到，理论与契约之间，只隔着一个 <span class="term">prep_input</span> 和一个 <span class="term">prep_output</span>。</p>
+
+        <h2 id="two-process">两个进程：model server 与 eval client</h2>
+        <p>π0 baseline 不是一个脚本，而是<b>两组进程</b>。这是它和后面两个 baseline 最大的结构差异，先记牢：</p>
+        <ul>
+          <li><b>model server</b>：跑 <span class="term">scripts/serve_policy.py</span>，把训练好的 π0/π0.5 权重加载进显存，开一个 <span class="term">WebSocket</span> 服务端口等推理请求。它<i>只</i>负责"给我 obs，还你 action chunk"，不碰 EBench 仿真。</li>
+          <li><b>eval client</b>：跑 <span class="term">scripts/pi_eval_client_online.py</span>，里面装着 <span class="term">genmanip-client</span>（连 EBench 仿真服务器的那条线）和一个 <span class="term">WebsocketClientPolicy</span>（连 model server 的那条线）。它是<b>中间人</b>：从仿真拿 obs，转发给 model server，把回来的 action 翻译成 EBench 契约格式再 step 回仿真。</li>
+        </ul>
+        <p>为什么要拆两层 WebSocket？因为 π0 的推理 env（JAX/PyTorch + openpi 依赖）和 EBench 的 client env（genmanip-client）天然冲突——这正是 <a href="../04-engine/4-1-client-server.html">4.1</a> 讲的依赖隔离哲学，在 baseline 内部又套了一层。model server 跑在 openpi 的 venv 里，eval client 跑在 GenManip-client 的 conda env 里，靠 WebSocket 解耦。</p>
+
+        <div class="bridge rl">
+          <div class="c-h"><span class="tag">从 RL 看</span> policy 就是个无状态函数</div>
+          <p>把 model server 想成一个纯函数 $\pi_\theta: o \mapsto A$：给它观测，它返回动作 chunk。它没有 env、没有 reward、没有 rollout 循环——所有"环境交互"的状态都在 eval client 和仿真那一侧。π0 这里把"策略"和"环境循环"在<b>进程级别</b>切开了，这种洁癖在 RL 代码里很少见，但对部署极其友好。</p>
+        </div>
+
+        <h2 id="prep-input">prep_input：把 EBench obs 喂成 π0 的语言</h2>
+        <p>eval client 的核心是 <span class="term">Pi0Client</span> 类。它的 <span class="term">get_action</span> 只有三步：把 obs 转成 model server 认得的字典、调 <code>infer</code>、再把动作翻译回契约。先看进的方向：</p>
+
+        <div class="code" data-lang="python"><div class="code-h"><span class="fn">baselines/openpi/scripts/pi_eval_client_online.py</span><button class="cp">复制</button></div><pre><code>def prep_input(self, obs):
+    observation = {
+        "images/head":      obs[self.ids]["obs"]["video.overlook_camera_view"],
+        "images/hand_left": obs[self.ids]["obs"]["video.left_camera_view"],
+        "images/hand_right":obs[self.ids]["obs"]["video.right_camera_view"],
+        "states/joint":     obs[self.ids]["obs"]["state.joints"],
+        "states/gripper":   obs[self.ids]["obs"]["state.gripper"],
+        "states/base":      obs[self.ids]["obs"]["state.base"],
+        "prompt":           obs[self.ids]["obs"]["instruction"],
+    }
+    return observation</code></pre></div>
+
+        <p>注意这里的相机映射：EBench lift2 有 4 个视角（<a href="../01-problem/1-3-lift2-embodiment.html">1.3</a>），但 π0 只吃<b>三路图像</b>——一路第三人称 + 两路手腕。openpi 把 EBench 的 <span class="term">overlook</span> 当 head（第三人称），<span class="term">left</span> / <span class="term">right</span> 当两只手腕。<span class="term">top</span> 视角直接丢弃。这是 π0 架构（PaliGemma 三图槽位）写死的限制，不是 EBench 的选择。</p>
+        <p>这个 dict 进了 model server 后，会经过 <span class="term">EBenchInputs</span> 这个 transform，把字段塞进 π0 真正认的键名：</p>
+
+        <div class="code" data-lang="python"><div class="code-h"><span class="fn">baselines/openpi/src/openpi/policies/ebench_policy.py</span><button class="cp">复制</button></div><pre><code>state = torch.cat([state_joint, state_gripper], dim=-1)   # 12 + 4 = 16
+inputs = {
+    "state": state,
+    "image": {
+        "base_0_rgb":        base_image,    # = head = overlook
+        "left_wrist_0_rgb":  left_image,
+        "right_wrist_0_rgb": right_image,
+    },
+    "image_mask": { "base_0_rgb": np.True_, "left_wrist_0_rgb": np.True_,
+        "right_wrist_0_rgb": np.True_ if model_type == PI0_FAST else np.False_ },
+}</code></pre></div>
+
+        <div class="callout note">
+          <div class="c-h">一个细节：state 只有 16 维，没有 base</div>
+          <p>注意 <span class="term">EBenchInputs</span> 拼的 state 是 <code>joint(12) + gripper(4) = 16</code>——<b>base 不进 state</b>。<span class="term">prep_input</span> 传了 <code>states/base</code>，但 transform 没用它。底盘位置不喂给策略当观测；底盘的运动完全由<b>输出</b>侧的 base_motion 通道处理。这一点等下在 prep_output 里会再次印证。</p>
+        </div>
+
+        <h2 id="prep-output">prep_output：joint 重排、base 相对增量、base_is_rel=True</h2>
+        <p>现在看出的方向。model server 吐出的是一个 <code>(horizon, 19)</code> 的 action chunk（<span class="term">EBenchOutputs</span> 用 <code>data["actions"][:, :19]</code> 截出 19 维：12 关节 + 4 夹爪 + 3 底盘）。但这 19 维的<b>排布顺序</b>和 EBench 契约要的不一样，所以要重排：</p>
+
+        <div class="code" data-lang="python"><div class="code-h"><span class="fn">baselines/openpi/scripts/pi_eval_client_online.py</span><button class="cp">复制</button></div><pre><code>def prep_output(self, action_chunk):
+    actions = []
+    last_base_motion = np.zeros(3)
+    for i in range(self.horizon):
+        action = action_chunk[i]
+        gripper_joint = action[12:16]
+        base_motion = action[16:19] - last_base_motion   # chunk relative to delta
+        last_base_motion = action[16:19]
+        joint = np.concatenate([
+            action[:6],          # joints 0-5
+            gripper_joint[0:2],  # left gripper
+            action[6:12],        # joints 6-11
+            gripper_joint[2:4],  # right gripper
+        ])
+        action_dict = {
+            "action": joint, "base_motion": base_motion,
+            "control_type": "joint_position",
+            "is_rel": False, "base_is_rel": True,
+        }
+        actions.append({self.ids: action_dict})
+    return actions</code></pre></div>
+
+        <p>两件值得品的事：</p>
+        <p><b>(1) joint 重排。</b>模型输出是 <code>[6 左臂关节, 6 右臂关节, 2 左夹, 2 右夹]</code>（关节集中、夹爪集中）；而 EBench 契约要的 16 维是 <code>[6 左臂, 2 左夹, 6 右臂, 2 右夹]</code>（每只手臂的关节+夹爪挨在一起，见 <a href="../04-engine/4-3-action-vector.html">4.3</a>）。这段 <code>np.concatenate</code> 就是把夹爪插回各自手臂后面。这种"同一个 19/16 维向量，不同 baseline 排布不同"的麻烦，是整个 Part 6 反复出现的主题。</p>
+        <p><b>(2) base 的相对增量。</b>模型预测的 <code>action[16:19]</code> 是相对 <b>chunk 起点</b>的累积位移（一条逐步增长的底盘轨迹）。但 EBench 的 <code>base_motion</code> 期待的是<b>每一步的增量</b> $\Delta$。于是用 <code>base_motion = action[16:19] - last_base_motion</code> 做差分，把"累积相对"还原成"逐步相对"，并打上 <code>base_is_rel=True</code>。</p>
+
+        <div class="bridge g103">
+          <div class="c-h"><span class="tag">从 GAMES103 看</span> 累积 vs 增量，就是位置与速度</div>
+          <p>模型输出的累积相对位移像一条<i>位置</i>轨迹 $x(\tau)$，而 EBench 要的逐步 $\Delta$ 像<i>速度</i> $\dot x$。<code>action[16:19] - last</code> 正是对位置做一阶差分得到速度——你在数值积分里反过来做（速度积成位置）的同一套运算，只是方向相反。底盘控制器在仿真里再把这些 $\Delta$ 积回绝对位置。</p>
+        </div>
+
+        <h2 id="loop">主循环：契约的最小骨架</h2>
+        <p>把这两个 prep 接上 EvalClient，主循环就是 Part 4 那张契约图的字面实现：</p>
+        <div class="code" data-lang="python"><div class="code-h"><span class="fn">baselines/openpi/scripts/pi_eval_client_online.py</span><button class="cp">复制</button></div><pre><code>eval_client = EvalClient(base_url=base_url, worker_ids=worker_ids, run_id=run_id, token=token)
+pi0_client  = Pi0Client(args.model_host, args.model_port, ids, args.horizon)
+obs = eval_client.reset()
+eval_finished = False
+while not eval_finished:
+    action_chunk = pi0_client.get_action(obs)
+    try:
+        obs, eval_finished = eval_client.step(action_chunk)
+    except Exception as e:
+        eval_client.close()
+        eval_client = EvalClient(base_url=base_url, worker_ids=worker_ids, run_id=run_id, token=token)
+        obs = eval_client.reset()</code></pre></div>
+        <p>每一轮 <code>get_action</code> 推一整个 <code>horizon</code> 长的 chunk，<code>step</code> 把整段一次发回去——这是 <span class="term">chunk 模式</span>（<a href="../04-engine/4-4-chunk-step.html">4.4</a>），省网络往返。注意那个 <code>try/except</code>：传输一旦失败，就 <code>close()</code> 旧 client、重建、重新 <code>reset()</code>。三个 baseline 都有这套"出错就重建 client"的错误恢复，是 EBench 长跑评测下的标配。</p>
+
+        <h2 id="launch">launch 脚本：多 server、端口与 GPU 分配</h2>
+        <p>怎么把这两组进程拉起来？看 <span class="term">launch_pi_onlineeval.sh</span>。它先按 <code>NUM_CLIENTS</code> 起 N 个 model server，再起 N 个对应的 eval client：</p>
+        <div class="code" data-lang="bash"><div class="code-h"><span class="fn">scripts/launch_pi_onlineeval.sh</span><button class="cp">复制</button></div><pre><code>POLICY_CFG="pi05_ebench_all"   # TrainConfig.name of your model
+Horizon=30                     # replan horizon
+# ---- start N model servers ----
+for ((i=0; i&lt;NUM_CLIENTS; i++)); do
+    export CUDA_VISIBLE_DEVICES=$(($i / 2))     # 每个 server 占一块（或共享）GPU
+    PORT=$((8000 + 2*i))                        # 端口 8000, 8002, 8004 ...
+    python scripts/serve_policy.py --port $PORT \
+        policy:checkpoint --policy.config=$POLICY_CFG --policy.dir=$POLICY_PATH &amp;
+done
+sleep 60
+# ---- start N eval clients ----
+for ((i=0; i&lt;NUM_CLIENTS; i++)); do
+    python scripts/pi_eval_client_online.py --horizon $Horizon \
+        --model_host 0.0.0.0 --model_port $((8000 + 2*i)) \
+        --worker_ids "$i" --run_id "$RUN_ID" --token $TOKEN --eval_host $URL &amp;
+done</code></pre></div>
+        <p>几个要点。<b>端口步长是 2</b>（8000, 8002, 8004…），给每个 server 留出余量。<b>GPU 用 <code>i / 2</code> 整除映射</b>——意味着默认两个 server 共享一块 GPU（π0 推理显存够），你按自己卡的显存改这条。第 i 个 client 用 <code>--model_port 8000+2i</code> 精确连到第 i 个 server，并用 <code>--worker_ids i</code> 在 EBench 仿真上认领第 i 个 worker。这样 N 条 (server, client, worker) 流水线并行跑，互不干扰。</p>
+        <p>脚本顶部那一排环境变量就是你要填的全部配置：<span class="term">GENMANIP_PATH</span> / <span class="term">NUM_CLIENTS</span> / <span class="term">RUN_ID</span> / <span class="term">POLICY_CFG</span> / <span class="term">POLICY_PATH</span> / <span class="term">Horizon</span> / <span class="term">TOKEN</span> / <span class="term">URL</span>。其中 <code>Horizon=30</code> 是 replan horizon：每推一次用前 30 步，对应 <span class="term">Pi0Client(horizon=30)</span> 的循环长度。</p>
+
+        <h2 id="configs">三个配置：all / mobile / tabletop</h2>
+        <p><code>POLICY_CFG</code> 不止一个。openpi 为 EBench 的三条 track 准备了对应的 <span class="term">TrainConfig</span>，π0 和 π0.5 各一套：</p>
+        <table>
+          <thead><tr><th>config 名</th><th>对应 track</th><th>输出动作维度</th><th>action_horizon</th></tr></thead>
+          <tbody>
+            <tr><td><span class="term">pi05_ebench_all</span></td><td>generalist（全部）</td><td><code>[:, :19]</code>（含 base）</td><td>50</td></tr>
+            <tr><td><span class="term">pi05_ebench_mobile</span></td><td>mobile_manip</td><td><code>[:, :19]</code>（含 base）</td><td>50</td></tr>
+            <tr><td><span class="term">pi05_ebench_tabletop</span></td><td>table_top_manip</td><td><code>[:, :16]</code>（无 base）</td><td>50</td></tr>
+          </tbody>
+        </table>
+        <p>关键区别在最后一列。<span class="term">all</span> 和 <span class="term">mobile</span> 用 <span class="term">EBenchOutputs</span>，截 <code>[:, :19]</code>，带底盘；而 <span class="term">tabletop</span> 用另一个 <span class="term">ebench_fixedbase_policy.EBenchOutputs</span>，截 <code>[:, :16]</code>——桌面任务底盘不动，干脆把 base 通道去掉。这就解释了为什么<b>同一个 baseline 要分三套配置</b>：track 决定了机器人要不要走路，也就决定了动作向量是 19 维还是 16 维。（π0 系列还有平行的 <code>pi0_ebench_*</code> 三套，区别只是模型用 π0 而非 π0.5。）</p>
+
+        <div class="callout">
+          <div class="c-h">把理论落回代码</div>
+          <p>到这里，Part 5 的每个概念都在 π0 baseline 里找到了落点：flow matching 与 action expert 藏在 model server 的权重里（<code>serve_policy.py</code> 加载、<code>infer</code> 用 10 步 Euler 积分采样）；action chunking 是那个 <code>horizon=30</code> 的 replan；契约则由 eval client 的 <code>prep_input</code>/<code>prep_output</code> 两个翻译层兜住。π0 是三个 baseline 里最"标准"的——下一节的 X-VLA 会用完全不同的模型加载方式和底盘约定，把这套契约推到另一个极端。</p>
+        </div>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/flow-matching-ode.js"></script>
+  <script src="../../assets/js/widgets/action-chunking.js"></script>
+  <script src="../../assets/js/widgets/eval-flow.js"></script>
+  <script src="../../assets/js/widgets/action-dissector.js"></script>
+  <script src="../../assets/js/widgets/capability-radar.js"></script>
+  <script src="../../assets/js/widgets/task-taxonomy.js"></script>
+  <script src="../../assets/js/widgets/moe-attention.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

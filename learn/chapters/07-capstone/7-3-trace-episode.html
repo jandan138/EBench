@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>追踪一个 episode 的全程 · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="7-3">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 7 · Capstone · 7-3</div>
+        <h1>追踪一个 episode 的全程</h1>
+        <p class="lede">全书到这里，每个零件你都见过了。最后一节，我们不引入任何新概念——只做一件事：牵着<i>一个</i> episode，从它睁眼（reset）走到闭眼（打分），看七个 Part 如何咬合成一台完整运转的机器。每经过一个环节，我们就回链到讲它的那一章。这是这本书的收束。</p>
+
+        <h2 id="cast">出场角色</h2>
+        <p>先点名。一个 episode 里同时在跑的，是三方：</p>
+        <ul>
+          <li><b>server</b>——云端/本机的 <span class="term">ray_eval_server.py</span>，里面是 Isaac Sim 物理世界（<a href="../02-sim/2-1-isaac-sim.html">2.1</a>）和 GenManip 任务（<a href="../02-sim/2-3-genmanip.html">2.3</a>）。它是黑盒（<a href="../04-engine/4-1-client-server.html">4.1</a>）。</li>
+          <li><b>client</b>——<span class="term">EvalClient</span>，装在你模型的 env 里，负责通信与契约（<a href="../04-engine/4-2-evalclient.html">4.2</a>）。</li>
+          <li><b>model</b>——你在 <a href="07-1-custom-model.html">7.1</a> 写的 <span class="term">ModelClient</span>，里面是一个 flow-matching VLA（<a href="../05-theory/5-2-flow-matching.html">5.2</a>）。</li>
+        </ul>
+        <p>下面这段循环就是它们的全部对话，我们将逐行展开它代表的物理与计算：</p>
+
+        <div class="code" data-lang="python"><div class="code-h"><span class="fn">一个 episode 的骨架（来自 4.2）</span><button class="cp">复制</button></div><pre><code>obs = client.reset()                       # ① server 重置世界，吐首帧
+done = False
+while not done:
+    if obs["0"]["obs"]["reset"]:           # ② 新 episode 首步：清模型状态
+        model.reset()
+    action = model.get_action(obs)         # ③④⑤ 解包→采样→重排成契约
+    obs, done = client.step(action)        # ⑥⑦ server 物理步进→新 obs/done
+client.close()
+# 全部 episode 跑完 → 子目标打分 → 聚合成 capability profile  ⑧⑨
+</code></pre></div>
+
+        <h2 id="s1-reset">① reset：世界睁眼，吐出第一帧 obs</h2>
+        <p>调用 <span class="term">client.reset()</span>，server 在 Isaac Sim 里把场景摆回初始：物体归位、机器人 <span class="term">lift2</span>（<a href="../01-problem/1-3-lift2-embodiment.html">1.3</a>）回到起始位姿，并解析一个任务指令（如"把咖啡豆收进容器"）。它渲染 4 路 480×640 相机（<span class="term">top/left/right/overlook</span>），读出关节/夹爪/底盘 state，打包成 observation 回给 client。这一帧的 <span class="term">reset</span> 字段是 <span class="term-i">True</span>。</p>
+        <div class="bridge g103">
+          <div class="c-h"><span class="tag">从 GAMES103 看</span> 初始条件</div>
+          <p>reset 就是给你的物理仿真设<b>初始状态</b> $x_0$：位置、姿态、速度全部摆好。之后的每一步都是从这个 $x_0$ 出发的数值积分——这正是你在 GAMES103 里对一套刚体/约束系统做的事，只是这里由 PhysX 在 GPU 上跑（<a href="../02-sim/2-1-isaac-sim.html">2.1</a>）。</p>
+        </div>
+
+        <h2 id="s2-modelreset">② model.reset：清掉上一局的残留</h2>
+        <p>client 看到 <span class="term">obs["0"]["obs"]["reset"] == True</span>，调你的 <span class="term">model.reset()</span>。如果你的策略带 recurrent state、action 队列或历史帧缓存（InternVLA-A1 的 action deque + temporal image pair 就是，<a href="../06-baselines/6-3-internvla-a1.html">6.3</a>），全在这里清空。<a href="07-1-custom-model.html">7.1</a> 把这列为三大坑之一——不清，新 episode 开头会被旧状态污染。</p>
+
+        <h2 id="s3-unpack">③ 解包 obs：从字典到张量</h2>
+        <p>进入 <span class="term">get_action(obs)</span>，第一步是解包。按 <span class="term">worker_id</span> 取出 <span class="term">obs["0"]["obs"]</span>，里面是 <span class="term">instruction</span>(str)、<span class="term">state.joints</span>(12)、<span class="term">state.gripper</span>(4)、<span class="term">state.base</span>(3)、<span class="term">state.ee_pose</span>、四路 <span class="term">video.{cam}_view</span>(480,640,3 uint8)、<span class="term">timestep</span>、<span class="term">reset</span>（schema 全貌见 <a href="../04-engine/4-2-evalclient.html">4.2</a>）。图像是 <b>uint8 HWC</b>，你得按训练时的口径归一化、相机命名对齐（<a href="07-1-custom-model.html">7.1</a> 第一坑）。低维 state 也要用训练统计量做归一化。</p>
+
+        <h2 id="s4-sample">④ flow matching 采样：一团噪声变成一段动作</h2>
+        <p>这是 episode 里最"聪明"的一步，也是 Part 5 的核心。模型不是回归出一个动作均值，而是从分布 $p(A_t\mid o_t)$ 里<b>采样</b>一整段 action chunk $A_t=[a_t,\dots,a_{t+H-1}]$，让它能表达"多种正确做法"的多模态性（<a href="../05-theory/5-2-flow-matching.html">5.2</a>）。</p>
+        <p>具体地：先抽噪声 $A_t^0\sim\mathcal N(0,I)$，然后沿 flow 时间 $\tau\in[0,1]$ 解一个 ODE，用 forward Euler 一步步把噪声"推"成干净动作：</p>
+        <div class="math-block">$$A_t^{\tau+\delta}=A_t^{\tau}+\delta\,v_\theta(A_t^{\tau},o_t)$$</div>
+        <p>其中 $v_\theta$ 是网络学到的向量场。因为 π0 用 rectified flow，路径近乎直线，<b>10 步</b>（$\delta=0.1$）就够（<a href="../05-theory/5-2-flow-matching.html">5.2</a>）。观测前缀 $o_t$ 的 KV cache 只算一次，10 步只重算 action token——这套"image/text 走一组权重、state/action 走 action-expert 权重、共享一次 attention"的结构就是 <a href="../05-theory/5-3-action-expert.html">5.3</a> 的 Transfusion/MoE。</p>
+        <div class="bridge g103">
+          <div class="c-h"><span class="tag">从 GAMES103 看</span> 又一次数值积分</div>
+          <p>采样动作和物理步进，本质是<b>同一件事的两次出现</b>：都是 forward Euler 解 ODE。第④步在 flow 时间 $\tau$ 上积分一个学出来的向量场 $v_\theta$ 得到动作；第⑥步将在物理时间上积分牛顿动力学得到下一个世界状态。你 GAMES103 的积分器直觉，在这条管线里用了两遍。</p>
+        </div>
+
+        <h2 id="s5-contract">⑤ 重排成契约：从模型输出到 action dict</h2>
+        <p>模型吐出的 chunk 不一定就长得像 EBench 要的样子。这一步把它<b>重排</b>成契约 dict（<a href="../04-engine/4-3-action-vector.html">4.3</a>）：取需要执行的那几步（receding horizon，<a href="../05-theory/5-1-action-chunking.html">5.1</a>——预测 50、只执行 16/25 再 replan），把关节顺序排成 <span class="term">[6 左关节, 2 左夹, 6 右关节, 2 右夹]</span>，底盘三维填进 <span class="term">base_motion</span>，并标好 <span class="term">control_type</span> / <span class="term">is_rel</span> / <span class="term">base_is_rel</span>。三个 baseline 的差异几乎全集中在这一步：π0 的 <span class="term">base_motion = action[16:19] - last</span> 且 <span class="term">base_is_rel=True</span>（<a href="../06-baselines/6-1-openpi.html">6.1</a>）；X-VLA 反缩放 proprio、gripper 阈值门控、<span class="term">base_is_rel=False</span> 独一份绝对底盘（<a href="../06-baselines/6-2-xvla.html">6.2</a>）；InternVLA-A1 的 <span class="term">delta</span> 还原 + 队列 popleft（<a href="../06-baselines/6-3-internvla-a1.html">6.3</a>）。契约相同，填法各异（<a href="../06-baselines/6-4-compare.html">6.4</a>）。</p>
+
+        <h2 id="s6-step">⑥ client.step → server 物理步进</h2>
+        <p>client 把这个 action dict 发给 server。server 在 Isaac Sim 里执行：PhysX 把关节目标/底盘增量变成力与接触，<b>推进物理时间</b>——刚体碰撞、夹爪闭合摩擦、底盘位移，全是 <a href="../02-sim/2-1-isaac-sim.html">2.1</a> 那套 USD→PhysX→step→写回 USD 的循环。在 chunk 模式下（<span class="term">--no_save_process</span>，<a href="../04-engine/4-4-chunk-step.html">4.4</a>），server 内部整段执行多步，只在 re-inference 点回观测，省掉网络往返。</p>
+
+        <h2 id="s7-newobs">⑦ 新 obs / done：世界回话</h2>
+        <p>步进后，RTX renderer 重渲 4 路相机、读新 state，打包成下一帧 obs 回给 client，并带一个 <span class="term">done</span> 标志。循环回到第③步——除非 <span class="term">done</span> 为真（任务完成、失败、或步数耗尽），此时这个 episode 结束。整个③→⑦就是 <a href="../04-engine/4-2-evalclient.html">4.2</a> 主循环的一圈。</p>
+        <div class="bridge rl">
+          <div class="c-h"><span class="tag">从 RL 看</span> 这就是 environment step</div>
+          <p>③–⑦合起来正是你熟悉的 $a_t=\pi(o_t)$、$o_{t+1},\,done=\mathrm{env.step}(a_t)$ 交互回路。唯一不同：env 是个跑在远端的 Isaac Sim 黑盒，$\pi$ 是 flow-matching 采样而非 $\arg\max_a Q$，而且 reward 不是逐步给的——它留到 episode 结束统一结算（下一步）。</p>
+        </div>
+
+        <h2 id="s8-score">⑧ 子目标打分：把一段轨迹压成 [0,1]</h2>
+        <p>episode 收尾，server 按任务的打分规则给一个 <span class="term">task score</span> ∈ [0,1]（<a href="../03-methodology/3-3-tasks-scoring.html">3.3</a>）。多数任务不是非 0 即 1：满足某个子目标得一份<b>部分分</b>，子目标求和；并且常带<b>时序条件</b>——前置子目标满足后才评后续（比如"先开微波炉"才轮到评"放进蛋挞"）。这让长流程任务的分数能反映"做到第几步"，而不是一刀切。</p>
+
+        <h2 id="s9-profile">⑨ 聚合成 capability profile：回到出发点</h2>
+        <p>很多 episode 这样跑完，每个 task/split 的 episode 分数取平均得 <b>track score</b>，leaderboard 再聚合三个 track（<a href="../03-methodology/3-2-tracks-splits.html">3.2</a>）。在 README 与线上平台上，这些数进一步沿多个能力轴摊开，画成一张 <span class="term">capability profile</span> 雷达图（愿景层，<a href="../03-methodology/3-5-metrics-report.html">3.5</a>）。</p>
+        <p>而这，正是我们在 <a href="../00-orientation/0-1-why-ebench.html">0.1</a> 开篇立下的那个目标：<b>从一个 success rate，到一张多轴能力画像</b>。一个 episode 的全程，最终汇成这张画像里的一笔。</p>
+
+        <div class="callout note">
+          <div class="c-h">一条线，九个环</div>
+          <p>reset → 清状态 → 解包 obs → flow-matching 采样 chunk → 重排成契约 → step → 物理步进 → 新 obs/done → 子目标打分 → 聚合成 profile。九个环，每一个都对应这本书的某一章。你现在能从任意一环往两头追到底——这就是读完这本书的意义。</p>
+        </div>
+
+        <h2 id="takeaway">全书收束</h2>
+        <p>从 <a href="../00-orientation/0-1-why-ebench.html">0.1</a> 的测量哲学，到仿真地基（Part 2）、方法论（Part 3）、client–server 契约（Part 4）、flow-matching 引擎（Part 5）、三个 baseline 的全链路（Part 6），再到你亲手接入自己的模型（Part 7）——它们不是七堆并列的知识，而是<b>同一个 episode 流过的七段河道</b>。当你下次启动一次评测，看着 worker 一帧帧往前推，你脑子里跑的，应该正是这条从 reset 到 capability profile 的完整线路。</p>
+        <p>这本书到此结束。要查具体的术语、链接、obs/action schema、或参考文献，去翻附录——它就是为你随手回查准备的。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/flow-matching-ode.js"></script>
+  <script src="../../assets/js/widgets/action-chunking.js"></script>
+  <script src="../../assets/js/widgets/eval-flow.js"></script>
+  <script src="../../assets/js/widgets/action-dissector.js"></script>
+  <script src="../../assets/js/widgets/capability-radar.js"></script>
+  <script src="../../assets/js/widgets/task-taxonomy.js"></script>
+  <script src="../../assets/js/widgets/moe-attention.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

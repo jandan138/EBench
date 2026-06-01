@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>26 个任务与打分规则 · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="3-3">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 3 · Benchmark 方法论 · 3-3</div>
+        <h1>26 个任务与打分规则</h1>
+        <p class="lede">上一节切好了「在哪个分布上测」。这一节钻进 track 内部：26 个任务到底是什么、分成哪三个 <span class="term-i">family</span>，以及最关键的——一次 episode 的分数 ∈ [0,1] 究竟<i>怎么算出来</i>。打分规则不是细节，它定义了 capability profile 每一根轴的刻度。</p>
+
+        <h2 id="three-families">三个 family：26 个任务的能力光谱</h2>
+        <p>docs 把 26 个任务按<b>所考能力</b>归入三个 family。它们正好对应开篇那条 long-horizon / dexterous / pick-place 的范式光谱：</p>
+        <ul>
+          <li><span class="term">Long-Horizon</span>（9 个）——多步、有先后依赖的长流程：Bottle / Detergent / Dish / Dishwasher / Fruit / Make Sandwich / Microwave / Pen / Shop。考的是「能不能把一长串子目标按顺序做完」。</li>
+          <li><span class="term">Pick-and-Place</span>（10 个）——抓取与放置：Utensils to Holder / Bookmark on Book / Soap to Dish / Apple to Fruit Bowl / Remote to Holder / Perfume to Cosmetics Rack / Salt to Spice Rack / Apple from Shelf / Teacup to Saucer / Bowl to Plate。考的是基础原子技能与空间对位。</li>
+          <li><span class="term">Dexterous &amp; Precise</span>（7 个）——灵巧与精密：Collect Coffee Beans / Flip Cup &amp; Collect Cookies / Frame Against Pen Holder / Install Gear / Peg in Hole / Put Glass in Glassbox / Tighten Nut。考的是毫米级公差的精细操作。</li>
+          </ul>
+        <p>9 + 10 + 7 = 26，正好。下面这个 widget 把全部 26 个任务、它们的 family 归属与打分结构都摊开了，建议边读边点。</p>
+
+        <div class="lab">
+          <div class="lab-h"><span class="lab-tag">interactive</span><span class="lab-t">task taxonomy：26 任务 × 3 family × 打分结构</span></div>
+          <div class="lab-body" data-widget="task-taxonomy"></div>
+          <div class="lab-cap">按 family 浏览全部 26 个任务；点开任务看它的子目标怎么拆、各占多少分。注意 Long-Horizon 任务的子目标往往带先后顺序。</div>
+        </div>
+
+        <h2 id="scoring-mechanism">打分机制：[0,1]、部分分、时序条件</h2>
+        <p>很多 benchmark 的打分是二元的——成了给 1，没成给 0。EBench 的打分要细腻得多，这正是为了支撑「诊断」而非「排名」。一次 episode 的 task score 落在连续区间 <b>[0,1]</b>，由三条规则共同决定：</p>
+        <ul>
+          <li><b>[0,1] 连续</b>：满足整个 goal 给满分；什么都没做成给 0；做了一半，给一个中间值。</li>
+          <li><b>部分分（partial credit）</b>：任务被拆成若干<b>子目标</b>，每个子目标分配一份权重，最终分数是<i>已完成子目标权重之和</i>。这样「开了门但没放东西」与「碰都没碰」会得到不同的分。</li>
+          <li><b>时序条件（temporal）</b>：有些子目标有<b>先后依赖</b>——后置目标只有在前置目标满足后才被评估。你不能跳过「拧松」直接拿「拧紧」的分。</li>
+        </ul>
+        <p>部分分让分数变成<b>连续信号</b>而不是开关，时序条件保证这个信号<b>诚实</b>——它奖励真实进展，而不奖励钻空子。两者合起来，一个 episode 的分数就能告诉你「模型走到了流程的哪一步才崩」，这正是 capability profile 想要的原料。</p>
+
+        <h2 id="examples">两个例子：Microwave 与 Tighten Nut</h2>
+        <p><b>例一 · Microwave（Long-Horizon，部分分）。</b>这个任务要「开微波炉门 → 放进两个蛋挞 → 关门」。它的子目标权重大致是：开门 <b>1/2</b>，两个蛋挞各 <b>1/6</b>，关门 <b>1/6</b>。</p>
+        <div class="math-block">$$\text{score}_{\text{Microwave}} = \tfrac{1}{2}\,[\text{开门}] + \tfrac{1}{6}\,[\text{蛋挞}_1] + \tfrac{1}{6}\,[\text{蛋挞}_2] + \tfrac{1}{6}\,[\text{关门}]$$</div>
+        <p>方括号是 0/1 指示量。注意权重<b>不均匀</b>：开门占了一半，因为它是后续一切的前提——开不了门，后面全免谈。这就把「难度的结构」编码进了分数。一个只会开门的模型拿 0.5，一个开门 + 放进一个蛋挞的拿 0.5 + 1/6 ≈ 0.67，二者的差恰好量化了「多做成了一步」。</p>
+        <p><b>例二 · Tighten Nut（Dexterous &amp; Precise，时序条件）。</b>拧紧螺母这件事天生有顺序：得先把螺母<i>对正、套上</i>，才谈得上<i>拧紧</i>。打分因此带时序门控——「拧紧」这个子目标只有在「对位/套上」已满足时才会被评估。模型若没真正套上就空转手腕，拿不到拧紧的分。这避免了「动作看起来对、但物理上没发生」骗到分数。</p>
+
+        <div class="bridge g103">
+          <div class="c-h"><span class="tag">从 GAMES103 看</span> 子目标判定来自物理状态，不是动作</div>
+          <p>这些子目标的「完成」判定，读的是仿真里<b>物体的物理状态</b>——门的铰链角度、蛋挞与微波炉腔体的接触/包含关系、螺母沿螺纹的旋入深度——而不是机器人发出了什么动作。这正是你在刚体/约束仿真里熟悉的那套状态量。<span class="term">temporal</span> 门控本质上是在物理状态机上加了一条「前置态必须先到达」的边，和你写约束求解时的依赖顺序是同一种思路。</p>
+        </div>
+
+        <h2 id="whats-next">这一节你需要带走的</h2>
+        <p>记住：26 个任务 = Long-Horizon 9 + Pick-and-Place 10 + Dexterous &amp; Precise 7；每次 episode 的 task score ∈ [0,1]，由<b>部分分</b>（子目标权重求和）和<b>时序条件</b>（前置满足才评后续）共同算出。Microwave 用不均匀权重把流程结构编进分数；Tighten Nut 用时序门控防止「假动作」骗分。</p>
+        <p>到此，每个任务<i>内部</i>怎么打分讲清楚了。但 capability profile 还有另一根重要的轴：换了没见过的物体、背景、指令，模型掉了多少分？下一节进入<b>泛化轴</b>——又一段需要分清愿景与现实的内容。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/flow-matching-ode.js"></script>
+  <script src="../../assets/js/widgets/action-chunking.js"></script>
+  <script src="../../assets/js/widgets/eval-flow.js"></script>
+  <script src="../../assets/js/widgets/action-dissector.js"></script>
+  <script src="../../assets/js/widgets/capability-radar.js"></script>
+  <script src="../../assets/js/widgets/task-taxonomy.js"></script>
+  <script src="../../assets/js/widgets/moe-attention.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

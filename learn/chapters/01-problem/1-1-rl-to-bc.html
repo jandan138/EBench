@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>从 RL 到 behavior cloning：生成式策略 · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="1-1">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 1 · Manipulation &amp; VLA · 1-1</div>
+        <h1>从 RL 到 behavior cloning：生成式策略</h1>
+        <p class="lede">你带着 RL 的工具箱走进这本书：policy、value、reward、policy gradient、TD。这一节我们从这套你最熟的语言出发，看清一件事——为什么 manipulation 这个领域，主流方法<i>不是</i>你预期的 online RL，而是 imitation / behavior cloning，以及由此长出的「生成式策略」到底新在哪。</p>
+
+        <h2 id="rl-recap">先把 RL 摆在桌上</h2>
+        <p>RL 的世界你很熟：一个 agent 在 environment 里，policy $\pi(a\mid s)$ 决定在状态 $s$ 下取动作 $a$，环境回一个 reward $r$，目标是最大化期望累积回报 $\mathbb{E}\big[\sum_t \gamma^t r_t\big]$。你有两条主路去优化它：<span class="term">policy gradient</span>（直接对 $\pi$ 求梯度，如 REINFORCE / PPO）和 <span class="term">value-based</span>（学 $Q(s,a)$ 或 $V(s)$，用 <span class="term">TD</span> 误差自举，再 $\arg\max_a Q$ 取动作）。无论哪条路，前提都是：你能<b>大量、廉价、安全</b>地和环境交互，并拿到<b>有意义的 reward 信号</b>。</p>
+
+        <div class="bridge rl">
+          <div class="c-h"><span class="tag">从 RL 看</span> 三个前提，在 manipulation 里全塌了</div>
+          <p>online RL 默认你能随便 rollout、reward 现成、试错没代价。但真实/仿真的灵巧操作里：rollout <b>不廉价</b>（每步要推进一整个 Isaac Sim 物理世界）、reward <b>难定义</b>（「把杯子稳稳放进杯托」这种目标很难写成稠密标量）、试错 <b>不安全也不便宜</b>（真机会撞坏，仿真要烧 GPU 时）。三根支柱一起松动，online RL 的性价比就崩了。</p>
+        </div>
+
+        <h2 id="why-bc">为什么 manipulation 转向 behavior cloning</h2>
+        <p>既然在线试错这么贵，一个更省的思路是：<b>别让机器人自己摸索，直接给它看专家怎么做。</b>这就是 <span class="term">imitation learning</span> 里最直接的一支——<span class="term">behavior cloning</span>（BC）。我们收集一批专家演示 $\{(o_i, a_i)\}$（人类遥操作、或 rule-based 脚本生成的轨迹），然后<b>纯监督学习</b>地拟合一个策略 $\pi_\theta(a\mid o)$，让它在见过的观测上复现专家动作。</p>
+        <p>没有 reward、没有 critic、没有 Bellman 方程、没有环境交互——训练时只有一堆 (观测, 动作) 对和一个回归/似然损失。EBench 的训练数据正是为此而生：<span class="term">EBench-Dataset</span> 的 6,600 条轨迹里，既有 rule-based（GenManip 脚本）生成的 <span class="term">long_horizon</span> / <span class="term">simple_pnp</span>，也有人类 <span class="term">teleop</span> 的轨迹（<a href="../02-sim/2-4-lerobot-dataset.html">2.4</a> 细讲）。</p>
+
+        <div class="callout warn">
+          <div class="c-h">BC 不是免费午餐</div>
+          <p>BC 有个著名的软肋：<span class="term">compounding error</span> / <span class="term">covariate shift</span>——模型只在专家走过的状态上训练，一旦推理时犯一点小错偏离了专家分布，就进入<b>没见过的状态</b>，错误像滚雪球一样累积。这个问题怎么缓解（答案是 <span class="term">action chunking</span>），我们留到 <a href="../05-theory/5-1-action-chunking.html">5.1</a> 专门讲。这里先记住它存在。</p>
+        </div>
+
+        <h2 id="multimodal">关键转折：动作分布是多模态的</h2>
+        <p>现在到了这一节真正的核心。你可能会想：BC 不就是个回归吗，$\pi_\theta(o)\to a$，最小化 $\lVert \pi_\theta(o)-a\rVert^2$ 就完了？问题恰恰出在这里。</p>
+        <p>设想一个场景：桌上一个瓶子，专家演示里，有人从左边绕过去抓、有人从右边抓——<b>两种都对</b>。你的数据里同一个观测 $o$ 对应了两个差异很大的「正确」动作。如果你用均方误差去回归，模型会学到什么？它会学到两个动作的<b>平均</b>——一个直直撞向瓶子、两边都不沾的废动作。这就是 <span class="term-i">mode averaging</span>（模式平均）的灾难。</p>
+        <p>问题的根子是：从观测到动作的映射<b>不是一个函数，而是一个分布</b>——$p(a\mid o)$ 往往是<span class="term">multimodal</span>（多模态）的，一个观测下有多种同样合理的做法。我们需要的策略，必须能<b>表达并采样</b>这个多模态分布，而不是塌缩到它的均值。</p>
+
+        <h2 id="generative-policy">「生成式策略」是什么意思</h2>
+        <p>于是有了这本书反复出现的关键词：<span class="term">generative policy</span>（生成式策略）。它的定义很朴素——<b>策略是一个生成模型</b>，能从条件分布 $p(a\mid o)$ 里<i>采样</i>出动作，而不是输出一个确定的点。给定观测，它可以这次采样出「从左边抓」，下次采样出「从右边抓」，两次都合理，而不会平均成废动作。</p>
+        <p>把它和你脑中的 RL 策略对照一下，差异就清楚了：</p>
+
+        <div class="bridge rl">
+          <div class="c-h"><span class="tag">从 RL 看</span> 它最像 stochastic actor，但训练方式不同</div>
+          <p>生成式策略最接近的 RL 类比是一个 <span class="term">stochastic actor</span>——一个会输出动作<b>分布</b>、可以从中采样的随机策略。但有两点关键不同：(1) 它<b>不靠 policy gradient / TD</b> 训练，而是用模仿（behavior cloning）的去噪 / 似然损失；(2) 它<b>不是 argmax over $Q$</b>——value-based 方法选「Q 值最高的那一个」动作，本质是单峰、确定的；生成式策略要的恰恰相反：保留并采样整个多模态分布。换句话说，没有 critic、没有 Bellman，只有「学会专家动作的分布」。</p>
+        </div>
+
+        <p>那「生成模型」具体用什么？早期 VLA 把动作离散成 token 自回归地吐（RT-2 / OpenVLA），后来 π0 这一路改用 <span class="term">flow matching</span>——一种能在连续高维动作空间上高效采样多模态分布、且推理只需极少步的生成方法（<a href="../01-problem/1-2-what-is-vla.html">1.2</a> 先点名，<a href="../05-theory/5-2-flow-matching.html">5.2</a> 钻数学）。它训练时本质就是 behavior cloning：从 $p(A_t\mid o_t)$ 采样，没有 Q、没有 critic。这正是我们为 Part 5 埋下的伏笔。</p>
+
+        <div class="callout note">
+          <div class="c-h">一句话拎清三个词的关系</div>
+          <p><b>imitation / behavior cloning</b> 是训练范式（学专家，不试错）；<b>multimodal action distribution</b> 是问题性质（同一观测有多种正确做法）；<b>generative policy</b> 是应对方案（用生成模型采样分布，而非回归均值）。三者一环扣一环，构成了现代 VLA 的方法论底色。</p>
+        </div>
+
+        <h2 id="whats-next">这一节你需要带走的</h2>
+        <p>manipulation 主流不用 online RL，是因为 rollout 贵、reward 难、试错危险；转而用 imitation / behavior cloning 从专家演示监督学习。但简单回归会因 multimodal action distribution 而 mode-average 出废动作，所以策略必须是一个能采样分布的 <b>generative policy</b>——它像个 stochastic actor，却用 BC 而非 policy gradient 训练，也不做 argmax over $Q$。</p>
+        <p>下一节，我们给这个生成式策略装上「眼睛和耳朵」：什么是 <b>VLA</b>——为什么要借一个预训练的视觉语言模型当骨干，再让它输出 action。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/flow-matching-ode.js"></script>
+  <script src="../../assets/js/widgets/action-chunking.js"></script>
+  <script src="../../assets/js/widgets/eval-flow.js"></script>
+  <script src="../../assets/js/widgets/action-dissector.js"></script>
+  <script src="../../assets/js/widgets/capability-radar.js"></script>
+  <script src="../../assets/js/widgets/task-taxonomy.js"></script>
+  <script src="../../assets/js/widgets/moe-attention.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>离散 vs 连续、FAST、knowledge insulation · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="5-4">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 5 · VLA 理论 · 5-4</div>
+        <h1>离散 vs 连续、FAST、knowledge insulation</h1>
+        <p class="lede">π0 已经能在实验室里灵巧操作。但「进一个从没见过的家、把厨房收拾干净」是另一个量级的问题——这是 <span class="term">π0.5</span> 要解的 <span class="term">open-world generalization</span>。它逼出三个深刻问题：动作该用离散还是连续表示？高层任务规划和低层控制怎么共处？以及——怎么在学控制的同时<b>不把 VLM 的世界知识冲掉</b>？</p>
+
+        <h2 id="pi05">π0.5：从实验室走向开放世界</h2>
+        <p><span class="term">π0.5</span>（arXiv 2504.16054）建立在 π0 之上，目标是 <span class="term">open-world generalization</span>：机器人要走进一个<b>训练中从未出现过的真实家庭</b>，完成清厨房、铺床、挂毛巾这类多阶段任务。这比固定实验室难得多——物体、布局、光照、指令全是新的。π0.5 的配方有几条主线，本节聚焦其中关于<b>表示</b>与<b>知识保护</b>的部分。</p>
+        <p>支撑泛化的底座是 <span class="term">co-training</span>：把异构数据混在一起训——多本体数据、约 <b>400 小时</b>真实家庭移动操作、实验室数据、<b>高层语义子任务预测</b>、物体检测、以及大量 web 数据。web 数据是世界知识的来源（认得出「洗洁精」「微波炉」是什么、放哪），这也正是后面 knowledge insulation 要拼命保护的东西。</p>
+
+        <h2 id="hierarchical">分层推理：先想「做什么」，再算「怎么动」</h2>
+        <p>开放世界任务往往很长（先收拾台面 → 再洗碗 → 再擦灶台），直接端到端出低层动作很难。π0.5 用<b>分层推理</b>，让<b>同一个模型</b>内部含两条解码路径：</p>
+        <ul>
+          <li><b>高层</b>：用<b>离散自回归</b>解码出一个<b>语义子任务</b>，比如 <span class="term-i">"pick up the plate"</span>——这是文本，正是 VLM 擅长的离散 next-token 生成。</li>
+          <li><b>低层</b>：以这个子任务为条件，用<b>连续 flow matching</b>（5.2 那套）解出一段低层 <span class="term">action chunk</span>，真正驱动关节。</li>
+        </ul>
+        <p>这是一种「<b>说出来再做出来</b>」的结构：先用语言把意图想清楚（借力 web 知识做常识推理），再把意图翻译成连续控制。两条路径共用一个骨干，所以高层的语义理解能直接调制低层的动作生成。</p>
+        <div class="bridge rl">
+          <div class="c-h"><span class="tag">从 RL 看</span> 这是 options / 分层策略的味道</div>
+          <p>分层推理对应你在 RL 里见过的 <b>hierarchical RL / options framework</b>：一个高层策略选择「子目标 / 宏动作」（这里是语义子任务），一个低层策略在子目标条件下产出原始动作。区别在于：π0.5 不用 reward 训这个层级，而是<b>全程模仿</b>——高层子任务标注来自 co-training 数据里的语义标签，低层来自 flow matching。层级的好处一样：缩短低层的有效 horizon、让高层用<b>语义抽象</b>来泛化到没见过的场景。</p>
+        </div>
+
+        <h2 id="fast">两种表示的分工：FAST 离散预训练 vs flow matching 后训练</h2>
+        <p>现在到核心张力：动作到底用<b>离散</b>还是<b>连续</b>表示？π0.5 的回答是——<b>训练用离散、部署用连续，分两阶段</b>。</p>
+        <ul>
+          <li><b>预训练阶段</b>：把连续动作用 <span class="term">FAST action tokenizer</span> 离散化成 token，然后用<b>交叉熵 next-token</b> 监督。这让 VLM 可以<b>用它处理语言的那一整套机制</b>来学控制表示——稳、快、易迁移，动作和文本在同一个离散 token 空间里，知识迁移最顺。</li>
+          <li><b>后训练阶段</b>：切换到 <span class="term">flow matching</span>，做实时连续控制。离散 token 自回归一个一个吐太慢、精度受分箱限制，不适合高频实时；flow matching 一次积出整段、连续精细，适合部署。</li>
+        </ul>
+        <table>
+          <thead><tr><th></th><th>离散（FAST + 交叉熵）</th><th>连续（flow matching）</th></tr></thead>
+          <tbody>
+            <tr><td>擅长</td><td>训练稳定、知识迁移、复用语言机制</td><td>实时、高精度、连续多模态</td></tr>
+            <tr><td>不擅长</td><td>自回归慢、分箱损精度</td><td>从零训随机初始化、易冲击骨干</td></tr>
+            <tr><td>π0.5 用在</td><td>预训练 / 监督 backbone</td><td>后训练 / 实时部署</td></tr>
+          </tbody>
+        </table>
+        <p>一句话记忆：<b>离散适合「学」和「迁移」，连续适合「跑」。</b></p>
+
+        <h2 id="knowledge-insulation">Knowledge insulation：用 stop-gradient 守住 web 知识</h2>
+        <p>这是本节最精妙的一招（arXiv 2505.23705）。问题是这样的：你想给预训练好的 VLM 接一个<b>随机初始化</b>的 action expert，端到端一起训。但实验发现——<b>让那个随机初始化的动作头的梯度直接回流（backprop）到 backbone，会损害训练速度、并破坏 VLM 学到的 web 知识迁移</b>。</p>
+        <div class="bridge g103">
+          <div class="c-h"><span class="tag">从 GAMES103 看</span> 把一团噪声接到精心调好的系统上</div>
+          <p>想象你有一个已经收敛、状态良好的物理系统（预训练 VLM），现在硬接上一个<b>初始全是噪声</b>的新模块（随机 action expert），还让这个噪声模块的「力」直接反向作用回主系统。早期那些巨大、方向混乱的梯度，就像一股乱流冲击稳定结构，把原本调好的权重<b>晃乱</b>了——这正是 web 知识被冲掉、训练变慢的来源。解决思路也很物理：<b>把这股乱流挡在门外</b>。</p>
+        </div>
+        <p><span class="term">Knowledge insulation</span>（知识隔离）就是这道门，由两部分组成：</p>
+        <ul>
+          <li><b>stop-gradient</b>：照常训练 flow-matching action expert，但<b>切断它回流到 backbone 的梯度</b>。action expert 可以<i>读</i> backbone 的表示（前向照常），但它的误差<b>不许</b>反向去改 backbone。backbone 不被随机噪声污染。</li>
+          <li><b>离散 next-token 监督 backbone</b>：那 backbone 靠什么学控制相关的东西？靠<b>离散（FAST）next-token</b> 这条<i>干净、稳定</i>的监督信号去微调——用语言那套机制更新 backbone，既稳又保住知识。</li>
+        </ul>
+        <p>合起来效果是：backbone 由可靠的离散监督温和更新、保住 web 知识；action expert 在隔离层后专心学连续实时控制。<b>web 知识保住了、训练更快了、推理仍然快</b>（部署时还是 flow matching 那 10 步）。</p>
+        <div class="callout note">
+          <div class="c-h">openpi 现状</div>
+          <p>需要留意：开源的 <span class="term">openpi</span> 目前<b>只支持 flow matching head</b>。也就是说，knowledge insulation 论文里那套「离散 FAST 监督 backbone + stop-gradient 隔离连续头」的完整双路训练，并非开箱即用。我们在 <a href="../06-baselines/6-1-openpi.html">6.1</a> 拆 EBench 的 openpi baseline 时，看到的是 flow-matching 这一路。</p>
+        </div>
+
+        <h2 id="results">结果：进 104 个全新场景</h2>
+        <p>这套配方换来的泛化能力很具体。π0.5 能走进<b>全新的家</b>，清理厨房、卧室，铺床，把毛巾挂上挂钩——这些都是多阶段、长流程任务，单次执行常达 <b>10–15 分钟</b>。论文报告：训练场景数量从约 <b>3 个</b>扩展到 <b>104 个</b>时，泛化表现持续改善，且大约 <b>~100 个</b>场景后趋于饱和——也就是说，open-world 泛化对场景多样性的需求是有限而可达的，不是无底洞。</p>
+
+        <h2 id="whats-next">这一节你需要带走的 · 也是整个 Part 5 的收束</h2>
+        <p>本节四点：(1) <b>π0.5</b> 在 π0 上加 co-training + 分层推理，冲 open-world；(2) <b>分层</b> = 离散自回归出高层语义子任务 + flow matching 出低层 chunk，同模型双路径；(3) <b>FAST</b> 让预训练把动作离散化、交叉熵 next-token，离散擅长学/迁移、连续擅长实时；(4) <b>knowledge insulation</b> = stop-gradient 切断随机 action expert 对 backbone 的梯度污染 + 用离散监督温和更新 backbone，保住 web 知识、训得更快。</p>
+        <p>至此，VLA 的「发动机」从 action chunking → flow matching → action expert → 离散/连续与知识隔离，已经完整拆开。你现在手里有了读懂任何一个现代 VLA 的全部理论零件。<b>下一 Part，我们把理论合上、打开真实 baseline 的代码</b>——看 π0/π0.5（openpi）、X-VLA、InternVLA-A1 是怎么把这些概念落成 EBench 上能跑的 client，以及它们各自做了哪些务实的取舍。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/flow-matching-ode.js"></script>
+  <script src="../../assets/js/widgets/action-chunking.js"></script>
+  <script src="../../assets/js/widgets/eval-flow.js"></script>
+  <script src="../../assets/js/widgets/action-dissector.js"></script>
+  <script src="../../assets/js/widgets/capability-radar.js"></script>
+  <script src="../../assets/js/widgets/task-taxonomy.js"></script>
+  <script src="../../assets/js/widgets/moe-attention.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

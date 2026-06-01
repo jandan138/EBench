@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>什么是 VLA：VLM backbone + action · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="1-2">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 1 · Manipulation &amp; VLA · 1-2</div>
+        <h1>什么是 VLA：VLM backbone + action</h1>
+        <p class="lede">上一节我们确立了：操作策略要是一个能采样多模态分布的生成式策略。但策略得先<i>看懂</i>世界、<i>听懂</i>指令才谈得上动作。这一节回答 VLA 这个缩写到底是什么——以及它为什么要站在一个预训练 <span class="term">VLM</span> 的肩膀上。</p>
+
+        <h2 id="what-is-vla">VLA = VLM 骨干 + 输出 action 的能力</h2>
+        <p><span class="term">VLA</span> 是 <span class="term-i">Vision-Language-Action</span> 的缩写。它的配方一句话就能说清：<b>拿一个预训练好的 <span class="term">VLM</span>（vision-language model）当骨干，再给它加上输出 <span class="term">robot action</span> 的能力。</b>视觉与语言这两个模态，VLM 已经处理得很好了；VLA 做的，是在这个强大的多模态理解之上，再接出一条通往「动作」的路。</p>
+        <p>所以一个 VLA 同时吃三种东西、吐一种东西：吃图像（Vision）、吃语言指令（Language），最后吐动作（Action）。前两个字母是<i>继承</i>来的家底，第三个字母是<i>新长</i>出来的能力。</p>
+
+        <h2 id="why-vlm">为什么非要借一个 VLM</h2>
+        <p>你可能会问：为什么不从零训练一个专用的操作网络，非要扛着一个几十亿参数的 VLM？答案是<b>VLM 自带的语义、常识与泛化</b>。一个在海量图文上预训练过的 VLM，已经知道「apple」长什么样、「左边」是哪边、「把它放进碗里」是什么意思——这些<b>语言与视觉的世界知识</b>，如果靠那点机器人演示数据从头学，根本学不出来。</p>
+
+        <div class="bridge rl">
+          <div class="c-h"><span class="tag">从 RL 看</span> 这是大规模 pretraining 当 prior</div>
+          <p>用 RL 的话说，VLM 骨干给了策略一个极强的 <span class="term">prior</span> / 表示初始化——相当于先在一个巨大的、与任务无关的语料上做了表示学习，再用少量演示「微调」出动作。这让样本效率和<b>泛化</b>大幅提升：换一句没见过的指令、换一个没见过的物体，VLM 的语义先验能帮策略「推断」该怎么做，而不是只会复读训练集里的具体轨迹。</p>
+        </div>
+
+        <h2 id="paligemma">一个具体骨干：PaliGemma</h2>
+        <p>给个具体的例子。π0 这一路 VLA 用的骨干是 <span class="term">PaliGemma</span>——一个 <b>3B</b> 的 VLM。它由两块拼成：一个 <span class="term">SigLIP</span> 视觉编码器（≈400M，负责把图像编码成视觉 token）加一个 <span class="term">Gemma</span> 语言模型（≈2.6B，负责融合视觉与语言、做推理）。</p>
+        <div class="callout note">
+          <div class="c-h">数字的口径</div>
+          <p>π0 paper 本身只说骨干是「3B 的 PaliGemma」。SigLIP≈400M、Gemma≈2.6B 是<b>背景知识</b>（PaliGemma 的公开构成），帮你理解这 3B 是怎么分的，并非 paper 给出的精确切分。本书把这类背景知识标出来，免得你误以为是论文里的硬指标。</p>
+        </div>
+
+        <h2 id="two-routes">两条「长出 action」的路线</h2>
+        <p>VLM 骨干有了，怎么从它身上接出动作？这里 VLA 分出两条历史路线，理解它们的差别，是看懂整个领域的关键。</p>
+
+        <h3 id="route-discrete">路线一：离散 token + 自回归</h3>
+        <p>早期 VLA（<span class="term">RT-2</span> / <span class="term">OpenVLA</span>）的做法非常「语言模型」：把连续的动作<b>离散化成 token</b>，然后像生成文字一样，一个一个 token 自回归地吐出来。好处是几乎不用改 VLM 的架构——动作就是另一种「语言」，复用整套 next-token 预测。但代价是：自回归逐 token 解码<b>慢</b>，离散化也损失精度，对高频、灵巧的连续控制并不友好。</p>
+
+        <h3 id="route-flow">路线二：flow matching</h3>
+        <p>π0 这一路主张：离散 token 自回归<b>不适合</b>高频灵巧控制，转而用 <span class="term">flow matching</span> 直接在连续动作空间上生成。这正好接上 <a href="1-1-rl-to-bc.html">1.1</a> 说的生成式策略——flow matching 能表达多模态连续动作分布，且因为走「近直线」的概率路径，推理只需极少步积分，适合实时控制。</p>
+        <div class="callout">
+          <div class="c-h">点到为止</div>
+          <p>flow matching 的数学（概率路径、向量场、forward Euler 解 ODE、rectified flow 为何能少步）是 Part 5 的重头戏，<a href="../05-theory/5-2-flow-matching.html">5.2</a> 会带你一步步推。这里你只要知道它是「连续、生成、可少步采样」的路线，和离散自回归并列即可。EBench 的几个 baseline（π0/π0.5/X-VLA/InternVLA-A1）都属于这一连续生成路线。</p>
+        </div>
+
+        <h2 id="io-shape">输入输出长什么形状</h2>
+        <p>最后把一个 VLA 在 EBench 里的 I/O 形态落地。输入是<b>多相机图像 + 语言指令 + proprioception（本体感知，如关节角）</b>，输出是一段 <span class="term">action chunk</span>（一次预测未来若干步动作，而非单步——为什么这样做见 <a href="../05-theory/5-1-action-chunking.html">5.1</a>）。具体到 EBench 本体 lift2：</p>
+        <table>
+          <thead><tr><th>角色</th><th>内容</th><th>来自</th></tr></thead>
+          <tbody>
+            <tr><td><b>Vision</b></td><td>多相机 RGB（lift2 有 4 个 480×640 视角）</td><td><code>video.{cam}_view</code></td></tr>
+            <tr><td><b>Language</b></td><td>自然语言任务指令</td><td><code>instruction</code></td></tr>
+            <tr><td><b>Proprio</b></td><td>关节角 / 夹爪 / 底盘 / ee_pose 等本体状态</td><td><code>state.*</code></td></tr>
+            <tr><td><b>Action</b></td><td>一段未来动作 chunk（关节 / 夹爪 / 底盘运动）</td><td>模型输出</td></tr>
+          </tbody>
+        </table>
+        <p>这套观测/动作的精确字段、维度与契约，是 Part 4 的内容；本体 lift2 的细节就在下一节。</p>
+
+        <h2 id="whats-next">这一节你需要带走的</h2>
+        <p>VLA = 预训练 VLM 骨干 + 输出 action 的能力；借 VLM 是为了白拿它的语义、常识与泛化（一个强 prior）。π0 用 PaliGemma（3B = SigLIP + Gemma，后者为背景）。从骨干长出动作有两条路：早期 RT-2/OpenVLA 的离散 token 自回归，和 π0 这一路的 flow matching（连续、生成、可少步，细节留 Part 5）。I/O 形态：多相机图 + 语言 + proprio → action chunk。</p>
+        <p>下一节我们把镜头拉近到承载这一切的<b>身体</b>：EBench 的本体 lift2——双臂、移动底盘、4 个相机，以及它的状态到底由哪些数字组成。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/flow-matching-ode.js"></script>
+  <script src="../../assets/js/widgets/action-chunking.js"></script>
+  <script src="../../assets/js/widgets/eval-flow.js"></script>
+  <script src="../../assets/js/widgets/action-dissector.js"></script>
+  <script src="../../assets/js/widgets/capability-radar.js"></script>
+  <script src="../../assets/js/widgets/task-taxonomy.js"></script>
+  <script src="../../assets/js/widgets/moe-attention.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

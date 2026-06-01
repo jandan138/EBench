@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Action 向量解剖：16/19-D 与 base_motion · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="4-3">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 4 · Client–Server · 4-3</div>
+        <h1>Action 向量解剖：16/19-D 与 base_motion</h1>
+        <p class="lede">obs 是世界给模型看的，action 是模型还给世界的。但「还回去」这一步藏着最多坑：双臂关节怎么排序、夹爪插在哪、移动底盘为什么单独拎出来、相对还是绝对。这一节把 server 契约里的 action 字典逐位解剖，再看模型那侧吐出来的一坨 19-D raw 向量是怎么被重排进这个契约的。</p>
+
+        <h2 id="contract">server 契约里的 action 字典</h2>
+        <p>step 收下的 action 不是一个裸数组，而是一个<b>按 worker_id 寻址的字典</b>，每个 worker 配一组结构化字段。完整长这样：</p>
+
+        <div class="code" data-lang="python"><div class="code-h"><span class="fn">step(action) 期望的 action 字典</span><button class="cp">复制</button></div><pre><code>{
+    "0": {
+        "action":       (16,),   # 6 左臂关节 + 2 左夹爪 + 6 右臂关节 + 2 右夹爪
+        "base_motion":  (3,),    # 底盘增量 dx, dy, dyaw
+        "control_type": "joint_position",
+        "is_rel":       False,   # 臂为相对量则 True
+        "base_is_rel":  True,    # 底盘几乎总是相对（增量）
+    }
+}</code></pre></div>
+
+        <p>逐字段读：</p>
+        <ul>
+          <li><span class="term">action</span> (16)——双臂的指令，<b>顺序是 6 左臂关节 → 2 左夹爪 → 6 右臂关节 → 2 右夹爪</b>。注意夹爪是<i>交错</i>插在两臂之间的，不是「12 关节在前、4 夹爪在后」。这个顺序是契约硬性规定，排错了机器人就乱动。</li>
+          <li><span class="term">base_motion</span> (3)——移动底盘的运动指令 <code>dx, dy, dyaw</code>。它被<b>单独拎出来</b>，不混进那 16 维里。</li>
+          <li><span class="term">control_type</span>——控制空间，<code>"joint_position"</code>（关节位置控制）是默认，也可切 <code>"ee_pose"</code>（末端位姿控制，见下）。</li>
+          <li><span class="term">is_rel</span>——臂的 action 是绝对目标还是相对增量。<code>False</code> 表示绝对（直接给目标关节角）；模型若输出 delta 则置 <code>True</code>。</li>
+          <li><span class="term">base_is_rel</span>——底盘是相对还是绝对。底盘几乎总是<code>True</code>（增量），因为「往前挪 dx」比「移动到世界系某绝对坐标」对策略更自然。</li>
+        </ul>
+
+        <div class="callout note">
+          <div class="c-h">为什么 base 要从 16 维里拆出来</div>
+          <p>双臂关节和移动底盘是<b>语义截然不同的两套自由度</b>：关节通常给绝对目标角、单位是弧度、动力学是机械臂的；底盘是 SE(2) 平面运动、几乎总以增量表达、动力学是轮式底盘的。把它们硬拼成一个向量，会让 <code>is_rel</code> 这种「相对/绝对」语义没法分别设定。拆成 <code>action</code> + <code>base_motion</code>，并配独立的 <code>is_rel</code> / <code>base_is_rel</code>，正是为了让两套自由度各自选最自然的表达——这也是 lift2「mobile manipulation」本体在接口层的直接体现。</p>
+        </div>
+
+        <h2 id="raw-19d">模型的 19-D raw action 如何重排进契约</h2>
+        <p>这里要解开一个最容易混的点：你常听到「模型输出 19 维 action」，而契约里却是「16 + 3」。<b>两个数字说的是同一件事</b>：16（双臂）+ 3（底盘）= 19。模型内部把整套自由度当成一个 <span class="term-i">19-D raw action</span> 向量一次性预测出来，client 再把它拆开、重排，塞进上面那个结构化字典。</p>
+        <p>各 baseline 的重排细节略有不同（Part 6 会逐个细看），但模式一致——拿模型吐出的 19 维 chunk，前段对应双臂、后 3 维对应底盘，按契约要求的顺序搬运：</p>
+
+        <div class="code" data-lang="python"><div class="code-h"><span class="fn">概念示意：19-D raw → 契约字典（顺序为关键）</span><button class="cp">复制</button></div><pre><code># raw 是模型直接吐的一帧 (19,)
+arm   = pack_arm(raw)          # 重排成 [j0..j5(左), gripL, j6..j11(右), gripR] -&gt; (16,)
+base  = raw[16:19]             # 取末 3 维做底盘 -&gt; (3,)
+# 多数 baseline：base_motion = base - last_base（化成增量），base_is_rel=True
+action = {
+    "0": {
+        "action": arm, "base_motion": base_motion,
+        "control_type": "joint_position",
+        "is_rel": False, "base_is_rel": True,
+    }
+}</code></pre></div>
+
+        <p>几个真实 baseline 的具体做法（FACTS 核对过的细节，供对照）：</p>
+        <ul>
+          <li><b>openpi（π0/π0.5）</b>：<code>prep_output</code> 重排 joint 顺序，<code>base_motion = action[16:19] - last</code>（即化成相对增量），<code>base_is_rel=True</code>；generalist 输出取 <code>action[:, :19]</code>，fixedbase 配置只取 16。</li>
+          <li><b>X-VLA</b>：把模型输出 chunk 反缩放还原后，按 <code>[j0-5, gripL, j6-11, gripR]</code> 的顺序 <code>_pack</code>，且<b>独一份地</b>用 <code>base_is_rel=False</code>（绝对底盘）。</li>
+          <li><b>InternVLA-A1</b>：<code>_pack_action_fields</code> 重排成 <code>[j0-5, gripL, j6-11, gripR]</code>；底盘 <code>target = chunk_start_base + predicted_rel_base</code>，<code>base_is_rel=True</code>。</li>
+        </ul>
+        <p>这三家排关节顺序、处理底盘、缩放约定都不一样，但<b>它们最终都收敛到同一个 16+3 契约字典</b>——这正是 client–server 边界的价值：server 只认契约，不认模型。下面这个部件让你把 19-D 向量一位一位点亮，并切换看不同 baseline 的映射差异。</p>
+
+        <div class="lab">
+          <div class="lab-h"><span class="lab-tag">interactive</span><span class="lab-t">action-dissector：19-D action 逐位解剖与 baseline 映射</span></div>
+          <div class="lab-body" data-widget="action-dissector"></div>
+          <div class="lab-cap">逐位高亮 19 维 raw action，看它如何切成 16(双臂) + 3(底盘)；切换 baseline，对比各家关节重排顺序与底盘相对/绝对约定。</div>
+        </div>
+
+        <div class="bridge g103">
+          <div class="c-h"><span class="tag">从 GAMES103 看</span> 关节位置控制 = 给积分器设目标，而非直接给力</div>
+          <p><code>control_type="joint_position"</code> 意味着你交的是<b>目标关节角</b>，仿真内部的控制器（PD 之类）再把目标变成力矩、由 PhysX 积分推进。这正好接上你在 GAMES103 里的「约束/目标驱动 → 数值积分 → 更新状态」那条链：action 设的是约束目标，server 负责把它积分成真实运动。底盘的 <code>base_motion</code> 增量则像每步给 SE(2) 位姿加一个小位移，由仿真消化成轮式运动。</p>
+        </div>
+
+        <h2 id="ee-pose">替代控制模式：ee_pose</h2>
+        <p>关节位置不是唯一的对话语言。把 <code>control_type</code> 切成 <span class="term">"ee_pose"</span>，你就改用<b>末端执行器位姿</b>说话：每臂提供一组 <code>[pos, quat, gripper]</code>——目标位置、目标姿态四元数，外加夹爪开合。这和 obs 里的 <code>state.ee_pose</code>（[[pos,quat]×2]=14）是同一个坐标空间，闭环很自然。</p>
+        <p>什么时候用哪个？关节位置控制更贴近策略直接输出的量、在仿真里稳定可预测，是多数 baseline 的默认；ee_pose 让你在任务空间（笛卡尔）里描述意图——「把手移到这个位姿」——对需要精细对位的 <span class="term">dexterous &amp; precise</span> 任务（插销入孔、套齿轮）有时更直观，代价是 server 端要解 IK 把任务空间目标变回关节空间（cuRobo 那套 GPU IK，见 <a href="../02-sim/2-2-curobo.html">2.2</a>）。两种模式走的是同一个 step 协议，只是字段语义随 <code>control_type</code> 切换。</p>
+
+        <h2 id="takeaway">这一节你需要带走的</h2>
+        <p>记住三件事：(1) action 契约是 <code>{"action"(16) + "base_motion"(3)}</code>，双臂那 16 维的顺序是 <b>6 左关节 + 2 左夹 + 6 右关节 + 2 右夹</b>（夹爪交错插入），底盘单拎出来；(2) 模型吐的 19-D raw = 16 双臂 + 3 底盘，client 负责重排进契约，各 baseline 的关节顺序与底盘相对/绝对约定各不相同，但都收敛到同一契约；(3) <code>is_rel</code>/<code>base_is_rel</code> 控制相对还是绝对，<code>control_type</code> 可切 <code>joint_position</code> 或 <code>ee_pose</code>。</p>
+        <p>下一节，我们处理一个一直被推迟的问题：每个 step 只发一帧 action，还是一口气发<b>一整段</b>？这就引出 chunk vs step、receding horizon，以及多 worker 并行。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/flow-matching-ode.js"></script>
+  <script src="../../assets/js/widgets/action-chunking.js"></script>
+  <script src="../../assets/js/widgets/eval-flow.js"></script>
+  <script src="../../assets/js/widgets/action-dissector.js"></script>
+  <script src="../../assets/js/widgets/capability-radar.js"></script>
+  <script src="../../assets/js/widgets/task-taxonomy.js"></script>
+  <script src="../../assets/js/widgets/moe-attention.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

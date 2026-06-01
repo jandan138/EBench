@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EvalClient 契约：reset/step/close 与 obs · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="4-2">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 4 · Client–Server · 4-2</div>
+        <h1>EvalClient 契约：reset/step/close 与 obs</h1>
+        <p class="lede">上一节我们说「所有聪明都在 client 一侧」。这一节就盯住 client 的入口对象——<span class="term">EvalClient</span>。它出奇地小：只有三个动作 <span class="term">reset</span> / <span class="term">step</span> / <span class="term">close</span>，以及一个它递给你的 observation 字典。把这两样东西吃透，你就掌握了接入任何模型的全部协议。</p>
+
+        <h2 id="three-actions">三个动作撑起整条循环</h2>
+        <p><span class="term">EvalClient</span> 把 <a href="4-1-client-server.html">4.1</a> 那条 reset→obs→infer→step→done 循环包成了三个方法。先看完整骨架——这就是接入任何模型时你照抄的那段：</p>
+
+        <div class="code" data-lang="python"><div class="code-h"><span class="fn">EvalClient 评测主循环</span><button class="cp">复制</button></div><pre><code>from genmanip_client.eval_client import EvalClient
+
+client = EvalClient(base_url="http://127.0.0.1:8087", worker_ids=["0"], run_id="my_eval")
+obs = client.reset()
+eval_finished = False
+while not eval_finished:
+    if obs[worker_ids]["obs"]["reset"]:
+        model.reset()
+    action = model.get_action(obs)
+    obs, eval_finished = client.step(action)
+client.close()</code></pre></div>
+
+        <p>三个动作各司其职：</p>
+        <ul>
+          <li><span class="term">reset()</span>——向 server 要第一帧 observation，开启评测。它返回的 <code>obs</code> 就是循环的种子。</li>
+          <li><span class="term">step(action)</span>——把你算出的 action 发给 server，server 在仿真里执行、推进、判分，然后把<b>下一帧 obs</b> 和一个 <code>eval_finished</code> 布尔一起还给你。这是循环的心脏，每轮跳一次。</li>
+          <li><span class="term">close()</span>——所有 episode 跑完（<code>eval_finished</code> 为真）后收尾，释放连接。</li>
+        </ul>
+        <p>注意循环条件用的是 <code>eval_finished</code>——它标志的是<b>整段评测（这个 worker 分到的所有 episode）</b>是否结束，而不是单个 episode 结束。server 会在内部把一个 episode 跑完、自动切到下一个 episode，并通过下面要讲的 <code>reset</code> 标志告诉 client「新 episode 开始了」。client 不需要自己数 episode 边界。</p>
+
+        <div class="bridge rl">
+          <div class="c-h"><span class="tag">从 RL 看</span> 和 Gym 几乎同构，但 done 的语义抬高了一层</div>
+          <p>对照 Gym：<code>reset()</code>↔<code>env.reset()</code>，<code>step(action)</code>↔<code>env.step(action)</code>。区别在 done：Gym 的 <code>done</code> 标志<i>单个 episode</i> 终止，而 EvalClient 的 <code>eval_finished</code> 标志<i>整段评测</i>终止；episode 内部的边界改由 obs 里的 <code>reset</code> 字段传达。这样设计是因为 server 要替你把一长串 episode 串起来连续跑，client 只关心「我还要不要继续 infer」。</p>
+        </div>
+
+        <h2 id="reset-flag">reset 标志：清空你的 recurrent 状态</h2>
+        <p>循环开头那行 <code>if obs[worker_ids]["obs"]["reset"]: model.reset()</code> 是<b>极易被忽略却必须写对</b>的一行。observation 里有个布尔字段 <code>reset</code>：它在每个 episode 的<b>首步为 True</b>，其余步为 False。它是 server 向 client 发出的「新 episode 开始，请把上一段的记忆全部清零」信号。</p>
+        <p>为什么重要？很多 VLA 推理是<b>有状态</b>的：</p>
+        <ul>
+          <li>做 action chunking 的模型（见 <a href="4-4-chunk-step.html">4.4</a> 与 <a href="../05-theory/5-1-action-chunking.html">5.1</a>）会缓存一整段未到期的 action chunk；</li>
+          <li>InternVLA-A1 维护一个 <span class="term">action queue</span>（deque），空了才重新规划；还会用 <span class="term">temporal image pair</span>（[past, current] 两帧）做推理，里面藏着上一帧的历史；</li>
+          <li>任何带 KV cache 或历史帧缓存的策略，都把「上一个 episode 的轨迹」记在了内部。</li>
+        </ul>
+        <p>如果新 episode 开始时不清空这些，上一段任务的残留动作和历史会污染新任务——机器人可能一开局就执行属于上一局的动作。所以看到 <code>reset==True</code>，就调你模型自己的 <code>model.reset()</code>，把 queue、cache、history 一律清空。</p>
+
+        <div class="callout warn">
+          <div class="c-h">最常见的接入 bug</div>
+          <p>忘记响应 <code>reset</code> 标志，是接入有状态模型时最隐蔽的错误：单 episode 看着正常，连续评测时分数莫名其妙地塌。务必在 episode 首步清空一切跨步状态。</p>
+        </div>
+
+        <h2 id="obs-schema">observation schema：逐字段拆开</h2>
+        <p>obs 是个嵌套字典，按 worker 寻址：顶层 key 是 <code>worker_id</code>（字符串，如 <code>"0"</code>），下一层的 <code>"obs"</code> 才是这一帧的真正内容。所以你总是这样取：<code>obs["0"]["obs"]["state.joints"]</code>。那层 <code>"obs"</code> 字典的字段如下：</p>
+
+        <div class="code" data-lang="python"><div class="code-h"><span class="fn">obs["&lt;worker_id&gt;"]["obs"] 的字段</span><button class="cp">复制</button></div><pre><code>{
+    "instruction":      str,                  # 本 episode 的自然语言指令
+    "state.joints":     (12,),                # 双臂关节角：左 6 + 右 6
+    "state.gripper":    (4,),                  # 夹爪状态（左 2 + 右 2）
+    "state.base":       (3,),                  # 底盘位姿 x, y, theta
+    "state.ee_pose":    [[pos, quat], [pos, quat]],   # 双臂末端位姿 (=14)
+    "video.top_view":   (480, 640, 3) uint8,  # 还有 left / right / overlook 共 4 路
+    "timestep":         int,                  # 本 episode 内的步计数
+    "reset":            bool,                  # 仅 episode 首步为 True
+}</code></pre></div>
+
+        <p>逐字段读一遍：</p>
+        <ul>
+          <li><span class="term">instruction</span>——这一局要做什么的自然语言（如 “put the apple in the fruit bowl”）。它是 VLA 里的「L」，会被 tokenize 进 VLM。同一任务在数据集里常有多套释义（<code>meta/tasks.jsonl</code>），训练时见过多种说法，泛化轴里的 <span class="term">Instruction</span> 扰动正是冲它来的（见 <a href="../03-methodology/3-4-generalization.html">3.4</a>）。</li>
+          <li><span class="term">state.joints</span> (12)——双臂的本体感觉，左臂 6 关节 + 右臂 6 关节。这是 VLA 里的 proprioception <code>q_t</code>，会和图像、语言一起作为条件喂给策略。</li>
+          <li><span class="term">state.gripper</span> (4)——两只夹爪的开合状态。</li>
+          <li><span class="term">state.base</span> (3)——移动底盘在世界系里的 <code>x, y, theta</code>。这是 lift2 「mobile」那一维的来源；纯桌面 baseline 会把它当背景。</li>
+          <li><span class="term">state.ee_pose</span>——双臂末端执行器位姿，每臂一组 <code>[pos(3), quat(4)]</code>，两臂合起来 14 维。当你用 <code>ee_pose</code> 控制模式时（见 <a href="4-3-action-vector.html">4.3</a>），这就是你要对话的坐标空间。</li>
+          <li><span class="term">video.{cam}_view</span>——4 路 <code>480×640×3</code> 的 uint8 RGB：<code>top</code> / <code>left</code> / <code>right</code> / <code>overlook</code>（录制 15 fps）。这是 VLA 里的「V」。注意各 baseline 只挑自己要的视角喂模型（如 head / hand_left / hand_right 的映射），并不是 4 路全用。</li>
+          <li><span class="term">timestep</span> (int)——episode 内步数，常用来做日志或触发周期性逻辑。</li>
+          <li><span class="term">reset</span> (bool)——上一节讲过的 episode 首步信号。</li>
+        </ul>
+
+        <div class="callout note">
+          <div class="c-h">这正好是 VLA 的输入三元组</div>
+          <p>把 obs 重新归类，你会看到它恰好是 VLA 策略 $\pi(A_t \mid o_t)$ 的条件 $o_t$：<b>视觉</b>（4 路相机）+ <b>语言</b>（instruction）+ <b>本体状态</b>（joints / gripper / base / ee_pose）。Part 5 讲 flow matching 时反复出现的观测前缀 $o_t=[I^1..I^n, \ell_t, q_t]$，落到 EBench 这里就是这个字典。obs 是「世界给模型看的」，action（下一节）是「模型还给世界的」。</p>
+        </div>
+
+        <h2 id="worker-addressing">worker_id 寻址：为并行留的接口</h2>
+        <p>为什么 obs 要先按 <code>worker_id</code> 套一层？因为 EBench 天生为<b>并行评测</b>设计。一个 <code>EvalClient</code> 在构造时就拿一个 <code>worker_ids=["0"]</code> 列表；不同的推理进程认领不同的 <code>worker_id</code>，各自连同一个（或远端）server 的不同评测分片。obs 用 worker_id 当顶层 key，就是为了让一个 client 能寻址自己负责的那个（或那几个）worker 的观测。</p>
+        <p>单机调试时你通常只用 <code>"0"</code> 一个 worker，循环里直接 <code>obs["0"]["obs"]</code> 即可。但这层寻址在你要开多进程、或上线 challenge 跑 16 并发时就派上用场了——并行的机制和上限我们留到 <a href="4-4-chunk-step.html">4.4</a> 和 <a href="4-5-gmp-cli.html">4.5</a> 详谈。</p>
+
+        <h2 id="takeaway">这一节你需要带走的</h2>
+        <p>EvalClient 的契约小到可以背下来：<b>reset 拿首帧、step 收发一来一回并报告整段是否结束、close 收尾</b>；observation 是一个 <code>obs[worker_id]["obs"]</code> 的嵌套字典，装着视觉 + 语言 + 本体状态，外加一个 episode 首步置 True 的 <code>reset</code> 标志——看到它就清空你模型的所有跨步记忆。这套协议对所有 baseline 完全一致，你自己的模型也照这个壳接入（Part 7 会实战一遍）。</p>
+        <p>下一节，我们把循环里 client 还回去的那一半——<span class="term">action</span> 向量——彻底解剖：16 维还是 19 维、关节顺序怎么排、<code>base_motion</code> 是什么、相对还是绝对。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/flow-matching-ode.js"></script>
+  <script src="../../assets/js/widgets/action-chunking.js"></script>
+  <script src="../../assets/js/widgets/eval-flow.js"></script>
+  <script src="../../assets/js/widgets/action-dissector.js"></script>
+  <script src="../../assets/js/widgets/capability-radar.js"></script>
+  <script src="../../assets/js/widgets/task-taxonomy.js"></script>
+  <script src="../../assets/js/widgets/moe-attention.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

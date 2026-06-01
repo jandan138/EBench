@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>术语表 Glossary · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="a-1">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Appendix · a-1</div>
+        <h1>术语表 Glossary</h1>
+        <p class="lede">全书出现的英文术语集中在这里，每条一句话。按主题分组，方便边读正文边回查。想看完整定义与推导，点最右列的章节链接回到正文。</p>
+
+        <h2 id="g-vla">VLA 模型与架构</h2>
+        <table>
+          <thead><tr><th>术语</th><th>英文全称</th><th>一句话解释</th></tr></thead>
+          <tbody>
+            <tr><td>VLA</td><td>Vision-Language-Action model</td><td>拿预训练 VLM 骨干，加上输出机器人 action 的能力的模型（<a href="../01-problem/1-2-what-is-vla.html">1.2</a>）。</td></tr>
+            <tr><td>VLM</td><td>Vision-Language Model</td><td>同时吃图像和文本的多模态模型，作 VLA 的骨干。</td></tr>
+            <tr><td>PaliGemma</td><td>—</td><td>π0 用的 3B 开放 VLM 骨干（SigLIP 视觉 + Gemma 语言为背景，paper 只说 3B）。</td></tr>
+            <tr><td>action chunking</td><td>—</td><td>一次预测 H 个未来动作而非每步一个，源自 ACT（<a href="../05-theory/5-1-action-chunking.html">5.1</a>）。</td></tr>
+            <tr><td>action expert</td><td>—</td><td>专门处理 state/action token 的一组独立权重（≈300M），与 image/text 权重共享一次 attention（<a href="../05-theory/5-3-action-expert.html">5.3</a>）。</td></tr>
+            <tr><td>action horizon</td><td>—</td><td>一个 chunk 里预测的动作步数 H（π0 H=50）。</td></tr>
+            <tr><td>receding horizon</td><td>—</td><td>开环执行 chunk 的前几步后再 replan，而非执行整段（<a href="../05-theory/5-1-action-chunking.html">5.1</a>）。</td></tr>
+            <tr><td>Mixture-of-Transformers</td><td>MoT</td><td>多个专家共享一次 unified self-attention 的结构，InternVLA-A1 用它统一 understanding/generation/action（<a href="../06-baselines/6-3-internvla-a1.html">6.3</a>）。</td></tr>
+            <tr><td>visual foresight</td><td>—</td><td>generation 专家预测未来视觉状态、当作世界模型"想象"的能力（<a href="../06-baselines/6-3-internvla-a1.html">6.3</a>）。</td></tr>
+            <tr><td>soft prompt</td><td>—</td><td>每个数据源/本体一套可学习 embedding，让共享骨干吸收异构性，X-VLA 的核心机制（<a href="../06-baselines/6-2-xvla.html">6.2</a>）。</td></tr>
+            <tr><td>domain_id</td><td>—</td><td>X-VLA 推理时选用哪套 soft-prompt 的索引（一般训练默认 0）。</td></tr>
+          </tbody>
+        </table>
+
+        <h2 id="g-train">训练与生成式策略</h2>
+        <table>
+          <thead><tr><th>术语</th><th>英文全称</th><th>一句话解释</th></tr></thead>
+          <tbody>
+            <tr><td>flow matching</td><td>—</td><td>训练一个向量场把噪声推成动作的生成式策略训练法，π0 用条件 flow matching（<a href="../05-theory/5-2-flow-matching.html">5.2</a>）。</td></tr>
+            <tr><td>rectified flow</td><td>—</td><td>线性高斯（OT）概率路径下的 flow matching，路径近直线、推理可极少步积分（π0 10 步）。</td></tr>
+            <tr><td>compounding error</td><td>—</td><td>单步误差把机器人推到没见过的状态、误差滚雪球，action chunking 要对抗的问题（<a href="../05-theory/5-1-action-chunking.html">5.1</a>）。</td></tr>
+            <tr><td>covariate shift</td><td>—</td><td>策略遇到的状态分布偏离训练分布；compounding error 的根因。</td></tr>
+            <tr><td>knowledge insulation</td><td>—</td><td>训 action expert 时停止其梯度回流 backbone（stop-gradient），保住 VLM 的 web 知识、加快训练（arXiv 2505.23705，<a href="../05-theory/5-4-discrete-continuous.html">5.4</a>）。</td></tr>
+            <tr><td>FAST tokenizer</td><td>FAST action tokenizer</td><td>把连续动作离散化的 tokenizer，π0.5 预训练阶段用它做交叉熵 next-token（<a href="../05-theory/5-4-discrete-continuous.html">5.4</a>）。</td></tr>
+          </tbody>
+        </table>
+
+        <h2 id="g-sim">仿真栈</h2>
+        <table>
+          <thead><tr><th>术语</th><th>英文全称</th><th>一句话解释</th></tr></thead>
+          <tbody>
+            <tr><td>Isaac Sim</td><td>NVIDIA Isaac Sim</td><td>基于 Omniverse 的机器人仿真应用，EBench server 的物理引擎（<a href="../02-sim/2-1-isaac-sim.html">2.1</a>）。</td></tr>
+            <tr><td>USD</td><td>Universal Scene Description</td><td>统一场景描述格式，资产交换与场景表示的载体。</td></tr>
+            <tr><td>PhysX</td><td>PhysX SDK</td><td>NVIDIA 的 GPU 并行物理引擎：刚体、接触、articulation、contact sensor。</td></tr>
+            <tr><td>RTX</td><td>RTX Renderer</td><td>RTX GPU 上的光追实时 PBR 渲染，合成相机/LiDAR 图像。</td></tr>
+            <tr><td>cuRobo</td><td>—</td><td>NVlabs 的 CUDA 加速运动生成库：GPU 并行 FK/IK、碰撞检测、轨迹优化（<a href="../02-sim/2-2-curobo.html">2.2</a>）。</td></tr>
+            <tr><td>GenManip</td><td>—</td><td>基于 Isaac Sim 的 LLM 驱动 instruction-following 仿真平台，EBench server 端来源（arXiv 2506.10966，<a href="../02-sim/2-3-genmanip.html">2.3</a>）。</td></tr>
+            <tr><td>LeRobot</td><td>—</td><td>HuggingFace 的机器人学习数据标准格式：Parquet + MP4 + metadata（<a href="../02-sim/2-4-lerobot-dataset.html">2.4</a>）。</td></tr>
+          </tbody>
+        </table>
+
+        <h2 id="g-bench">Benchmark、本体与契约</h2>
+        <table>
+          <thead><tr><th>术语</th><th>英文全称</th><th>一句话解释</th></tr></thead>
+          <tbody>
+            <tr><td>EBench</td><td>Elemental Mobile Manipulation Benchmark</td><td>基于 Isaac Sim 的室内 VLA manipulation benchmark（Shanghai AI Lab / InternRobotics）。</td></tr>
+            <tr><td>lift2</td><td>—</td><td>EBench 的本体：dual-arm + 移动底盘 + 4 个 480×640 相机（<a href="../01-problem/1-3-lift2-embodiment.html">1.3</a>）。</td></tr>
+            <tr><td>base_motion</td><td>—</td><td>action dict 里的底盘运动 (3,)：Δx, Δy, Δyaw（<a href="../04-engine/4-3-action-vector.html">4.3</a>）。</td></tr>
+            <tr><td>is_rel</td><td>—</td><td>臂动作是否为相对量（相对则 True，否则绝对关节角）。</td></tr>
+            <tr><td>base_is_rel</td><td>—</td><td>底盘是否为相对增量（多数 baseline True；X-VLA 独用 False 绝对底盘）。</td></tr>
+            <tr><td>EvalClient</td><td>—</td><td>genmanip-client 里的客户端类，跑 reset/step/close 主循环（<a href="../04-engine/4-2-evalclient.html">4.2</a>）。</td></tr>
+            <tr><td>gmp</td><td>—</td><td>genmanip-client 的命令行工具：submit/eval/status/plot/clean/visualize（<a href="../04-engine/4-5-gmp-cli.html">4.5</a>）。</td></tr>
+            <tr><td>track</td><td>—</td><td>评测赛道：mobile_manip / table_top_manip / generalist（<a href="../03-methodology/3-2-tracks-splits.html">3.2</a>）。</td></tr>
+            <tr><td>split</td><td>—</td><td>数据切分：val_train / val_unseen（开放）/ test（留出，驱动 leaderboard）。</td></tr>
+            <tr><td>capability profile</td><td>—</td><td>把单一 success rate 摊成多轴能力画像（雷达图）的 EBench 核心理念（<a href="../00-orientation/0-1-why-ebench.html">0.1</a>）。</td></tr>
+          </tbody>
+        </table>
+
+        <div class="callout note">
+          <div class="c-h">口径提醒</div>
+          <p>本表里 5-axis diagnostic、794 task instances、Specialist/Generalist track 等属 README/paper <b>愿景</b>语言；3 tracks × 3 splits、26 tasks、6,600 episodes 属 docs/代码<b>可验证事实</b>。详见 <a href="../03-methodology/3-5-metrics-report.html">3.5</a> 与 <a href="../00-orientation/0-1-why-ebench.html">0.1</a> 的口径说明。</p>
+        </div>
+
+        <h2 id="g-next">查不到？</h2>
+        <p>这里没有的术语，多半在它首次出现的章节里有完整定义——用顶栏的 🔍 搜索框直接搜英文术语，会跳到讲它的那一节。链接地图、obs/action 速查、参考文献分别在 <a href="a-2-links.html">a-2</a> / <a href="a-3-cheatsheet.html">a-3</a> / <a href="a-4-references.html">a-4</a>。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/flow-matching-ode.js"></script>
+  <script src="../../assets/js/widgets/action-chunking.js"></script>
+  <script src="../../assets/js/widgets/eval-flow.js"></script>
+  <script src="../../assets/js/widgets/action-dissector.js"></script>
+  <script src="../../assets/js/widgets/capability-radar.js"></script>
+  <script src="../../assets/js/widgets/task-taxonomy.js"></script>
+  <script src="../../assets/js/widgets/moe-attention.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

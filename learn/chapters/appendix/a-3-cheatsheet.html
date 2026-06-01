@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>速查：obs / action / gmp · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="a-3">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Appendix · a-3</div>
+        <h1>速查：obs / action / gmp</h1>
+        <p class="lede">写 <span class="term">ModelClient</span> 时最常翻回来确认的几样东西，集中在一页：observation schema、action dict、常用 <span class="term">gmp</span> 命令、env 变量。复制即用。完整讲解在 <a href="../04-engine/4-2-evalclient.html">4.2</a> / <a href="../04-engine/4-3-action-vector.html">4.3</a> / <a href="../04-engine/4-5-gmp-cli.html">4.5</a>。</p>
+
+        <h2 id="obs">Observation schema</h2>
+        <p>按 <span class="term">worker_id</span> 取：<span class="term">obs["&lt;worker_id&gt;"]["obs"]</span>。单 worker 时 worker_id 为 <span class="term">"0"</span>。</p>
+        <div class="code" data-lang="python"><div class="code-h"><span class="fn">obs["0"]["obs"] 的字段</span><button class="cp">复制</button></div><pre><code>{
+  "instruction":      str,                    # 自然语言任务指令
+  "state.joints":     (12,),                  # 双臂关节角
+  "state.gripper":    (4,),                   # 夹爪
+  "state.base":       (3,),                   # x, y, theta（底盘位姿）
+  "state.ee_pose":    [[pos, quat], [pos, quat]],  # 左右末端，=14 维
+  "video.top_view":     (480, 640, 3),        # uint8, HWC, 0-255
+  "video.left_view":    (480, 640, 3),        # uint8
+  "video.right_view":   (480, 640, 3),        # uint8
+  "video.overlook_view":(480, 640, 3),        # uint8
+  "timestep":  int,
+  "reset":     bool,    # 新 episode 首步为 True → 调 model.reset()
+}
+</code></pre></div>
+        <div class="callout warn">
+          <div class="c-h">两个必记的坑</div>
+          <p>(1) 图像是 <b>uint8 HWC 0–255</b>，归一化/转 CHW 要你自己按训练口径做。(2) <span class="term">reset==True</span> 时务必清模型跨步状态（recurrent / action 队列 / 历史帧）。详见 <a href="../07-capstone/7-1-custom-model.html">7.1</a>。</p>
+        </div>
+
+        <h2 id="action">Action dict</h2>
+        <p>从 <span class="term">get_action(obs)</span> 返回，键是 worker_id。两种 <span class="term">control_type</span>：</p>
+        <div class="code" data-lang="python"><div class="code-h"><span class="fn">joint_position 模式（最常用）</span><button class="cp">复制</button></div><pre><code>{
+  "0": {
+    "action": (16,),          # 6 左关节 + 2 左夹 + 6 右关节 + 2 右夹
+    "base_motion": (3,),      # Δx, Δy, Δyaw（底盘运动）
+    "control_type": "joint_position",
+    "is_rel": False,          # 臂为绝对关节角；相对则 True
+    "base_is_rel": True,      # 底盘多为相对增量（X-VLA 独用 False = 绝对）
+  }
+}
+</code></pre></div>
+        <div class="code" data-lang="python"><div class="code-h"><span class="fn">ee_pose 模式（可选）</span><button class="cp">复制</button></div><pre><code>{
+  "0": {
+    "action": [pos, quat, gripper],   # 改用末端位姿 + 夹爪
+    "base_motion": (3,),
+    "control_type": "ee_pose",
+    "is_rel": False,
+    "base_is_rel": True,
+  }
+}
+</code></pre></div>
+        <p>注：契约里"动作"19 维 = action(16) + base_motion(3)；generalist 输出 19、fixedbase 16。各 baseline 的通道重排差异见 <a href="../06-baselines/6-4-compare.html">6.4</a>。</p>
+
+        <h2 id="loop">主循环模板</h2>
+        <div class="code" data-lang="python"><div class="code-h"><span class="fn">reset / step / close</span><button class="cp">复制</button></div><pre><code>from genmanip_client.eval_client import EvalClient
+
+client = EvalClient(base_url="http://127.0.0.1:8087",
+                    worker_ids=["0"], run_id="my_eval")   # online 再加 token=...
+obs = client.reset()
+eval_finished = False
+while not eval_finished:
+    if obs["0"]["obs"]["reset"]:
+        model.reset()
+    action = model.get_action(obs)
+    obs, eval_finished = client.step(action)
+client.close()
+</code></pre></div>
+
+        <h2 id="gmp">常用 gmp 命令</h2>
+        <div class="code" data-lang="bash"><div class="code-h"><span class="fn">server + 本地评测</span><button class="cp">复制</button></div><pre><code># 起 server（chunk 模式需 --no_save_process）
+python ray_eval_server.py --host 0.0.0.0 --port 8087 --no_save_process
+
+# 提交一个 run（粒度：全部 / 单 track / 单任务）
+gmp submit ebench --run_id my_first_run
+gmp submit ebench/table_top_manip/val_unseen --run_id my_first_run
+gmp submit ebench/table_top_manip/test/collect_coffee_beans --run_id my_first_run
+
+# 跑 client worker（跨机加 --host &lt;ip&gt; --port &lt;port&gt;）
+gmp eval -a r5a -g lift2 --worker_ids 0
+
+# 查进度 / 画图 / 清理 / 可视化
+gmp status
+gmp plot
+gmp clean --dry-run          # 或 --all
+gmp visualize                # Rerun HTTPS viewer，需 Py3.11+ 和 [visualize] extra
+# 结果落在 saved/eval_results/&lt;task&gt;/&lt;run_id&gt;/
+</code></pre></div>
+        <div class="code" data-lang="bash"><div class="code-h"><span class="fn">online challenge</span><button class="cp">复制</button></div><pre><code># 登录 internrobotics.shlab.org.cn/eval 拿 token → $T
+gmp online submit \
+  --base_url https://internrobotics.shlab.org.cn/eval \
+  --token $T --benchmark_set ebench_generalist \
+  --model_name my_vla --model_type VLA
+# 返回 task_id(=run_id) + endpoint；用 EvalClient(base_url=endpoint, token=$T, run_id=task_id, ...)
+# 跑完：
+gmp online stop
+</code></pre></div>
+        <p><b>online 约束</b>：当前仅 <span class="term">ebench_generalist</span>；最多 16 并发 worker；10 分钟无活动断连；同 <span class="term">task_id</span> 可续跑。</p>
+
+        <h2 id="gmp-opts">gmp 选项速查</h2>
+        <table>
+          <thead><tr><th>选项</th><th>含义 / 默认</th></tr></thead>
+          <tbody>
+            <tr><td><span class="term">--run_id</span></td><td>本次 run 标识；续跑用同一个。</td></tr>
+            <tr><td><span class="term">--host / --port</span></td><td>server 地址，默认 <span class="term">127.0.0.1:8087</span>。</td></tr>
+            <tr><td><span class="term">--worker_ids</span></td><td>本进程的 worker 编号（不同进程不同号）。</td></tr>
+            <tr><td><span class="term">--chunk_size</span></td><td>chunk 模式下执行步数（receding horizon，<a href="../05-theory/5-1-action-chunking.html">5.1</a>）。</td></tr>
+            <tr><td><span class="term">--frame_save_interval</span></td><td>每隔多少帧存一次。</td></tr>
+          </tbody>
+        </table>
+
+        <h2 id="env">常用 env 变量</h2>
+        <p>三个 baseline 的启动脚本通过环境变量配置（细节见 Part 6）。</p>
+        <table>
+          <thead><tr><th>变量</th><th>baseline</th><th>作用</th></tr></thead>
+          <tbody>
+            <tr><td><span class="term">GENMANIP_PATH</span></td><td>openpi</td><td>genmanip-client 路径。</td></tr>
+            <tr><td><span class="term">POLICY_CFG / POLICY_PATH</span></td><td>openpi</td><td>π0/π0.5 配置名与 checkpoint 路径。</td></tr>
+            <tr><td><span class="term">NUM_CLIENTS / Horizon</span></td><td>openpi</td><td>并行 client 数 / action horizon。</td></tr>
+            <tr><td><span class="term">MODEL_PATH</span></td><td>X-VLA</td><td>X-VLA checkpoint 路径。</td></tr>
+            <tr><td><span class="term">STEP_MODE / GPU_IDS</span></td><td>X-VLA</td><td>chunk|step 模式 / GPU round-robin 映射。</td></tr>
+            <tr><td><span class="term">ckpt_path / stats_key</span></td><td>InternVLA-A1</td><td>checkpoint 与归一化统计 key（如 <span class="term">lift2</span>）。</td></tr>
+            <tr><td><span class="term">RUN_ID / TOKEN / URL(BASE_URL)</span></td><td>全部</td><td>run 标识 / online token / server 地址。</td></tr>
+            <tr><td><span class="term">WORKER_IDS</span></td><td>全部</td><td>本进程 worker 编号。</td></tr>
+          </tbody>
+        </table>
+
+        <h2 id="next">接着查</h2>
+        <p>术语去 <a href="a-1-glossary.html">a-1</a>，repo/链接去 <a href="a-2-links.html">a-2</a>，参考文献去 <a href="a-4-references.html">a-4</a>。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/flow-matching-ode.js"></script>
+  <script src="../../assets/js/widgets/action-chunking.js"></script>
+  <script src="../../assets/js/widgets/eval-flow.js"></script>
+  <script src="../../assets/js/widgets/action-dissector.js"></script>
+  <script src="../../assets/js/widgets/capability-radar.js"></script>
+  <script src="../../assets/js/widgets/task-taxonomy.js"></script>
+  <script src="../../assets/js/widgets/moe-attention.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

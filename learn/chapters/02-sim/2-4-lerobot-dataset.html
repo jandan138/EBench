@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LeRobot 数据格式与 EBench 数据集 · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="2-4">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 2 · Simulation Stack · 2-4</div>
+        <h1>LeRobot 数据格式与 EBench 数据集</h1>
+        <p class="lede">仿真栈的最后一块地基是<b>数据</b>。前面 cuRobo / GenManip 生成的轨迹要落盘、要能被千万条地训练，就得有一种标准格式——这就是 <span class="term">LeRobot</span>。这一节我们先看它怎么把一条机器人轨迹拆成「低维 + 视频 + 元数据」，再看 EBench 自己的三个数据子集长什么样，并为 Part 4 的 obs/action 契约埋下伏笔。</p>
+
+        <h2 id="lerobot-format">LeRobot 格式：解决碎片化</h2>
+        <p><span class="term">LeRobot</span>（来自 HuggingFace）是机器人学习的一种<b>标准数据格式</b>。它存在的理由很现实：机器人数据极度碎片化——每个实验室一套目录结构、一套字段命名、一套相机编码，互相读不动。LeRobot 给出一个统一约定，让一条轨迹无论来自哪、都能用同一套代码加载。它把一条 episode 拆成三种存储，各取所长：</p>
+        <ul>
+          <li><b><span class="term">Parquet</span></b>——存<b>低维、高频</b>的信号：关节角、夹爪、底盘位姿、动作向量、时间戳……这些数值列式存储，读取与切片都快。</li>
+          <li><b><span class="term">MP4</span></b>——存<b>相机视频</b>。图像帧不塞进表里（那会爆掉），而是编码成视频文件，按帧索引对齐到 Parquet 的行。EBench 用 <span class="term">AV1</span> 编码的 MP4。</li>
+          <li><b>metadata</b>——存<b>结构信息</b>：任务文本、robot type、fps、episode 边界、各字段的形状/含义等。EBench 里体现为 <code>meta/modality.json</code>（modality 定义）与 <code>meta/tasks.jsonl</code>（多套指令释义）。</li>
+        </ul>
+        <p>用起来极简：<code>LeRobotDataset("...")</code> 帮你把三种存储缝合好，按 index 取一帧时自动从 Parquet 取低维、从 MP4 解出对应图像帧，吐出对齐的 <b>PyTorch tensor</b>。你的训练循环看到的就是干净的张量，碎片化在这一层被彻底吸收。</p>
+
+        <div class="callout note">
+          <div class="c-h">版本：v2.1 与 v3</div>
+          <p>EBench 的三个子集都是 <span class="term">LeRobot v2.1</span>。格式仍在演进——<span class="term">v3</span> 已支持百万级轨迹 / 十亿级帧，并提供 <span class="term">StreamingLeRobotDataset</span>（边下边训，不必先落全量盘）。你用 EBench 数据时认准 v2.1 即可。</p>
+        </div>
+
+        <h2 id="ebench-dataset">EBench-Dataset：三个子集</h2>
+        <p>EBench 的训练轨迹托管在 🤗 <span class="term">EBench-Dataset</span>，分三个子集。它们的划分逻辑很清晰——<b>按生成方式与任务族</b>分，这直接决定了轨迹的「手感」和它服务的评测 track：</p>
+        <table>
+          <thead>
+            <tr><th>子集</th><th>来源</th><th>任务×每任务</th><th>episodes</th><th>≈ frames</th><th>eval track</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="term">long_horizon</span></td>
+              <td>rule-based / GenManip 脚本</td>
+              <td>9 × 200</td>
+              <td><b>1,800</b></td>
+              <td>≈ 3.6M</td>
+              <td>mobile_manip + generalist</td>
+            </tr>
+            <tr>
+              <td><span class="term">simple_pnp</span></td>
+              <td>rule-based</td>
+              <td>10 × 200</td>
+              <td><b>2,000</b></td>
+              <td>≈ 0.96M</td>
+              <td>mobile_manip + generalist</td>
+            </tr>
+            <tr>
+              <td><span class="term">teleop_tasks</span></td>
+              <td>人类遥操作 teleop</td>
+              <td>7 × 400</td>
+              <td><b>2,800</b></td>
+              <td>≈ 5.3M</td>
+              <td>table_top_manip + generalist</td>
+            </tr>
+            <tr>
+              <td colspan="2"><b>合计</b></td>
+              <td>26 tasks</td>
+              <td><b>6,600</b></td>
+              <td><b>≈ 9.86M</b></td>
+              <td>—</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>注意三件事：(1) 任务总数 9+10+7 = <b>26</b>，与 benchmark 的 26 task 体系对齐；(2) episode 数 1,800+2,000+2,800 = <b>6,600</b>；(3) teleop 子集任务最少（7）但 episode 最多（每任务 400），帧数也最大（≈5.3M）——人类示范又长又密。</p>
+
+        <h2 id="rule-vs-teleop">rule-based vs teleop：两种轨迹「手感」</h2>
+        <p>同样是模仿学习的监督信号，<span class="term">rule-based</span> 与 <span class="term">teleop</span> 轨迹的质地截然不同，这一点会实实在在地影响你训出的策略：</p>
+        <ul>
+          <li><b>rule-based</b>（long_horizon / simple_pnp）由 cuRobo 在脚本下优化生成——还记得上一节的 minimum-jerk 吗？轨迹<b>干净、平滑、一致</b>，像被熨过。它是高质量、低噪声的监督。</li>
+          <li><b>teleop</b>（teleop_tasks）来自人手遥操作，带着人类操作的全部「毛刺」：<b>抖动、迟疑、停顿</b>，速度不均、偶有回拉。它更接近真实人类行为的分布，但噪声大。</li>
+        </ul>
+
+        <div class="bridge g103">
+          <div class="c-h"><span class="tag">从 GAMES103 看</span> 优化出来的轨迹 vs 人手摇出来的轨迹</div>
+          <p>cuRobo 的 rule-based 轨迹，就是你做轨迹优化时追求的那条解：连续、可导、jerk 最小——数学上「最优且光滑」。teleop 轨迹则像你<b>没有</b>做平滑、直接采样人手输入得到的折线：含高频噪声、不可导的拐点。一个是优化器的产物，一个是人类感觉运动系统的产物。它们在频域上的差别（teleop 高频能量大），正是下面那个训练坑的根源。</p>
+        </div>
+
+        <div class="callout warn">
+          <div class="c-h">坑：teleop 的抖动会被学进策略</div>
+          <p>VLA 是模仿学习——<b>它会忠实地复制示范，包括 teleop 里的抖动和迟疑</b>。如果你直接混训，策略可能学出一只「会发抖的手」。想要更平滑的策略，一个实用做法是<b>调高 rule-based（GenManip）子集的采样权重</b>，让干净轨迹占更大比重，把抖动稀释掉。这是数据配比层面的调参，不是模型结构问题。</p>
+        </div>
+
+        <h2 id="frame-fields">帧字段与 *_delta：动作的绝对与增量两套</h2>
+        <p>打开一帧，你会看到低维信号分成 <span class="term-i">observation</span> 与 <span class="term-i">action</span> 两侧。action 侧每个通道都<b>成对</b>出现——一个绝对值，一个 <span class="term">_delta</span> 增量值：</p>
+        <table>
+          <thead><tr><th>字段</th><th>维度</th><th>含义</th></tr></thead>
+          <tbody>
+            <tr><td><code>action.joints</code> / <code>action.joints_delta</code></td><td>12</td><td>双臂关节目标（绝对 / 增量）</td></tr>
+            <tr><td><code>action.gripper</code></td><td>4</td><td>夹爪</td></tr>
+            <tr><td><code>action.ee_pose</code> / <code>action.ee_pose_delta</code></td><td>14</td><td>末端位姿 [pos,quat]×2（绝对 / 增量）</td></tr>
+            <tr><td><code>action.base</code> / <code>action.base_delta</code></td><td>3</td><td>底盘 x/y/θ（绝对 / 增量）</td></tr>
+          </tbody>
+        </table>
+        <p>为什么要存两套？因为<b>不同 VLA 对动作空间的偏好不同</b>：有的模型预测绝对目标位姿，有的预测相对当前状态的增量（delta）。数据集同时备好绝对值和 <code>*_delta</code>，是为了让两类模型都能直接取用、不必自己换算。这正是 Part 4 里 obs/action <b>契约</b>要细抠的东西——<code>is_rel</code> / <code>base_is_rel</code> 这些开关、各 baseline 怎么映射底盘与夹爪，都是从这里的「绝对 vs 增量」长出来的。我们在 <a href="../04-engine/4-3-action-vector.html">4.3</a> 把动作向量逐位解剖。</p>
+
+        <div class="callout note">
+          <div class="c-h">埋个伏笔：训练数据 ≠ 评测接口，但同源</div>
+          <p>这里看到的帧字段（<code>state.*</code> / <code>action.*</code> / <code>video.*_view</code>）和你将来在评测里从 <span class="term">EvalClient</span> 拿到的 obs、要回传的 action，命名与语义是<b>一脉相承</b>的。把这张字段表记在心里，到 Part 4 看评测契约时会有强烈的「似曾相识」——那不是巧合，是同一套 modality 在「离线训练」与「在线评测」两个场景的两副面孔。</p>
+        </div>
+
+        <h2 id="download">下载命令</h2>
+        <p>资产（场景/物体/任务，来自 <span class="term">EBench-Assets</span>）与训练数据（<span class="term">EBench-Dataset</span>）分两个仓库，都用 <code>huggingface-cli</code> 拉：</p>
+        <div class="code" data-lang="bash"><div class="code-h"><span class="fn">download_assets.sh</span><button class="cp">复制</button></div><pre><code># 场景 / 物体 / 任务资产 → saved/
+huggingface-cli download InternRobotics/EBench-Assets --local-dir saved --repo-type dataset
+
+# LeRobot 训练轨迹 → saved/dataset/
+huggingface-cli download InternRobotics/EBench-Dataset --local-dir saved/dataset --repo-type dataset</code></pre></div>
+        <p>注意两条命令都带 <code>--repo-type dataset</code>（这两个仓库在 HuggingFace 上都注册为 dataset 类型），且 Dataset 落到 <code>saved/dataset</code> 子目录，与 Assets 区分开。拉下来后，<code>saved/dataset</code> 里就是上面三个子集的 LeRobot v2.1 目录，可直接喂给 <code>LeRobotDataset(...)</code>。</p>
+
+        <h2 id="whats-next">这一节你需要带走的</h2>
+        <p>LeRobot 用 <b>Parquet（低维）+ MP4（相机）+ metadata</b> 统一了机器人数据，<code>LeRobotDataset</code> 缝合成 tensor。EBench-Dataset 三子集：<span class="term">long_horizon</span> 1,800 / <span class="term">simple_pnp</span> 2,000 / <span class="term">teleop_tasks</span> 2,800 = <b>6,600 episodes、≈9.86M frames、26 tasks</b>。rule-based 干净平滑、teleop 抖动会被学进去（调高 rule-based 权重可平滑）。帧字段含绝对 + <code>*_delta</code> 两套，为 Part 4 的 obs/action 契约埋下伏笔。</p>
+        <p>到这里 Part 2 的仿真地基完整了：<b>世界（Isaac Sim）→ 运动（cuRobo）→ 服务器（GenManip）→ 数据（LeRobot）</b>。接下来 Part 3 我们抬头看 benchmark 的方法论：能力画像、tracks/splits、26 任务与打分。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/flow-matching-ode.js"></script>
+  <script src="../../assets/js/widgets/action-chunking.js"></script>
+  <script src="../../assets/js/widgets/eval-flow.js"></script>
+  <script src="../../assets/js/widgets/action-dissector.js"></script>
+  <script src="../../assets/js/widgets/capability-radar.js"></script>
+  <script src="../../assets/js/widgets/task-taxonomy.js"></script>
+  <script src="../../assets/js/widgets/moe-attention.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

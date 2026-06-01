@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Capability profile 的愿景 · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="3-1">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 3 · Benchmark 方法论 · 3-1</div>
+        <h1>Capability profile 的愿景</h1>
+        <p class="lede">在 <a href="../00-orientation/0-1-why-ebench.html">0.1</a> 我们说过一句话：不要只看一个 success rate，要看它在各个能力轴上的<i>分解</i>。这一节我们把这个想法讲透——它叫 <span class="term">capability profile</span>，是 <span class="term">EBench</span> 整套方法论的<b>愿景母题</b>。但请先记住一件事：这一节讲的几乎全是「愿景语言」，下一节起我们才落到代码与 docs 的地面真相。</p>
+
+        <h2 id="recap-philosophy">重申：诊断，而不是排名</h2>
+        <p>回顾一下 0.1 的核心不满：<span class="term">success rate</span> 是一个<b>被压扁</b>的标量。模型跑 100 个 episode 成功 63 个，你得到 0.63——然后呢？你不知道它是栽在长流程的中段，还是手不够稳拧不上螺母，还是底盘没走到位，还是换一句指令就听不懂。两个都拿 0.63 的模型可能强在<i>完全不同</i>的地方，而一个标量把这些结构信息全部抹平了。</p>
+        <p>所以 EBench 想做的不是「再排一次名」，而是<b>诊断</b>：把一次评测的结果，从一个数，摊成一张沿多个能力轴展开的画像。排名是给旁观者看的；画像是给<i>开发者</i>看的——它告诉你「下一步该往哪改」「这个模型会在什么情况下崩」。这是两种根本不同的信息粒度。</p>
+
+        <div class="bridge rl">
+          <div class="c-h"><span class="tag">从 RL 看</span> 不止看 return，要看 return 的分解</div>
+          <p>这正是你熟悉的处境。在 RL 里把复杂行为压成单一标量 <span class="term">reward</span>，会丢掉大量结构——reward shaping、multi-objective RL、各种 diagnostic / probing 方法都在试图把丢掉的东西补回来。capability profile 类比过来就是：<b>不要只报 return，要报 return 在各能力轴上的剖面</b>。同样的平均回报，剖面可以截然不同，而剖面才是可操作的。</p>
+        </div>
+
+        <h2 id="five-axes">README/paper 愿景的 5-axis atomic diagnostic</h2>
+        <p>EBench 的 README 和即将发布的 paper，用一套很有野心的语言来描述这张画像：把一个机器人任务拆解成若干<b>原子能力维度</b>（<span class="term-i">atomic diagnostic axes</span>），让每个维度单独可读。愿景里给出的是 <b>5 个轴</b>：</p>
+        <ul>
+          <li><span class="term">Scene</span>——场景理解与空间布局：物体在哪、桌面/货架/家电怎么排布，机器人能否在杂乱场景里定位目标。</li>
+          <li><span class="term">Atomic Skill</span>——原子操作技能：抓、放、推、拧、翻转这些最小的动作单元本身做得稳不稳。</li>
+          <li><span class="term">Horizon</span>——任务时序长度：单步够了，还是要把一长串子目标按先后依赖一步步做完（开门→放进去→关门）。</li>
+          <li><span class="term">Precision</span>——精度要求：对位公差有多紧，套轴、插孔、拧螺母这种毫米级灵巧度。</li>
+          <li><span class="term">Mobility</span>——移动性：是否需要先<i>走过去</i>，底盘导航与「移动 + 操作」的协调。</li>
+        </ul>
+        <p>这五个轴的设计动机，是把开篇说的三种范式（long-horizon / dexterous &amp; precise / mobile）背后真正变化的<b>能力因子</b>抽出来，让它们彼此正交、各自可测。一个任务可以同时在 Horizon 与 Precision 上都要求很高（比如装一台多步骤又要精细对位的设备），而 capability profile 想让你看清：模型是栽在「步太多记不住」，还是「手不够准」。</p>
+
+        <div class="callout note">
+          <div class="c-h">这是「愿景语言」，请标注清楚</div>
+          <p>上面这套 <b>5-axis atomic diagnostic</b>（Scene·Atomic Skill·Horizon·Precision·Mobility），连同后面会遇到的 <span class="term">4-axis generalization</span>、<span class="term">794 task instances</span>、<span class="term">Test-Mini</span>、Specialist vs Generalist track，都来自 <b>README / paper 的愿景描述</b>。它解释了 EBench「<i>想成为</i>」什么。而当前线上 <span class="term">docs</span> 站能验证的<b>地面真相</b>是另一套口径：3 tracks × 3 splits、26 tasks、数据集 6,600 episodes，且 split 细分仍标 <span class="term">WIP</span>（下一节 <a href="3-2-tracks-splits.html">3.2</a> 详谈）。本书会一路把<b>愿景</b>和<b>现实</b>分开标注，不让你把「想做的」当成「已实现的」。</p>
+        </div>
+
+        <h2 id="radar-as-diagnosis">换个角度看雷达图：它是诊断仪，不是排行榜</h2>
+        <p>0.1 里我们用雷达图演示过「同样总分、不同画像」。这里我们换一个角度再看一次同一个 widget——不要把它读成「谁的面积大谁赢」。雷达图的价值<b>恰恰不在面积</b>，而在<i>形状</i>：哪条轴塌下去，哪条轴鼓出来。一个面积更小但在你关心的那条轴上更高的模型，对你这次开发可能更有用。</p>
+
+        <div class="lab">
+          <div class="lab-h"><span class="lab-tag">interactive</span><span class="lab-t">capability profile：读形状，而不是读面积</span></div>
+          <div class="lab-body" data-widget="capability-radar"></div>
+          <div class="lab-cap">勾选不同模型对比。这次请刻意忽略「总面积」，只盯单条轴：如果你正在攻克 Precision，那条轴最高的模型才是你的参照系——哪怕它平均分更低。数值为示意。</div>
+        </div>
+
+        <p>这就是「诊断而非排名」最具体的样子：同一张图，排行榜思维只读出一个赢家，诊断思维读出一份<b>改进清单</b>。EBench 的全部方法论，本质上是在为这张图提供可信、可分解的坐标。</p>
+
+        <h2 id="whats-next">这一节你需要带走的</h2>
+        <p>记住三点就够进入下一节：(1) capability profile 的目的是<b>诊断</b>——把一个 success rate 摊成沿能力轴的剖面，服务于「下一步改哪」而非「谁第一」；(2) README/paper 愿景给出 5 个原子能力轴 Scene·Atomic Skill·Horizon·Precision·Mobility，这是<b>愿景语言</b>；(3) 雷达图要读<i>形状</i>不读面积。</p>
+        <p>愿景讲完了。下一节我们落地——看 docs 与代码里<b>真实存在</b>的评测结构：3 tracks × 3 splits，以及为什么「训练/测试隔离」是这张画像可信度的红线。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/flow-matching-ode.js"></script>
+  <script src="../../assets/js/widgets/action-chunking.js"></script>
+  <script src="../../assets/js/widgets/eval-flow.js"></script>
+  <script src="../../assets/js/widgets/action-dissector.js"></script>
+  <script src="../../assets/js/widgets/capability-radar.js"></script>
+  <script src="../../assets/js/widgets/task-taxonomy.js"></script>
+  <script src="../../assets/js/widgets/moe-attention.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

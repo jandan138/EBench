@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EBench · 交互式教程</title>
+  <link rel="stylesheet" href="assets/css/book.css" />
+</head>
+<body data-root="" data-page="cover">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <span class="brand"><b>EBench</b> · 交互式教程</span>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 搜索 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+  </header>
+
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <div class="cover">
+        <div class="eyebrow">Elemental Mobile Manipulation Benchmark</div>
+        <h1>读懂 <span style="color:var(--accent)">EBench</span></h1>
+        <div class="sub">一本娓娓道来的交互式教程 —— 从仿真地基、评测方法到 VLA 模型理论</div>
+        <div class="meta">受众：有 RL 数学基础 + GAMES103 物理仿真基础的读者 · 中文叙述，保留英文术语</div>
+
+        <div class="hero-card">
+          <p style="margin:0 0 .6em"><b>这本书要回答一个问题：</b>当我们说一个 VLA 模型"会做家务"，到底是<i>什么意思</i>？怎么<i>测量</i>它、怎么<i>拆解</i>它的强弱？</p>
+          <p style="margin:0;color:var(--ink-soft)">EBench 把一个黑盒的 <span class="term">success rate</span> 变成一张可读的 <span class="term">capability profile</span>。我们会顺着这条线，从 <span class="term">Isaac Sim</span> 物理仿真讲到 <span class="term">flow matching</span> 动作生成，再回到代码里三个 baseline 是怎样接进同一套评测契约的。</p>
+        </div>
+
+        <div id="cover-toc"></div>
+      </div>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <!-- 搜索 -->
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="content.js"></script>
+  <script>
+    /* 封面目录 */
+    (function () {
+      const root = document.getElementById("cover-toc");
+      let html = "";
+      window.EBOOK.parts.forEach((p) => {
+        html += `<div class="toc-part"><div class="tp-h"><span class="tp-label">${p.label}</span><span class="tp-title">${p.title}</span></div>`;
+        p.sections.forEach((s) => {
+          html += `<a class="toc-sec" href="${s.file}"><span class="num">${s.id}</span><span>${s.title}</span></a>`;
+        });
+        html += `</div>`;
+      });
+      root.innerHTML = html;
+    })();
+  </script>
+  <script src="assets/js/book.js"></script>
+</body>
+</html>

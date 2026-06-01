@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Repo &amp; 链接地图 · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="a-2">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Appendix · a-2</div>
+        <h1>Repo &amp; 链接地图</h1>
+        <p class="lede">EBench 不是一个仓库，而是一群仓库组成的星座（<a href="../00-orientation/0-2-constellation.html">0.2</a> 讲过它的拓扑）。这里把所有链接集中成可点的地图：repo 星座、各 baseline 的模型上游、仿真栈依赖、以及官方文档与排行榜。</p>
+
+        <h2 id="constellation">EBench repo 星座</h2>
+        <p>这五个 repo（外加 docs / leaderboard）构成 EBench 的全部。你现在读的教程住在 <span class="term">EBench</span> 这个"前门"里。</p>
+        <table>
+          <thead><tr><th>角色</th><th>仓库 / 站点</th><th>装了什么</th></tr></thead>
+          <tbody>
+            <tr><td>前门（本 repo）</td><td><a href="https://github.com/InternRobotics/EBench" target="_blank" rel="noopener">github.com/InternRobotics/EBench</a></td><td>四个 baseline + 评测 scripts，整个项目的入口。</td></tr>
+            <tr><td>Sim server</td><td><a href="https://github.com/InternRobotics/GenManip" target="_blank" rel="noopener">github.com/InternRobotics/GenManip</a></td><td>Isaac Sim server + 任务配置；EBench 的仿真黑盒来源。</td></tr>
+            <tr><td>Client</td><td><a href="https://github.com/InternRobotics/genmanip-client" target="_blank" rel="noopener">github.com/InternRobotics/genmanip-client</a></td><td>极简客户端包：<span class="term">gmp</span> CLI + <span class="term">EvalClient</span>，装进模型自己的 env。</td></tr>
+            <tr><td>资产</td><td><a href="https://huggingface.co/datasets/InternRobotics/EBench-Assets" target="_blank" rel="noopener">🤗 InternRobotics/EBench-Assets</a></td><td>场景 / 物体 / 任务资产（HF dataset repo）。</td></tr>
+            <tr><td>训练数据</td><td><a href="https://huggingface.co/datasets/InternRobotics/EBench-Dataset" target="_blank" rel="noopener">🤗 InternRobotics/EBench-Dataset</a></td><td>LeRobot v2.1 格式训练轨迹，6,600 episodes / 26 tasks。</td></tr>
+            <tr><td>文档</td><td><a href="https://internrobotics.github.io/EBench-doc" target="_blank" rel="noopener">internrobotics.github.io/EBench-doc</a></td><td>可验证的契约 / track-split / gmp CLI 文档。</td></tr>
+            <tr><td>排行榜 / online</td><td><a href="https://internrobotics.shlab.org.cn/eval" target="_blank" rel="noopener">internrobotics.shlab.org.cn/eval</a></td><td>online challenge 登录、拿 token、提交上榜。</td></tr>
+          </tbody>
+        </table>
+
+        <div class="code" data-lang="bash"><div class="code-h"><span class="fn">下载资产与数据集</span><button class="cp">复制</button></div><pre><code>huggingface-cli download InternRobotics/EBench-Assets  --local-dir saved         --repo-type dataset
+huggingface-cli download InternRobotics/EBench-Dataset --local-dir saved/dataset --repo-type dataset
+</code></pre></div>
+
+        <h2 id="baselines">Baseline 模型上游与 checkpoint</h2>
+        <p>四个 baseline 的实现住在本 repo 的 <span class="term">baselines/</span> 下，但它们的模型本体各有上游 repo / paper（细节见 Part 6）。</p>
+        <table>
+          <thead><tr><th>Baseline</th><th>上游</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td>π0 / π0.5</td><td><a href="https://github.com/Physical-Intelligence/openpi" target="_blank" rel="noopener">github.com/Physical-Intelligence/openpi</a></td><td>Physical Intelligence 的 openpi 框架；EBench 用 <span class="term">pi05_ebench_*</span> / <span class="term">pi0_*</span> 配置（<a href="../06-baselines/6-1-openpi.html">6.1</a>）。</td></tr>
+            <tr><td>X-VLA</td><td>arXiv <a href="https://arxiv.org/abs/2510.10274" target="_blank" rel="noopener">2510.10274</a></td><td>soft-prompted flow-matching VLA；本 repo <span class="term">baselines/X-VLA/run.py</span> 经 <span class="term">AutoModel</span> 加载（<a href="../06-baselines/6-2-xvla.html">6.2</a>）。</td></tr>
+            <tr><td>InternVLA-A1</td><td>arXiv <a href="https://arxiv.org/abs/2601.02456" target="_blank" rel="noopener">2601.02456</a>（InternRobotics）</td><td>MoT + visual foresight；3B 版基于 Qwen3-VL-2B（<a href="../06-baselines/6-3-internvla-a1.html">6.3</a>）。</td></tr>
+          </tbody>
+        </table>
+        <div class="callout note">
+          <div class="c-h">checkpoint 在哪</div>
+          <p>各 baseline 的 post-trained checkpoint 由本 repo 的脚本指向加载（π0 经 <span class="term">POLICY_PATH</span>、X-VLA 经 <span class="term">MODEL_PATH</span>、InternVLA-A1 经 <span class="term">ckpt_path</span>）。具体下载位置以本 repo 各 baseline 目录下的 README / 脚本注释为准——这部分随 repo 更新，正文不写死路径。</p>
+        </div>
+
+        <h2 id="stack">仿真栈与数据格式依赖</h2>
+        <table>
+          <thead><tr><th>组件</th><th>链接</th><th>在 EBench 里的角色</th></tr></thead>
+          <tbody>
+            <tr><td>Isaac Sim</td><td><a href="https://developer.nvidia.com/isaac/sim" target="_blank" rel="noopener">developer.nvidia.com/isaac/sim</a></td><td>server 的物理 + 渲染引擎（v4.1.0；CUDA 12.1；torch 2.4.0）。</td></tr>
+            <tr><td>cuRobo</td><td><a href="https://github.com/NVlabs/curobo" target="_blank" rel="noopener">github.com/NVlabs/curobo</a></td><td>GPU 运动生成，在场景里造专家/遥操轨迹（<a href="../02-sim/2-2-curobo.html">2.2</a>）。</td></tr>
+            <tr><td>LeRobot</td><td><a href="https://github.com/huggingface/lerobot" target="_blank" rel="noopener">github.com/huggingface/lerobot</a></td><td>训练数据集的标准格式（<a href="../02-sim/2-4-lerobot-dataset.html">2.4</a>）。</td></tr>
+            <tr><td>GenManip (paper)</td><td>arXiv <a href="https://arxiv.org/abs/2506.10966" target="_blank" rel="noopener">2506.10966</a>（CVPR'25）</td><td>server 端仿真平台的论文（<a href="../02-sim/2-3-genmanip.html">2.3</a>）。</td></tr>
+          </tbody>
+        </table>
+
+        <h2 id="papers">关键论文（速链）</h2>
+        <p>完整带标题的参考文献在 <a href="a-4-references.html">a-4</a>，这里只放最常点的几个 arXiv：</p>
+        <ul>
+          <li>π0 — arXiv <a href="https://arxiv.org/abs/2410.24164" target="_blank" rel="noopener">2410.24164</a></li>
+          <li>π0.5 — arXiv <a href="https://arxiv.org/abs/2504.16054" target="_blank" rel="noopener">2504.16054</a></li>
+          <li>Knowledge Insulation — arXiv <a href="https://arxiv.org/abs/2505.23705" target="_blank" rel="noopener">2505.23705</a></li>
+          <li>X-VLA — arXiv <a href="https://arxiv.org/abs/2510.10274" target="_blank" rel="noopener">2510.10274</a></li>
+          <li>InternVLA-A1 — arXiv <a href="https://arxiv.org/abs/2601.02456" target="_blank" rel="noopener">2601.02456</a></li>
+          <li>GenManip — arXiv <a href="https://arxiv.org/abs/2506.10966" target="_blank" rel="noopener">2506.10966</a></li>
+        </ul>
+
+        <h2 id="next">接着查</h2>
+        <p>术语回查去 <a href="a-1-glossary.html">a-1</a>，obs/action/gmp 速查去 <a href="a-3-cheatsheet.html">a-3</a>，带标题的完整文献去 <a href="a-4-references.html">a-4</a>。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/flow-matching-ode.js"></script>
+  <script src="../../assets/js/widgets/action-chunking.js"></script>
+  <script src="../../assets/js/widgets/eval-flow.js"></script>
+  <script src="../../assets/js/widgets/action-dissector.js"></script>
+  <script src="../../assets/js/widgets/capability-radar.js"></script>
+  <script src="../../assets/js/widgets/task-taxonomy.js"></script>
+  <script src="../../assets/js/widgets/moe-attention.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

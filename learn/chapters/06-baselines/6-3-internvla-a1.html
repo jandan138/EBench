@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>InternVLA-A1：MoT + visual foresight · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="6-3">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 6 · Baseline 全链路 · 6-3</div>
+        <h1>InternVLA-A1：MoT + visual foresight</h1>
+        <p class="lede">前两个 baseline，模型都是"看一眼，出动作"。InternVLA-A1 多了一件事：它会先<i>想象</i>接下来画面应该长什么样，再据此决定怎么动。这个"先想象后行动"的世界模型直觉，加上它在代码里那个<b>有状态的 action 队列</b>，让它成为三个 baseline 里部署逻辑最丰富的一个。</p>
+
+        <h2 id="model">模型层：Mixture-of-Transformers 三专家</h2>
+        <p>InternVLA-A1（arXiv 2601.02456，InternRobotics）的骨架是一个 <span class="term">Mixture-of-Transformers</span>（MoT）。注意它和 5.3 讲的 π0 那种 action expert 不是一回事：π0 是"两元 mixture"（图文一套权重、机器人 token 一套权重）；InternVLA-A1 把<b>三种能力</b>各做成一个 Transformer 专家：</p>
+        <ul>
+          <li><b>understanding expert</b>——理解视觉与语言（基于 InternVL3 / Qwen3-VL 系视觉语言模型）；</li>
+          <li><b>generation expert</b>——预测<i>未来的视觉状态</i>，也就是 <span class="term">visual foresight</span>：像一个世界模型，先在脑子里把"做完这步画面会变成什么样"想象出来；</li>
+          <li><b>action expert</b>——用 flow matching 出 action chunk（和 π0 同源的连续动作头）。</li>
+        </ul>
+        <p>三个专家<b>共享一次 unified masked self-attention</b>——它们不是三个独立网络，而是在同一次 attention 里通过 mask 互相交互（理解的结果能影响想象，想象能约束动作）。3B 版本基于 <span class="term">Qwen3-VL-2B</span>，代码里对应 <span class="term">QwenA1Policy</span>。它在 692M 帧（真实 + 合成 + 人类视频）上预训练，开 <code>torch.compile</code> 后约 ~13Hz。</p>
+
+        <div class="bridge rl">
+          <div class="c-h"><span class="tag">从 RL 看</span> generation expert 是个 model-based 的世界模型</div>
+          <p>在 model-based RL 里，你学一个 dynamics model $\hat{s}_{t+1} = f(s_t, a_t)$，用想象的 rollout 帮助决策。InternVLA-A1 的 generation expert 干的正是这件事，只不过它预测的"下一状态"是<b>未来的图像帧</b>，而不是低维 state。它把世界模型的想象作为一路条件，喂给 action expert——这是 model-based 思想和 imitation/flow-matching 策略的一次缝合。是否真去解码那张想象的图，由代码里的 <code>decode_image</code> 开关控制。</p>
+        </div>
+
+        <h2 id="load">代码层：QwenA1Policy 与有状态 wrapper</h2>
+        <p>打开 <span class="term">baselines/InternVLA-A1/inference.py</span>。和 X-VLA 一样，模型直接加载进 client 进程（无独立 server），但走的是 LeRobot 的 policy 接口而非 HuggingFace AutoModel：</p>
+        <div class="code" data-lang="python"><div class="code-h"><span class="fn">baselines/InternVLA-A1/inference.py</span><button class="cp">复制</button></div><pre><code>config = PreTrainedConfig.from_pretrained(ckpt_path)
+assert isinstance(config, QwenA1Config)
+policy = QwenA1Policy.from_pretrained(config=config, pretrained_name_or_path=ckpt_path)
+policy.cuda().to(dtype).eval()</code></pre></div>
+        <p>真正特别的是包在外面的 <span class="term">QwenA1PolicyWrapper</span>。它不是无状态的——它持有一个 <b>action 队列</b>和几条<b>图像历史</b>，这是前两个 baseline 都没有的。</p>
+
+        <h2 id="queue">有状态 action 队列：队列空了才推理</h2>
+        <p>核心逻辑藏在 <span class="term">get_action</span> 里：每步先看队列空不空，空了才推一整段，否则直接从队列头取一个：</p>
+        <div class="code" data-lang="python"><div class="code-h"><span class="fn">baselines/InternVLA-A1/inference.py</span><button class="cp">复制</button></div><pre><code>def get_action(self, obs: dict) -&gt; dict:
+    if not self.action_plan:          # 队列空 → 推一段新的
+        self._plan_action(obs)
+    if self.action_plan:
+        action = np.asarray(self.action_plan.popleft(), dtype=np.float32)   # 否则弹一个
+        ...</code></pre></div>
+        <p>这是 <span class="term">receding horizon</span> replan（<a href="../05-theory/5-1-action-chunking.html">5.1</a>）在客户端的<b>显式实现</b>。对比一下三者的触发节奏：π0 每轮 while 循环都重推一整段；X-VLA 在 step 模式下逐步发但每轮重推；而 InternVLA-A1 是<b>队列驱动</b>——一段 chunk 一步步 <code>popleft</code> 消耗完，才触发下一次推理。<code>action_plan</code> 是个 <code>deque(maxlen=action_horizon_size)</code>，默认装 30 步。</p>
+
+        <div class="bridge g103">
+          <div class="c-h"><span class="tag">从 GAMES103 看</span> 队列就是一个预算好的轨迹缓冲</div>
+          <p>想象你的积分器一次解出未来 30 帧的轨迹，存进缓冲，然后逐帧播放；播完了再解下一段。这正是离线轨迹生成 + 在线回放的模式。队列 <code>popleft</code> 是回放指针，<code>_plan_action</code> 是重新解算。比每帧都重解省算力，但缓冲越长，对突发扰动越迟钝——这就是 5.1 那个 chunk 长度的经典 tradeoff，在这里是 <code>action_horizon_size</code> 这个数字。</p>
+        </div>
+
+        <h2 id="temporal">temporal image pair 与 base 置零</h2>
+        <p>因为有 visual foresight，InternVLA-A1 喂模型的不是单帧，而是 <b>[过去帧, 当前帧]</b> 一对——让世界模型看到画面在怎么变。它维护三条图像历史 deque，按 <span class="term">image_history_interval</span>（默认 15）回看一帧：</p>
+        <div class="code" data-lang="python"><div class="code-h"><span class="fn">baselines/InternVLA-A1/inference.py</span><button class="cp">复制</button></div><pre><code>past_idx = max(len(self.head_color_history) - self.args.image_history_interval - 1, 0)
+image_head_with_history = torch.stack(
+    [self.head_color_history[past_idx], self.head_color_history[-1]], dim=0)   # [past, current]</code></pre></div>
+        <p>state 这一侧有个容易忽略的处理：拼 state 时把 base 三维<b>置零</b>，只保留维度、抹掉数值：</p>
+        <div class="code" data-lang="python"><div class="code-h"><span class="fn">baselines/InternVLA-A1/inference.py</span><button class="cp">复制</button></div><pre><code>self.chunk_start_base = np.asarray(base_state, dtype=np.float32).copy()   # 记下 chunk 起点底盘
+zero_base = np.zeros_like(base_state)
+new_state = np.concatenate([joints, zero_base, gripper_state])            # base 置零再拼</code></pre></div>
+        <p>注释说这是为了和训练时的预处理一致——训练时底盘 state 就被置零了，所以推理也要置零，否则分布不匹配。但它在这之前先把当前底盘 <code>chunk_start_base</code> 存下来，因为出来的底盘预测是<b>相对这个起点</b>的，待会儿要加回去。</p>
+
+        <h2 id="postprocess">推理后处理：unnormalize、delta 加回、gripper 离散化</h2>
+        <p><code>_plan_action</code> 里推理 + 后处理是这一节最密的一段，拆开看：</p>
+        <div class="code" data-lang="python"><div class="code-h"><span class="fn">baselines/InternVLA-A1/inference.py</span><button class="cp">复制</button></div><pre><code>action_pred, _ = self.policy.predict_action_chunk(inputs, decode_image=self.args.decode_image)
+action_pred = action_pred[0, : self.args.infer_horizon, :19]          # 取前 infer_horizon 步、前 19 维
+action_pred = self.unnormalize_fn({"action": action_pred})["action"]  # 反归一化（stats_key 如 lift2）
+
+if self.args.action_mode == "delta":
+    init_action = torch.from_numpy(new_state)[None].float().cuda()
+    action_pred[:, :12] += init_action[:, :12]                        # 关节 delta 加回 init state
+
+action_pred_joints  = action_pred[:, :12]
+action_pred_gripper = action_pred[:, 15:]
+action_pred_base    = action_pred[:, 12:15]
+action_pred_gripper[action_pred_gripper &lt; 0.005] = 0.0                 # gripper 离散化
+action_pred_gripper[action_pred_gripper &gt; 0.005] = 0.044
+action_pred = torch.cat([action_pred_joints, action_pred_gripper, action_pred_base], dim=-1)
+self.action_plan.extend(action_pred[:self.args.action_horizon_size].cpu().numpy())</code></pre></div>
+        <p>四个动作连起来：<b>(1)</b> 从原始输出切 <code>[0, :infer_horizon, :19]</code>（默认 infer_horizon=50，但队列只装前 action_horizon_size=30）。<b>(2)</b> <span class="term">unnormalize_fn</span> 用 <code>stats.json[stats_key]</code>（默认 <code>lift2</code>）按 mean/std 反归一化——X-VLA 是手写缩放系数，这里是用数据集统计量。<b>(3)</b> <span class="term">delta 模式</span>：模型预测的是关节<i>增量</i>，要 <code>+= init_action</code> 把当前关节角加回去变成绝对目标。<b>(4)</b> gripper <b>离散化</b>成两个值：<code>&lt; 0.005 → 0.0</code>（闭）、否则 <code>0.044</code>（开）——和 X-VLA 的阈值门控异曲同工，但这里是离散成两个具体开度，不是钳到 -0.01。</p>
+
+        <h2 id="base">base：相对加回 chunk 起点，base_is_rel=True</h2>
+        <p>底盘的处理是这一节的点睛之笔，因为它把 state 置零和 chunk_start_base 串了起来。在 <code>get_action</code> 弹出每个动作时：</p>
+        <div class="code" data-lang="python"><div class="code-h"><span class="fn">baselines/InternVLA-A1/inference.py</span><button class="cp">复制</button></div><pre><code>curr_base = np.asarray(obs["obs"]["state.base"], dtype=np.float32)
+if self.chunk_start_base is None:
+    self.chunk_start_base = curr_base.copy()
+predicted_rel_base = action[16:]                          # 模型出的相对底盘位移
+target_base_abs    = self.chunk_start_base + predicted_rel_base   # 加回 chunk 起点 = 绝对目标
+base_motion        = target_base_abs - curr_base          # 再减当前 = 这一步该走的增量
+output["base_motion"] = base_motion.tolist()
+output['base_is_rel'] = True
+output["control_type"] = "joint_position"</code></pre></div>
+        <p>逻辑链：模型预测的是相对 chunk 起点的位移 → 加 <code>chunk_start_base</code> 得到<b>绝对目标</b> → 再减<b>当前</b>底盘得到"这一步要走多少"的增量，配 <code>base_is_rel=True</code>。这和 π0 的差分思路殊途同归（都把累积相对换成逐步相对），但 InternVLA-A1 多绕了一圈"绝对目标"，因为它的相对基准是 chunk 起点而非上一步。</p>
+
+        <div class="callout note">
+          <div class="c-h">_pack_action_fields：又一次 joint 重排</div>
+          <p>和 π0、X-VLA 一样，关节也要重排成契约的 <code>[左臂6, 左夹2, 右臂6, 右夹2]</code> 布局。这里封装成一个静态方法：<code>np.concatenate([action[:6], action[12:14], action[6:12], action[14:16]])</code>。三个 baseline 写了三遍同一件事——足见 4.3 那个 19 维向量的内部顺序有多容易出错。</p>
+        </div>
+
+        <h2 id="args">args 与启动</h2>
+        <p>CLI 用 <span class="term">tyro</span> 解析 <span class="term">InferenceArgs</span> dataclass，关键参数：<span class="term">ckpt_path</span>、<span class="term">stats_key</span>（默认 lift2，决定反归一化用哪套统计量）、<span class="term">resize_size</span>（224）、<span class="term">image_history_interval</span>（15，回看多远）、<span class="term">action_mode</span>（delta）、<span class="term">infer_horizon</span>（50，模型一次预测多长）、<span class="term">action_horizon_size</span>（30，队列实际装多长）、以及连接用的 <span class="term">worker_ids</span> / <span class="term">url</span> / <span class="term">token</span> / <span class="term">run_id</span>。主循环和另两者同构：<code>reset → get_action → step</code>，出错重建 client，并在收到 <code>obs["reset"]</code> 时调 <code>policy.reset()</code> 清空队列和图像历史。外层 <code>eval_pjsim.sh</code> 再包一层多 worker 启动。</p>
+
+        <div class="callout">
+          <div class="c-h">三者集齐，可以对比了</div>
+          <p>InternVLA-A1 带来了三个独有的复杂度：world-model 式的 visual foresight、有状态的队列驱动 replan、以及"相对 chunk 起点 → 绝对 → 逐步增量"的两段式底盘换算。但剥开这些，它和 π0、X-VLA 吐回去的仍是同一个 EvalClient 契约里的 action dict。下一节，我们把三者并排放进一张表，看清"同一个契约，三种迥异策略"到底差在哪几个字段。</p>
+        </div>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/flow-matching-ode.js"></script>
+  <script src="../../assets/js/widgets/action-chunking.js"></script>
+  <script src="../../assets/js/widgets/eval-flow.js"></script>
+  <script src="../../assets/js/widgets/action-dissector.js"></script>
+  <script src="../../assets/js/widgets/capability-radar.js"></script>
+  <script src="../../assets/js/widgets/task-taxonomy.js"></script>
+  <script src="../../assets/js/widgets/moe-attention.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>怎么读这本书 · 两座桥 · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="0-3">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 0 · Orientation · 0-3</div>
+        <h1>怎么读这本书 · 两座桥</h1>
+        <p class="lede">这本书是为<i>一类特定读者</i>写的：你有扎实的<span class="term">RL</span>数学底子，上过 <span class="term">GAMES103</span> 那样的物理仿真课，但 VLA 对你还是新世界。这一节给你一张路线图，外加两座专门为你搭的桥——让你每遇到一个陌生概念，都能踩着已知的东西走过去。</p>
+
+        <h2 id="roadmap">全书结构：7 个 Part + 附录</h2>
+        <p>全书是一条从「为什么」走到「怎么做」的线。前面建直觉与背景，中间讲机制与理论，后面落到真实代码和实战。结构如下：</p>
+        <table>
+          <thead><tr><th>Part</th><th>主题</th><th>你会得到什么</th></tr></thead>
+          <tbody>
+            <tr><td><b>Part 0</b></td><td>序章 · Orientation</td><td>EBench 是什么、由哪些 repo 组成、怎么读这本书（你在这里）。</td></tr>
+            <tr><td><b>Part 1</b></td><td>问题域 · Manipulation &amp; VLA</td><td>从 RL 过渡到 behavior cloning；VLA 是什么；本体 lift2。</td></tr>
+            <tr><td><b>Part 2</b></td><td>仿真地基 · Simulation Stack</td><td>Isaac Sim / cuRobo / GenManip / LeRobot 数据。</td></tr>
+            <tr><td><b>Part 3</b></td><td>Benchmark 方法论</td><td>capability profile 愿景、tracks×splits、26 任务与打分、泛化轴、诊断报告。</td></tr>
+            <tr><td><b>Part 4</b></td><td>评测引擎 · Client–Server</td><td>依赖隔离、EvalClient 契约、action 向量、chunk/step、gmp CLI。</td></tr>
+            <tr><td><b>Part 5</b></td><td>VLA 理论 · The Engine Inside</td><td>action chunking、flow matching、action expert、离散 vs 连续。</td></tr>
+            <tr><td><b>Part 6</b></td><td>Baseline 全链路</td><td>π0/π0.5、X-VLA、InternVLA-A1 的真实代码，以及三者对比。</td></tr>
+            <tr><td><b>Part 7</b></td><td>实战 · Capstone</td><td>接入自己的模型、本地 vs online、追踪一个 episode 全程。</td></tr>
+            <tr><td><b>Appendix</b></td><td>附录 · Reference</td><td>术语表、链接地图、obs/action/gmp 速查、参考文献。</td></tr>
+          </tbody>
+        </table>
+        <p>你不必严格按顺序读。但如果你是 VLA 新人，建议至少把 <b>Part 1 → Part 4 → Part 5</b> 这条主线走一遍：先知道问题长什么样、再知道评测怎么跑、最后才钻进模型内部的数学。</p>
+
+        <h2 id="two-bridges">两座桥的约定</h2>
+        <p>这本书最核心的教学手法，是<b>两座桥</b>。每当引入一个 VLA 新概念，我们会尽量从你已经掌握的东西搭一座桥过去——一边是 RL，一边是 GAMES103。桥会长这样：</p>
+
+        <div class="bridge rl">
+          <div class="c-h"><span class="tag">从 RL 看</span> 这座桥连接你的 RL 直觉</div>
+          <p>带这个标记的盒子，会把眼前的新概念翻译成你熟悉的 RL 语言：policy、value、reward、policy gradient、TD、actor、stochastic policy……举个例子，后面讲生成式策略时，我们会说它「最接近一个 <span class="term">stochastic actor</span>，但用 behavior cloning 而非 policy gradient 训练」。</p>
+        </div>
+
+        <div class="bridge g103">
+          <div class="c-h"><span class="tag">从 GAMES103 看</span> 这座桥连接你的仿真直觉</div>
+          <p>带这个标记的盒子，会借用你在 GAMES103 学的物理仿真知识：刚体、约束、时间步进、数值积分（forward Euler）、向量场……例如讲 flow matching 推理时，我们会说「解 ODE 的 forward Euler 积分，正是你学过的那套数值积分；rectified flow 的直线路径就像积分一条几乎匀速的轨迹，步长少也准」。Isaac Sim 的物理循环，本质就是你学过的刚体步进被 GPU 并行到上千个 env。</p>
+        </div>
+
+        <p>不是每个概念都两座桥都搭——哪座更顺手就用哪座。遇到桥，请<b>停一下</b>，先在脑子里把新旧概念对齐，再往下读。这是这本书希望你养成的读法。</p>
+
+        <h2 id="english-terms">英文术语的约定</h2>
+        <p>本书<b>保留所有英文术语</b>——架构名、命令、性能指标、概念名一律不翻译，用 <span class="term">这种高亮</span> 标出。原因有二：一是这些词正是你将来读 paper、读 issue、和同行交流时要用的；二是中文译名往往多套并存，反而增加歧义。所以你会看到 <span class="term">flow matching</span>、<span class="term">action chunk</span>、<span class="term">covariate shift</span>、<span class="term">EvalClient</span> 这样的词直接出现在中文句子里——这是刻意的。偶尔我们用 <span class="term-i">斜体高亮</span> 来强调一个需要你特别留意的词。</p>
+
+        <div class="callout note">
+          <div class="c-h">一个会反复出现的口径提醒</div>
+          <p>EBench 有两套口径：README / paper 用<b>愿景</b>语言（如「5-axis atomic diagnostic」「794 task instances」「Test-Mini」），线上 <span class="term">docs</span> 给<b>可验证事实</b>（「3 tracks × 3 splits、26 tasks、6,600 episodes」，且 split 细分标 <span class="term">WIP</span>）。本书会明确区分二者：讲愿景时标注「README/paper 愿景」，讲机制时用 docs 与代码事实，绝不把两者混为一谈。</p>
+        </div>
+
+        <h2 id="widgets">交互部件怎么玩</h2>
+        <p>书里散布着可交互的小实验，长这样（每个全书只出现一次，放在最相关的那一节）：</p>
+        <div class="lab">
+          <div class="lab-h"><span class="lab-tag">interactive</span><span class="lab-t">一个交互部件示意</span></div>
+          <div class="lab-body"><p style="margin:0;color:var(--muted)">真正的部件会渲染在这里——比如雷达图、ODE 积分动画、action 向量解剖器。在它各自的章节里它是活的，可以拖、可以勾选、可以观察参数变化。</p></div>
+          <div class="lab-cap">每个部件下方都有一句说明：告诉你怎么玩、该看什么。</div>
+        </div>
+        <p>你会在书里遇到这些部件：<span class="term">capability-radar</span>（能力画像，<a href="0-1-why-ebench.html">0.1</a> 已出现）、<span class="term">action-chunking</span>、<span class="term">eval-flow</span>（client↔server 时序）、<span class="term">action-dissector</span>（动作向量解剖）、<span class="term">flow-matching-ode</span>（noise→action 的积分动画）、<span class="term">task-taxonomy</span>（26 任务全景）、<span class="term">moe-attention</span>（action expert 的注意力路由）。遇到时<b>动手玩</b>，比读十行字都管用。</p>
+
+        <h2 id="search">搜索与导航</h2>
+        <p>顶栏右上有个搜索按钮，但更快的是直接按 <kbd>/</kbd> 键——任何页面随时唤起搜索框，输入小节标题或术语，<kbd>↑</kbd><kbd>↓</kbd> 选择、<kbd>Enter</kbd> 跳转、<kbd>Esc</kbd> 关闭。左侧栏是自动生成的目录树，右侧栏是当前页的「On this page」并随滚动高亮你所在的位置。上一页 / 下一页也是自动生成的，跟着 <a href="../../index.html">封面</a> 的顺序走。</p>
+
+        <h2 id="whats-next">这一节你需要带走的</h2>
+        <p>这本书：7 个 Part + 附录，从「为什么」走到「怎么做」；两座桥（RL 桥、GAMES103 桥）帮你从已知走向未知；英文术语一律保留；交互部件请动手玩；按 <kbd>/</kbd> 随时搜索。带着这张路线图，我们正式进入正题。</p>
+        <p>下一节（也是 Part 1 的开场），我们从你最熟的地方出发——<b>RL</b>——一步步走到 manipulation 为什么改用 behavior cloning，以及「生成式策略」到底是什么意思。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/flow-matching-ode.js"></script>
+  <script src="../../assets/js/widgets/action-chunking.js"></script>
+  <script src="../../assets/js/widgets/eval-flow.js"></script>
+  <script src="../../assets/js/widgets/action-dissector.js"></script>
+  <script src="../../assets/js/widgets/capability-radar.js"></script>
+  <script src="../../assets/js/widgets/task-taxonomy.js"></script>
+  <script src="../../assets/js/widgets/moe-attention.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

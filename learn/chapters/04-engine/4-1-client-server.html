@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>为什么是 client–server：依赖隔离 · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="4-1">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 4 · Client–Server · 4-1</div>
+        <h1>为什么是 client–server：依赖隔离</h1>
+        <p class="lede">从这一节起我们打开评测引擎的引擎盖。你会发现 EBench 的整个评测系统，被一条看似工程化、实则非常关键的设计决策切成了两半：<span class="term">server</span> 跑仿真，<span class="term">client</span> 跑模型，中间只隔着一条网络。先讲清楚<i>为什么</i>必须这样切，再看这一刀切出来的完整评测循环长什么样。</p>
+
+        <h2 id="the-pain">痛点：两套依赖谁也不让谁</h2>
+        <p>EBench 的仿真地基是 <span class="term">NVIDIA Isaac Sim</span>（我们在 <a href="../02-sim/2-1-isaac-sim.html">2.1</a> 拆过它 = USD + PhysX + RTX）。它不是一个轻量库，而是一整套 <span class="term">Omniverse</span> 应用：固定到 <span class="term">Isaac Sim 4.1.0</span>、<span class="term">CUDA 12.1</span>、<span class="term">torch==2.4.0</span>，还拖着一长串渲染、物理、USD 解析的原生依赖。它对 Python 版本、CUDA、PyTorch 的口味都很挑。</p>
+        <p>而你的 VLA 模型呢？它有<i>自己</i>的一套世界。一个 π0/π0.5 跑在 <span class="term">openpi</span> 的环境里；X-VLA 要 <span class="term">transformers</span> 的某个版本配 <span class="term">trust_remote_code</span>；InternVLA-A1 要 <span class="term">Qwen3-VL</span> 那一套。这些模型对 torch、CUDA、flash-attention 的版本同样挑剔，而且和 Isaac Sim 的口味<b>几乎不可能对齐</b>。</p>
+        <p>如果把模型和仿真硬塞进同一个 Python 进程、同一个 conda env，你立刻会撞上经典的 <span class="term">dependency hell</span>：torch 版本一个要 2.4、一个要 2.6；CUDA 一个要 12.1、一个要 12.4；某个原生库被两边以不兼容的方式各自链接。即便你侥幸调通了一种模型，换一个 baseline 又得从头再来。评测平台要同时接纳 π0、π0.5、X-VLA、InternVLA-A1 以及你自己的模型——这种「每来一个模型就重装一次仿真栈」的世界是不可维护的。</p>
+
+        <div class="callout warn">
+          <div class="c-h">这不是「微服务时髦」，是物理约束</div>
+          <p>很多系统拆成 client–server 是为了水平扩展。EBench 拆开的<b>首要原因</b>更朴素：Isaac Sim 这只重型黑盒和现代 VLA 的依赖树根本无法共存于一个进程。隔离不是优化项，是能不能跑起来的前提。</p>
+        </div>
+
+        <h2 id="the-solution">解法：server 是仿真黑盒，client 极简寄生</h2>
+        <p>EBench 把这条裂缝变成了架构边界。一边是 <span class="term">server</span>：它把整个 Isaac Sim 仿真——加载场景、推进物理、渲染 4 路相机、判分——全部封在自己那套重型环境里，对外只暴露一个统一的<b>黑盒 API</b>。它来自 <a href="../02-sim/2-3-genmanip.html">GenManip</a>（CVPR'25），那套曾压测过 1,500 并发 Isaac Sim 实例的仿真平台。</p>
+        <p>另一边是 <span class="term">client</span>：一个极其轻量的 Python 包 <span class="term">genmanip-client</span>。它不含任何仿真依赖，只负责「按一个固定协议收发 observation 和 action」。因为足够薄，它可以直接 <span class="term">pip install -e .</span> 进<b>你模型自己的 env</b> 而不会污染任何东西。</p>
+
+        <div class="code" data-lang="bash"><div class="code-h"><span class="fn">把 client 装进你的模型环境</span><button class="cp">复制</button></div><pre><code>git clone https://github.com/InternRobotics/genmanip-client.git
+cd genmanip-client &amp;&amp; pip install -e .</code></pre></div>
+
+        <p>于是分工变得干净：<b>server 那边</b>，你完全不用关心模型是什么，它只管把仿真状态吐出来、把动作执行下去；<b>client 这边</b>，你完全不用关心 Isaac Sim 怎么装，你只在自己熟悉的训练环境里写「拿 obs → 推理 → 回 action」。两边各自用各自最舒服的依赖，通过一条 HTTP/WebSocket 连接对话。这条连接还天然支持<b>跨机</b>——server 跑在带 8× RTX 4090 的仿真机上，client 跑在你的推理机上，加 <span class="term">--host</span>/<span class="term">--port</span> 即可（线上 challenge 更是直接连远端 endpoint，见 <a href="4-5-gmp-cli.html">4.5</a>）。</p>
+
+        <div class="bridge rl">
+          <div class="c-h"><span class="tag">从 RL 看</span> 这就是 env 与 agent 的物理分居</div>
+          <p>你在 RL 里早就习惯了 <span class="term">env</span> 与 <span class="term">agent</span> 的接口分离：<code>obs = env.reset()</code>、<code>obs, reward, done = env.step(action)</code>。EBench 没有发明新概念，它只是把这条<b>本来在进程内的接口，推到了进程之间</b>。server = env（Isaac Sim 仿真 + 判分），client = agent 的外壳（把你的模型包成符合协议的 caller）。Gym 那套 reset/step/done 的心智模型可以原样搬过来——区别只是 step 现在要跨网络，而且 reward 在评测里以 episode 末的 task score 形式出现（见 <a href="../03-methodology/3-3-tasks-scoring.html">3.3</a>）。</p>
+        </div>
+
+        <div class="bridge g103">
+          <div class="c-h"><span class="tag">从 GAMES103 看</span> 仿真器作为可被远程驱动的时间步进器</div>
+          <p>你在 GAMES103 写过的物理循环——「解析约束 → 推进一个时间步 → 写回状态」——正是 server 内部每次 <code>step</code> 在做的事，只不过被 Isaac Sim 的 PhysX 在 GPU 上并行到了整个场景。client 在外面看不到这些积分细节，它拿到的是积分<i>之后</i>的状态快照（关节角、底盘位姿、相机图）。把仿真器当成一个「外部可驱动的时间步进黑盒」，正是 client–server 想给你的抽象。</p>
+        </div>
+
+        <h2 id="the-loop">这一刀切出来的评测循环</h2>
+        <p>边界划好之后，一次评测就是 client 和 server 之间反复打的一套乒乓。把它写成一句话的循环：<b>server reset 给出首帧 obs → client 拿 obs 推理出 action → client 把 action 发回 server → server 在仿真里执行、推进、再吐下一帧 obs → 直到 server 报告 done</b>。每个 episode 都是这个循环跑一遍，跑满整个 track/split 的所有 episode 就得到分数。</p>
+        <p>下面这个交互部件把这条时序铺开了。先建立直觉，后面几节会把循环里的每一格——obs 的字段（<a href="4-2-evalclient.html">4.2</a>）、action 的结构（<a href="4-3-action-vector.html">4.3</a>）、chunk 还是 step（<a href="4-4-chunk-step.html">4.4</a>）——逐一拆开。</p>
+
+        <div class="lab">
+          <div class="lab-h"><span class="lab-tag">interactive</span><span class="lab-t">eval-flow：一次评测里 client 与 server 的对话</span></div>
+          <div class="lab-body" data-widget="eval-flow"></div>
+          <div class="lab-cap">看 reset→obs→infer→step→done 的往返时序；切换 chunk / step 模式，注意 chunk 模式如何把多步执行收进 server 一侧、省掉中间往返（细节见 4.4）。</div>
+        </div>
+
+        <p>注意这张图里有一条贯穿全书的暗线：<b>所有「聪明」都在 client 那一侧</b>。server 只是个忠实、无状态记忆的执行器（它不知道你的模型在想什么）；模型怎么把视觉和指令变成动作、要不要做 action chunking、要不要 receding horizon replan——全是 client 的事。这也解释了为什么本书 Part 5 的 VLA 理论和 Part 6 的 baseline 全链路，几乎都在讲 client 这半边。</p>
+
+        <h2 id="takeaway">这一节你需要带走的</h2>
+        <p>记住一句话：<b>EBench 把仿真和模型用一条网络隔成两个进程，是为了让两套互不兼容的依赖各自活下去</b>。server 是 Isaac Sim 黑盒，client 是能寄生进任何模型环境的极简包；两者用 reset→obs→infer→step→done 的循环对话。这条边界一旦理解，后面所有内容都只是在填这个循环的细节。</p>
+        <p>下一节，我们走进 client 这一侧的入口——<span class="term">EvalClient</span>，看它的 reset/step/close 三个动作如何驱动整条循环，以及它递给你的那个 observation 字典里到底装了什么。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/flow-matching-ode.js"></script>
+  <script src="../../assets/js/widgets/action-chunking.js"></script>
+  <script src="../../assets/js/widgets/eval-flow.js"></script>
+  <script src="../../assets/js/widgets/action-dissector.js"></script>
+  <script src="../../assets/js/widgets/capability-radar.js"></script>
+  <script src="../../assets/js/widgets/task-taxonomy.js"></script>
+  <script src="../../assets/js/widgets/moe-attention.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

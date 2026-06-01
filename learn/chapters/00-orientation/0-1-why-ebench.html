@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>从 success rate 到 capability profile · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="0-1">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 0 · Orientation · 0-1</div>
+        <h1>从 success rate 到 capability profile</h1>
+        <p class="lede">我们先不碰任何代码。先想清楚一个更基本的问题：当你说一个机器人策略「做得好」，你到底在<i>测量什么</i>？这个问题的答案，决定了 <span class="term">EBench</span> 长什么样。</p>
+
+        <h2 id="single-number">一个数字的贫穷</h2>
+        <p>大多数 manipulation benchmark 给你一个数：<span class="term">success rate</span>。模型跑 100 个 episode，成功 63 个，于是 0.63。排行榜上 0.63 排在 0.61 前面，故事结束。</p>
+        <p>但 0.63 是个<b>被压扁的</b>数字。它把「这个模型能把长流程任务一步步做完」「它的手够不够稳能拧上螺母」「它会不会推着底盘走到桌子另一边」「换一句没见过的指令它还听不听得懂」——全部揉成了一个标量。两个都拿 0.63 的模型，可能强在完全不同的地方。你拿到这个数，<i>什么也学不到</i>，既不知道该往哪改,也不知道它会在什么情况下崩。</p>
+
+        <div class="bridge rl">
+          <div class="c-h"><span class="tag">从 RL 看</span> 标量回报的信息瓶颈</div>
+          <p>这其实是你熟悉的问题。在 RL 里，把一个复杂行为压缩成单一标量 reward，会丢掉大量结构信息——这正是 reward shaping、multi-objective RL、以及各种 diagnostic / probing 方法想补回来的东西。EBench 做的事，类比过来就是：<b>不要只看 return，要看 return 在各个能力轴上的分解</b>。</p>
+        </div>
+
+        <h2 id="profile">把一个数摊成一张画像</h2>
+        <p>EBench 的全称是 <span class="term-i">Elemental Mobile Manipulation Benchmark</span>。它的核心主张写在 README 的副标题里：</p>
+        <div class="callout"><p style="margin:0;font-style:italic">“From a single success rate to a multi-axis capability profile.”</p></div>
+        <p>也就是把黑盒的 success rate，变成一张可读的 <span class="term">capability profile</span>——一张沿多个能力轴展开的雷达图。下面这个（示意）雷达图就是这个想法的样子：同样的总分，画像可以完全不同。</p>
+
+        <div class="lab">
+          <div class="lab-h"><span class="lab-tag">interactive</span><span class="lab-t">capability profile：同样的总分，不一样的画像</span></div>
+          <div class="lab-body" data-widget="capability-radar"></div>
+          <div class="lab-cap">勾选不同模型对比。注意 Model A 与 Model B 即使平均分接近，强弱轴也可能正好互补。数值为示意。</div>
+        </div>
+
+        <h2 id="three-regimes">为什么是「mobile manipulation」</h2>
+        <p>EBench 想覆盖三类通常被分开研究的操作范式，放进同一个 benchmark：</p>
+        <ul>
+          <li><b>long-horizon</b>——多步、有先后依赖的长流程任务（开微波炉 → 放两个蛋挞 → 关门）。</li>
+          <li><b>dexterous &amp; precise</b>——需要精细对位的灵巧操作（把齿轮套上轴并与另两个齿轮啮合）。</li>
+          <li><b>mobile</b>——带移动底盘，机器人要先<i>走过去</i>再操作。</li>
+        </ul>
+        <p>这三类背后是完全不同的能力短板。把它们塞进一个 success rate 里尤其浪费信息；分轴诊断的价值在这里最大。所有任务都跑在同一个本体上——<span class="term">lift2</span>：双臂 + 移动底盘 + 4 个 480×640 相机（我们会在 <a href="../01-problem/1-3-lift2-embodiment.html">1.3</a> 里仔细拆它）。</p>
+
+        <h2 id="isolation">还有一件事：别在测试集上自欺</h2>
+        <p>capability profile 要可信，前提是数字反映<b>真实泛化</b>，而不是对评测分布的过拟合。EBench 因此严格区分 <span class="term">val_train</span> / <span class="term">val_unseen</span>（开放，可调）与留出的 <span class="term">test</span>（驱动 leaderboard）。这条「训练/测试隔离」的红线，我们在 <a href="../03-methodology/3-2-tracks-splits.html">3.2</a> 详谈。</p>
+
+        <div class="callout note">
+          <div class="c-h">一个口径提醒（会贯穿全书）</div>
+          <p>EBench 的 README / 即将发布的 paper 用「5-axis atomic diagnostic」「794 task instances」「Test-Mini」这类<b>愿景</b>语言来描述能力画像；而当前线上 <span class="term">docs</span> 站给出的<b>可验证事实</b>是「3 tracks × 3 splits、26 tasks、数据集 6,600 episodes」，且 split 细分仍标注 <span class="term">WIP</span>。本书会把<b>愿景</b>（为什么要多轴诊断）和<b>地面真相</b>（代码与 docs 里确实存在的东西）分开标注，不让你混淆。</p>
+        </div>
+
+        <h2 id="whats-next">这一节你需要带走的</h2>
+        <p>EBench 的出发点不是「又一个 benchmark」，而是一个测量哲学：<b>把能力拆开来看</b>。记住这三件事就够进入下一节了——(1) 单一 success rate 信息太少；(2) EBench 用 capability profile 沿多轴展开；(3) 它横跨 long-horizon / dexterous / mobile 三种范式，并用训练/测试隔离守住可信度。</p>
+        <p>下一节，我们站到高处，看清这个项目其实是由<i>一群仓库</i>组成的星座——你现在读的这个 repo 只是它的前门。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/flow-matching-ode.js"></script>
+  <script src="../../assets/js/widgets/action-chunking.js"></script>
+  <script src="../../assets/js/widgets/eval-flow.js"></script>
+  <script src="../../assets/js/widgets/action-dissector.js"></script>
+  <script src="../../assets/js/widgets/capability-radar.js"></script>
+  <script src="../../assets/js/widgets/task-taxonomy.js"></script>
+  <script src="../../assets/js/widgets/moe-attention.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

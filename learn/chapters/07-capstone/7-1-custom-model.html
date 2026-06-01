@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>接入自己的模型：最小 ModelClient · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="7-1">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 7 · Capstone · 7-1</div>
+        <h1>接入自己的模型：最小 ModelClient</h1>
+        <p class="lede">前面六个 Part 我们拆透了 EBench 的方方面面——仿真栈、契约、VLA 理论、三个 baseline 的全链路。现在轮到你了。本节只回答一个问题：要让 <span class="term">EBench</span> 评测你自己的策略，你<i>最少</i>要写什么代码？答案出奇地短。</p>
+
+        <h2 id="the-contract">只有一个契约要满足</h2>
+        <p>回忆 <a href="../04-engine/4-2-evalclient.html">4.2</a> 里我们反复强调的那条主循环：<span class="term">EvalClient</span> 负责和 server 通信，你只需要往它手里塞一个能<b>把 observation 变成 action</b> 的东西。EBench 把这个东西叫做 <span class="term">ModelClient</span>，它的契约可以缩成一行：</p>
+        <div class="callout"><p style="margin:0;font-style:italic"><span class="term">model_client.get_action(obs) -&gt; action</span> ——一次推理，一次调用。</p></div>
+        <p>没有基类要继承，没有注册表要登记。只要你的对象有这个方法、吃 <a href="../04-engine/4-2-evalclient.html">4.2</a> 那套 observation、吐 <a href="../04-engine/4-3-action-vector.html">4.3</a> 那套 action dict，<b>它就接入完成了</b>。三个官方 baseline（π0、X-VLA、InternVLA-A1）本质上都只是这个契约的不同填法。</p>
+
+        <div class="bridge rl">
+          <div class="c-h"><span class="tag">从 RL 看</span> 这就是一个 policy 的 <span class="term-i">act()</span></div>
+          <p>你在 RL 里写惯的 <span class="term">policy.act(state) -&gt; action</span>，和这里的 <span class="term">get_action(obs)</span> 是同一个东西。区别只在 obs/action 的<i>结构</i>更复杂（多相机图 + 多段 state；双臂关节 + 底盘增量），以及策略内部不是 argmax 一个 Q，而是 flow matching 采样一段 chunk。接口形状没变。</p>
+        </div>
+
+        <h2 id="skeleton">最小骨架</h2>
+        <p>下面是一个能跑通的 <span class="term">ModelClient</span> 骨架。它把要做的四件事标了出来：<b>加载权重</b>（<span class="term">__init__</span>）、<b>清状态</b>（<span class="term">reset</span>）、<b>解包 obs</b>、<b>产出 action dict</b>。把每个 <span class="term-i">TODO</span> 换成你自己模型的逻辑即可。</p>
+
+        <div class="code" data-lang="python"><div class="code-h"><span class="fn">my_model_client.py</span><button class="cp">复制</button></div><pre><code>import numpy as np
+import torch
+
+
+class MyModelClient:
+    """满足 EBench 契约的最小模型封装：get_action(obs) -> action。"""
+
+    def __init__(self, ckpt_path, device="cuda"):
+        # 1) 加载权重。只在进程启动时做一次，别放进 get_action。
+        self.device = device
+        self.policy = load_my_policy(ckpt_path).to(device).eval()
+        # 训练时存下来的归一化统计量（mean/std）；推理要用同一套。
+        self.stats = load_norm_stats(ckpt_path)
+        self._t = 0  # 内部时间戳 / recurrent state 的占位
+
+    def reset(self):
+        # 2) 每个新 episode 调一次：清掉一切跨步携带的状态。
+        #    若模型有 action 队列 / recurrent hidden / 历史帧缓存，全在这里清。
+        self._t = 0
+        if hasattr(self.policy, "reset"):
+            self.policy.reset()
+
+    @torch.no_grad()
+    def get_action(self, obs):
+        # 3) 解包 observation（按 worker_id 取，见 4.2）。
+        o = obs["0"]["obs"]            # 单 worker：worker_id == "0"
+        imgs = {
+            "head":  o["video.top_view"],     # (480,640,3) uint8 HWC
+            "left":  o["video.left_view"],
+            "right": o["video.right_view"],
+        }
+        joints  = np.asarray(o["state.joints"],  dtype=np.float32)   # (12,)
+        gripper = np.asarray(o["state.gripper"], dtype=np.float32)   # (4,)
+        base    = np.asarray(o["state.base"],    dtype=np.float32)   # (3,) x,y,theta
+        prompt  = o["instruction"]                                   # str
+
+        # ---- TODO: 预处理 + 你的模型前向 ----
+        images = self._preprocess(imgs)                  # 归一化 / resize / CHW
+        state  = self._norm(np.concatenate([joints, gripper, base]))
+        pred   = self.policy.infer(images, state, prompt)  # 出一段 (H, 19) chunk
+        a      = self._unnorm(pred[0])                    # 取 chunk 第 0 步，反归一化
+
+        # 4) 产出 action dict（契约形状见 4.3）。
+        self._t += 1
+        return {
+            "0": {
+                "action": a[:16].astype(np.float32),   # 6 左关节+2 左夹+6 右关节+2 右夹
+                "base_motion": a[16:19].astype(np.float32),  # Δx, Δy, Δyaw
+                "control_type": "joint_position",
+                "is_rel": False,        # 臂为绝对关节角；相对则 True
+                "base_is_rel": True,    # 底盘多为相对增量
+            }
+        }
+</code></pre></div>
+
+        <p>就这些。把 <span class="term">load_my_policy</span> / <span class="term">_preprocess</span> / <span class="term">infer</span> 换成你的实现，配上 <a href="../04-engine/4-2-evalclient.html">4.2</a> 的那段 <span class="term">reset → get_action → step</span> 主循环，你就能在本地 server 上跑评测了。回看三个 baseline，它们多出来的代码全是<b>填充</b>这个骨架的细节：π0 的 <span class="term">prep_input/prep_output</span> 做通道重排（<a href="../06-baselines/6-1-openpi.html">6.1</a>），X-VLA 的 proprio 缩放与 gripper 门控（<a href="../06-baselines/6-2-xvla.html">6.2</a>），InternVLA-A1 的 action 队列与 temporal image pair（<a href="../06-baselines/6-3-internvla-a1.html">6.3</a>）——骨架一模一样。</p>
+
+        <h2 id="chunk-mode">可选：get_action_chunk，省掉往返</h2>
+        <p>如果你的策略一次出一整段 chunk（flow matching 模型几乎都是），实现可选的 <span class="term">get_action_chunk(obs)</span> 能让 server 在内部<b>整段执行</b>，只在 re-inference 点把观测回传给你，省掉每一步的网络往返。代价是 server 要带 <span class="term">--no_save_process</span> 起。回顾 <a href="../04-engine/4-4-chunk-step.html">4.4</a> 的 chunk vs step 对比。</p>
+
+        <div class="code" data-lang="python"><div class="code-h"><span class="fn">my_model_client.py（追加）</span><button class="cp">复制</button></div><pre><code>    @torch.no_grad()
+    def get_action_chunk(self, obs):
+        """返回长度 chunk_size 的 list[action dict]；server 内部逐个执行。"""
+        o = obs["0"]["obs"]
+        images = self._preprocess({
+            "head":  o["video.top_view"],
+            "left":  o["video.left_view"],
+            "right": o["video.right_view"],
+        })
+        state = self._norm(np.concatenate([
+            o["state.joints"], o["state.gripper"], o["state.base"]
+        ]).astype(np.float32))
+
+        chunk = self._unnorm(self.policy.infer(images, state, o["instruction"]))  # (H,19)
+        chunk = chunk[: self.chunk_size]           # 只回 chunk_size 步（受 receding horizon 约束）
+        return [self._to_action_dict(a) for a in chunk]
+</code></pre></div>
+
+        <p>注意：执行的步数（<span class="term">chunk_size</span>）通常<b>短于</b>模型预测的 horizon——这正是 <a href="../05-theory/5-1-action-chunking.html">5.1</a> 的 receding horizon：预测 50、只执行 16/25，再 replan。<span class="term">chunk_size</span> 由 <span class="term">gmp</span> 的 <span class="term">--chunk_size</span> 选项控制（<a href="../04-engine/4-5-gmp-cli.html">4.5</a>）。</p>
+
+        <h2 id="pitfalls">三个最常踩的坑</h2>
+        <p>接入失败十有八九不是契约写错，而是这三类<i>静默</i>错误——不报错，但分数趴在地上。</p>
+
+        <div class="callout warn">
+          <div class="c-h">图像是 uint8 HWC，归一化得你自己来</div>
+          <p>obs 里的 <span class="term">video.{cam}_view</span> 是 <b>(480,640,3) 的 uint8、HWC 排布、0–255</b>。绝大多数 VLM backbone 要 float、CHW、且按训练时的 <span class="term">mean/std</span> 归一化（或 /255 到 [0,1]）。忘了这步，模型看到的是一片全白噪声，照样推理出动作，照样得 0 分却不报错。<b>用和训练时<i>完全一致</i>的预处理</b>。相机命名对齐也在这里：EBench 的 <span class="term">top/left/right/overlook</span> 要映射到你模型期望的 <span class="term">head/hand_left/hand_right</span> 等视角。</p>
+        </div>
+
+        <div class="callout warn">
+          <div class="c-h">reset 必须真的清干净跨步状态</div>
+          <p>新 episode 的首步 obs 里 <span class="term">reset == True</span>（见 <a href="../04-engine/4-2-evalclient.html">4.2</a>）。如果你的策略带 <b>recurrent hidden state、action 队列、历史帧缓存</b>（InternVLA-A1 就有 action 队列 + temporal pair），<span class="term">reset</span> 里不清，上一个 episode 的残留会污染这一个的开头几步——表现为"每个 episode 一开始动作乱飘然后才正常"。在主循环里务必 <span class="term">if obs[...]["reset"]: model.reset()</span>。</p>
+        </div>
+
+        <div class="callout warn">
+          <div class="c-h">chunk_size 要调，长短各有代价</div>
+          <p>执行多少步再 replan 直接影响成绩，且和任务类型相关。<b>长 chunk</b> 动作平滑、网络往返少，但对扰动/接触反应迟钝（dexterous 任务吃亏）；<b>短 chunk</b> 反应快、纠错及时，但 <span class="term">covariate shift</span> 暴露更多、也更费网络（<a href="../05-theory/5-1-action-chunking.html">5.1</a>）。X-VLA 默认 <span class="term">--used_chunk_size 30</span> 是个合理起点；precise 任务可往下调，long-horizon 可往上。先在 <span class="term">val_unseen</span> 上扫几个值，别在 <span class="term">test</span> 上调参。</p>
+        </div>
+
+        <h2 id="takeaway">这一节你需要带走的</h2>
+        <p>接入 EBench = <b>实现一个有 <span class="term">get_action(obs) -&gt; action</span> 的对象</b>，外加 <span class="term">__init__</span> 加载权重、<span class="term">reset</span> 清状态。可选 <span class="term">get_action_chunk</span> 省往返。剩下全是细节填充，三个 baseline 已经给了你三份范本。下一节，我们把写好的 client 真正跑起来：本地评测和 online challenge 的流程差在哪，以及怎么读它吐回来的诊断报告。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/flow-matching-ode.js"></script>
+  <script src="../../assets/js/widgets/action-chunking.js"></script>
+  <script src="../../assets/js/widgets/eval-flow.js"></script>
+  <script src="../../assets/js/widgets/action-dissector.js"></script>
+  <script src="../../assets/js/widgets/capability-radar.js"></script>
+  <script src="../../assets/js/widgets/task-taxonomy.js"></script>
+  <script src="../../assets/js/widgets/moe-attention.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

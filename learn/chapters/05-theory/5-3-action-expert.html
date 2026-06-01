@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Action expert：Transfusion 与 MoE · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="5-3">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 5 · VLA 理论 · 5-3</div>
+        <h1>Action expert：Transfusion 与 MoE</h1>
+        <p class="lede">上一节我们用 flow matching 把动作「积」了出来。但这套机制要嫁接到一个<b>预训练好的 VLM</b>（PaliGemma）上——VLM 天生处理离散文本 token、用交叉熵训练，而动作是连续的、用 flow matching 训练。怎么让<i>同一个 transformer</i>同时干这两件事？π0 的答案是 <span class="term">Transfusion</span> 加上一个 <span class="term">action expert</span>。</p>
+
+        <h2 id="transfusion">Transfusion：一个 transformer，两套目标</h2>
+        <p>π0 在结构上 follow <span class="term">Transfusion</span> 的思路。核心一句话：<b>一个 transformer，按 token 类型用不同的训练目标</b>。</p>
+        <ul>
+          <li><b>离散 token</b>（文本、语言指令）：照常用 <span class="term">next-token cross-entropy</span>（交叉熵）监督——这是 VLM 的母语。</li>
+          <li><b>连续 token</b>（动作）：用上一节的 <span class="term">flow-matching loss</span> 监督——回归去噪向量场。</li>
+        </ul>
+        <p>两类 token 在<b>同一个序列、同一次前向</b>里流过 transformer，只是各自挂不同的损失头。这就避免了「把连续动作硬离散成 token」的信息损失（早期 RT-2/OpenVLA 那条路），又让模型保留了 VLM 处理图文的全部能力。Transfusion 原本是为「同一个模型既会画图（连续像素，diffusion）又会写字（离散文本，CE）」设计的；π0 把「画图」换成了「出动作」。</p>
+
+        <div class="bridge rl">
+          <div class="c-h"><span class="tag">从 RL 看</span> 离散动作头 vs 连续动作头</div>
+          <p>这其实是你熟悉的 action space 之争的翻版。RL 里离散动作空间（softmax over actions，交叉熵）和连续动作空间（高斯/确定性策略）需要完全不同的策略头。早期 VLA 选了离散——把每维动作分箱成 token，复用语言模型的自回归 + 交叉熵，工程上省事。但 π0 论证：高频灵巧控制需要<b>连续、精细、多模态</b>的输出，离散分箱既丢精度又难表达多模态。于是它在<b>同一个骨干上挂了一个连续动作头</b>（flow matching），而不是改造离散头。Transfusion 让这两种「策略头哲学」在一个网络里共存。</p>
+        </div>
+
+        <h2 id="action-expert">Action expert：给 robotics token 一套独立权重</h2>
+        <p>光有两套损失还不够。π0 更进一步：<b>处理 robotics 相关 token（action + state）时，用一套<i>独立的</i> transformer 权重</b>。这套独立权重就叫 <span class="term">action expert</span>。</p>
+        <p>用 π0 自己的话说，这「类似一个<b>两元的 mixture-of-experts</b>（MoE）」：</p>
+        <ul>
+          <li>一元专家处理 <b>image / text</b> 输入输出——用预训练好的 <span class="term">PaliGemma</span>（3B）权重；</li>
+          <li>另一元专家处理 <b>robotics（state / action）</b> 输入输出——用 action-expert 权重，<b>从零随机初始化</b>，规模约 <b>300M</b>。</li>
+        </ul>
+        <p>为什么要分两套权重，而不是让所有 token 共享同一套？直觉是：图文 token 和动作 token 的<b>统计性质天差地别</b>——前者是离散语义符号、后者是连续物理量。强迫一套 MLP/投影同时拟合两者，会互相拖累；而且我们想<b>保住 PaliGemma 预训练学到的 web 知识</b>，不希望随机初始化的动作部分把它冲乱（这条线索会在 <a href="../05-theory/5-4-discrete-continuous.html">5.4</a> 的 knowledge insulation 里推到极致）。给 robotics token 一套专属权重，让它<b>专门</b>学控制表示，是最自然的隔离。</p>
+
+        <div class="callout note">
+          <div class="c-h">这是「条件路由」MoE，不是「学习路由」MoE</div>
+          <p>注意这和你可能听过的稀疏 MoE（用 gating 网络<i>动态</i>决定每个 token 去哪个专家）不同。这里路由是<b>固定且由 token 类型决定</b>的：是图文就走 PaliGemma 权重，是 state/action 就走 action-expert 权重。没有学习出来的 gate，只有一条「按 modality 分流」的硬规则。</p>
+        </div>
+
+        <h2 id="shared-attention">关键：两专家共享一次 attention</h2>
+        <p>如果两套专家各算各的、互不通信，那就是两个独立模型，动作根本<b>看不到</b>图像和指令。所以最关键的设计是：<b>两元专家共享同一次 attention</b>。</p>
+        <p>机制是这样的：所有 token（图文 + state + action）排进<b>同一个序列</b>，做<b>一次联合 self-attention</b>——动作 token 在这一步里 attend 到图像 patch、语言 token、state，从而「读到」当前观测。但在 attention 之外，<b>每类 token 走自己专家的 MLP 和投影层</b>。换句话说：</p>
+        <table>
+          <thead><tr><th>子层</th><th>是否共享</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td>self-attention</td><td><b>共享一次</b></td><td>所有 token 在此交互，动作借此读到观测</td></tr>
+            <tr><td>MLP / 投影 / 输出头</td><td><b>各用各的</b></td><td>图文走 PaliGemma 权重，state/action 走 action-expert 权重</td></tr>
+          </tbody>
+        </table>
+        <p>这正好接上了上一节结尾的 <span class="term">KV cache</span> 巧思：因为观测 token 的 KV 在那一次 attention 里算好就不变，flow matching 的 10 步 Euler 只需反复更新 action token 对这份缓存的 attention，开销极小。</p>
+
+        <h2 id="masking">Attention mask：动作 token 是 full bidirectional</h2>
+        <p>还有一个容易忽略但重要的细节——<b>mask 形状</b>。文本 token 通常是 <span class="term">causal</span>（因果）mask：第 $i$ 个 token 只能看前面的，因为文本是自回归一个一个生成的。但<b>动作 token 不是自回归生成的</b>：整段 chunk 是 flow matching <i>一次性</i>积出来的，chunk 内部没有先后生成顺序。</p>
+        <p>所以 action token 用 <span class="term">full bidirectional</span>（全双向）mask：<b>chunk 内每个动作 token 都能 attend 到 chunk 内所有其它动作 token</b>。这让这 50 个动作能彼此协调、保持物理连贯（左右臂配合、轨迹平滑），而不是被人为切成单向序列。下面这个部件让你看清：哪些 token 走哪个专家、哪条 attention 边是允许的、动作块内部那个稠密双向连接长什么样。</p>
+
+        <div class="lab">
+          <div class="lab-h"><span class="lab-tag">interactive</span><span class="lab-t">action expert：token 路由与 attention mask</span></div>
+          <div class="lab-body" data-widget="moe-attention"></div>
+          <div class="lab-cap">看 image/text token 与 state/action token 如何分别路由到两套专家权重，却共享一次 attention；注意 action token 之间的 full bidirectional 连接，以及它们对观测前缀的单向读取。</div>
+        </div>
+
+        <h2 id="budget">参数账：3.3B 是怎么凑出来的</h2>
+        <p>把规模算清楚，方便你在读代码时核对：</p>
+        <ul>
+          <li><b>PaliGemma</b> 骨干：约 <b>3B</b>（背景知识：SigLIP 视觉 ≈400M + Gemma LM ≈2.6B，但 paper 只说 3B，我们也只说 3B）。</li>
+          <li><b>Action expert</b>：约 <b>300M</b>，从零初始化。</li>
+          <li>合计 π0 约 <b>3.3B</b> 参数。</li>
+        </ul>
+        <p>π0 还做过一个 <span class="term">π0-small</span> 消融，整体约 470M，用来验证方法在小规模下也成立、并隔离各设计的贡献。值得品味的对比是：动作专家只占总参数的<b>不到十分之一</b>（300M / 3.3B），却承担了「把图文理解翻译成连续控制」这件最关键的事——绝大部分容量花在了<b>保留和利用 VLM 的世界知识</b>上，动作头只是一个轻巧但专精的「翻译官」。</p>
+
+        <h2 id="whats-next">这一节你需要带走的</h2>
+        <p>三点：(1) <b>Transfusion</b> = 一个 transformer 混合两种目标，离散 token 走交叉熵、连续动作 token 走 flow-matching loss；(2) <b>action expert</b> = 给 state/action token 一套独立权重（约 300M，类两元 MoE），与图文的 PaliGemma(3B) 权重<b>共享一次 attention、各用各的 MLP</b>，π0 合计 3.3B；(3) action token 用 <b>full bidirectional</b> mask，因为整段 chunk 是一次积出的、内部无生成顺序。</p>
+        <p>到这里，π0 的「单层」结构已经讲透。但真正的开放世界（进一个全新的家做饭、铺床）还需要更多：分层推理、离散与连续表示的取舍、以及一个保护 web 知识的关键技巧。下一节进入 <span class="term">π0.5</span>、<span class="term">FAST</span> 与 <span class="term">knowledge insulation</span>。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/flow-matching-ode.js"></script>
+  <script src="../../assets/js/widgets/action-chunking.js"></script>
+  <script src="../../assets/js/widgets/eval-flow.js"></script>
+  <script src="../../assets/js/widgets/action-dissector.js"></script>
+  <script src="../../assets/js/widgets/capability-radar.js"></script>
+  <script src="../../assets/js/widgets/task-taxonomy.js"></script>
+  <script src="../../assets/js/widgets/moe-attention.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

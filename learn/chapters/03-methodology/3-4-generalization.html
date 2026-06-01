@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>泛化轴：Object/Background/Instruction/Mixed · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="3-4">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 3 · Benchmark 方法论 · 3-4</div>
+        <h1>泛化轴：Object / Background / Instruction / Mixed</h1>
+        <p class="lede">3.3 讲的是单个任务<i>内部</i>怎么打分。但 capability profile 还想回答一个更尖锐的问题：换了没见过的物体、没见过的背景、换一种说法的指令，模型掉了多少分？掉在<i>哪根轴</i>上？这一节讲 README/paper 愿景里的 <span class="term">4-axis generalization</span>——并且要再次小心：这里大半是<b>愿景语言</b>。</p>
+
+        <h2 id="why-axes">为什么泛化也要分轴</h2>
+        <p>回到 3.2 的红线：<span class="term">val_unseen</span> / <span class="term">test</span> 之所以「未见」，不是换个随机种子，而是制造了真实的<b>分布偏移</b>。但「模型在 unseen 上掉了 0.2」这句话本身又是一个被压扁的标量——你不知道它是<i>看不懂新物体</i>，还是<i>被新背景干扰</i>，还是<i>听不懂换了措辞的指令</i>。这三种失败要用完全不同的方法去修。</p>
+        <p>所以愿景主张：把 <span class="term">OOD</span>（out-of-distribution）掉分<b>归因到具体的泛化轴</b>。这和 3.1 的能力轴是同一种哲学的延伸——不只问「泛化好不好」，而是把泛化拆成可定位的因子，让掉分变成一份<i>诊断</i>而非一句叹息。</p>
+
+        <h2 id="four-axes">README/paper 愿景的 4 个泛化轴</h2>
+        <p>愿景给出 <b>4 个 generalization 轴</b>，每一根都对应一类受控的扰动：</p>
+        <table>
+          <thead>
+            <tr><th>泛化轴</th><th>改变了什么</th><th>这根轴塌了，说明…</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><span class="term">Object</span></td><td>换成训练没见过的目标物体（新形状/颜色/实例）</td><td>视觉表征过拟合到了具体物体外观，没学到「这一类东西怎么抓」。</td></tr>
+            <tr><td><span class="term">Background</span></td><td>换桌面/场景背景、干扰物、布局</td><td>策略被背景纹理或杂物带偏，目标定位不鲁棒。</td></tr>
+            <tr><td><span class="term">Instruction</span></td><td>同一任务换一种<b>措辞</b>（指令释义）</td><td>语言理解贴着训练措辞死记，没真正接住语义。</td></tr>
+            <tr><td><span class="term">Mixed</span></td><td>以上几种扰动<b>叠加</b>同时出现</td><td>综合鲁棒性——最接近真实开放世界的难度。</td></tr>
+          </tbody>
+        </table>
+        <p>前三轴是<b>单因子</b>受控变量：一次只动一个变量，才能干净地把掉分归因到那一轴。<span class="term">Mixed</span> 则故意叠加，逼近真实部署里「什么都不一样」的处境——它通常是最难、掉分最多的一轴，但单看它无法定位病灶，得配合前三轴一起读。</p>
+
+        <h2 id="instruction-paraphrase">指令释义：Instruction 轴怎么造</h2>
+        <p>Instruction 轴的扰动叫<b>指令释义</b>（<span class="term-i">instruction paraphrases</span>）。同一个任务目标，用多套不同措辞表达——「把苹果放进果盘」「pick up the apple and put it in the fruit bowl」「将那个苹果搁到水果碗里去」指的是同一件事。一个真正理解语义的策略应当对这些措辞<i>不变</i>；一个只记住了训练里那句话表面 token 的策略，换个说法就会失手。</p>
+        <p>这套释义在数据侧是有迹可循的：训练数据集的 <code>meta/tasks.jsonl</code> 里就为每个任务存了<b>多套指令措辞</b>（2.4 提到过）。Instruction 轴本质上是在评测端继续利用这种多措辞结构，去探测语言理解的鲁棒性边界。</p>
+
+        <div class="bridge rl">
+          <div class="c-h"><span class="tag">从 RL 看</span> distribution shift 与 OOD 泛化</div>
+          <p>这整套就是你熟悉的 <span class="term">distribution shift</span>：训练分布 $p_{\text{train}}$ 与测试分布 $p_{\text{test}}$ 不同，策略在 $p_{\text{test}}$ 上的表现就是 <span class="term">OOD generalization</span>。4 个轴等于把「shift 发生在哪个维度」显式参数化——Object 是观测里物体子空间的 shift，Instruction 是语言条件 $\ell$ 的 shift，Background 是观测里场景子空间的 shift。把掉分归因到轴，就是在问「我的 covariate shift 主要来自哪个坐标」，这比一个笼统的泛化间隙信息量大得多。</p>
+        </div>
+
+        <div class="callout note">
+          <div class="c-h">这是「愿景语言」，docs 细节仍 WIP</div>
+          <p><b>4-axis generalization</b>（Object·Background·Instruction·Mixed）来自 <b>README / paper 的愿景描述</b>，它讲清了 EBench <i>想怎么</i>诊断泛化。但当前线上 <span class="term">docs</span> 站<b>并未</b>把这四个轴落成可提交的 split 或可验证的评测口径——回忆 3.2，docs 的地面真相只有 3 tracks × 3 splits，且 split 细分本身仍标 <span class="term">WIP</span>。所以：把这四个轴当成<b>理解 EBench 设计意图的框架</b>来读，而不是「现在就能在 leaderboard 上分轴打分」的既成事实。一旦 docs 落地，再以 docs 为准。</p>
+        </div>
+
+        <h2 id="whats-next">这一节你需要带走的</h2>
+        <p>记住三点：(1) 泛化也该<b>分轴</b>，把 OOD 掉分归因到具体维度才可操作；(2) README/paper 愿景给出 4 轴 Object·Background·Instruction·Mixed，前三轴单因子受控、Mixed 叠加，Instruction 靠<i>指令释义</i>探测语义鲁棒性；(3) 这是<b>愿景语言</b>，docs 尚未落地对应口径。</p>
+        <p>方法论的最后一块拼图，是把前面所有打分汇总成一份可读的<b>诊断报告</b>——radar、heatmap、transfer curve。但这里有一道最需要诚实对待的愿景 vs 现实裂缝，下一节专门澄清。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/flow-matching-ode.js"></script>
+  <script src="../../assets/js/widgets/action-chunking.js"></script>
+  <script src="../../assets/js/widgets/eval-flow.js"></script>
+  <script src="../../assets/js/widgets/action-dissector.js"></script>
+  <script src="../../assets/js/widgets/capability-radar.js"></script>
+  <script src="../../assets/js/widgets/task-taxonomy.js"></script>
+  <script src="../../assets/js/widgets/moe-attention.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>
