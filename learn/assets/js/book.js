@@ -156,20 +156,30 @@
   const KW = /\b(def|class|return|if|elif|else|for|while|in|not|and|or|is|None|True|False|import|from|as|with|try|except|finally|raise|lambda|yield|async|await|self|export|const|let|var|function|await)\b/g;
   const BUILTIN = /\b(np|torch|print|len|range|list|dict|str|int|float|enumerate|zip|super|deque|dataclass)\b/g;
   function escapeHtml(s){return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
-  function highlight(raw, lang) {
-    let s = escapeHtml(raw);
-    // 注释（# 行 与 // 行）
-    s = s.replace(/(^|\n)(\s*)(#.*?)(?=\n|$)/g, (m,a,b,c)=>`${a}${b}<span class="tok-com">${c}</span>`);
-    s = s.replace(/(^|\n)(\s*)(\/\/.*?)(?=\n|$)/g, (m,a,b,c)=>`${a}${b}<span class="tok-com">${c}</span>`);
-    // 字符串
-    s = s.replace(/("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')/g, '<span class="tok-str">$1</span>');
-    // 数字
+  // 高亮普通文本段里的 keyword / builtin / number（此处不含字符串与注释，安全）
+  function hlPlain(text, lang) {
+    let s = escapeHtml(text);
     s = s.replace(/\b(\d+\.?\d*)\b/g, '<span class="tok-num">$1</span>');
     if (lang !== "text") {
       s = s.replace(KW, '<span class="tok-kw">$1</span>');
       s = s.replace(BUILTIN, '<span class="tok-builtin">$1</span>');
     }
     return s;
+  }
+  /* 单遍 tokenizer：先把代码切成 注释 / 字符串 / 普通文本 三类，
+     只对普通文本做关键字高亮，token 内部不再二次匹配 —— 避免标签互相污染。 */
+  function highlight(raw, lang) {
+    // 一个正则同时捕获：# 注释、// 注释、双/单引号字符串
+    const re = /(#[^\n]*)|(\/\/[^\n]*)|("(?:[^"\\]|\\.)*")|('(?:[^'\\]|\\.)*')/g;
+    let out = "", last = 0, m;
+    while ((m = re.exec(raw)) !== null) {
+      out += hlPlain(raw.slice(last, m.index), lang);        // 之前的普通文本
+      if (m[1] || m[2]) out += `<span class="tok-com">${escapeHtml(m[0])}</span>`;  // 注释
+      else out += `<span class="tok-str">${escapeHtml(m[0])}</span>`;              // 字符串
+      last = re.lastIndex;
+    }
+    out += hlPlain(raw.slice(last), lang);                   // 结尾剩余普通文本
+    return out;
   }
   function initCode() {
     document.querySelectorAll(".code").forEach((box) => {
