@@ -34,17 +34,17 @@
             <tr>
               <td><a href="https://arxiv.org/abs/2410.24164" target="_blank" rel="noopener">2410.24164</a></td>
               <td><b>π0</b>：A Vision-Language-Action Flow Model for General Robot Control</td>
-              <td>VLA = PaliGemma(3B) VLM + flow-matching action expert；action chunk H=50、推理 10 步 Euler。本书 flow matching / action expert 的主蓝本（<a href="../05-theory/5-2-flow-matching.html">5.2</a>、<a href="../05-theory/5-3-action-expert.html">5.3</a>、<a href="../06-baselines/6-1-openpi.html">6.1</a>）。</td>
+              <td>VLA = PaliGemma(3B) VLM + flow-matching action expert；action chunk H=50、推理 10 步 Euler。本书 flow matching / action expert 的主蓝本（<a href="../05-theory/5-5-flow-matching.html">5.5</a>、<a href="../05-theory/5-7-action-expert.html">5.7</a>、<a href="../06-baselines/6-1-openpi.html">6.1</a>）。</td>
             </tr>
             <tr>
               <td><a href="https://arxiv.org/abs/2504.16054" target="_blank" rel="noopener">2504.16054</a></td>
               <td><b>π0.5</b>：a VLA with Open-World Generalization</td>
-              <td>异构 co-training + 分层推理（离散高层子任务 → 连续低层 chunk）+ FAST 预训练/flow 后训练两阶段。面向"进全新家"的泛化（<a href="../05-theory/5-4-discrete-continuous.html">5.4</a>、<a href="../06-baselines/6-1-openpi.html">6.1</a>）。</td>
+              <td>异构 co-training + 分层推理（离散高层子任务 → 连续低层 chunk）+ FAST 预训练/flow 后训练两阶段。面向"进全新家"的泛化（<a href="../05-theory/5-8-discrete-continuous.html">5.8</a>、<a href="../06-baselines/6-1-openpi.html">6.1</a>）。</td>
             </tr>
             <tr>
               <td><a href="https://arxiv.org/abs/2505.23705" target="_blank" rel="noopener">2505.23705</a></td>
               <td><b>Knowledge Insulation</b>（for VLA）</td>
-              <td>给 VLM 接随机初始化 action expert 会损害训练；做法是用 FAST 离散 token 微调 backbone，同时训 flow action expert 但 stop-gradient 不回流 backbone（<a href="../05-theory/5-4-discrete-continuous.html">5.4</a>）。</td>
+              <td>给 VLM 接随机初始化 action expert 会损害训练；做法是用 FAST 离散 token 微调 backbone，同时训 flow action expert 但 stop-gradient 不回流 backbone（<a href="../05-theory/5-8-discrete-continuous.html">5.8</a>）。</td>
             </tr>
             <tr>
               <td><a href="https://arxiv.org/abs/2510.10274" target="_blank" rel="noopener">2510.10274</a></td>
@@ -66,7 +66,7 @@
 
         <div class="callout note">
           <div class="c-h">书里引用但未单列的源头</div>
-          <p>正文还借用了两个奠基工作的概念：<b>ACT</b>（Action Chunking with Transformers，ALOHA / Tony Zhao）——action chunking 的出处（<a href="../05-theory/5-1-action-chunking.html">5.1</a>）；<b>Transfusion</b>——单 transformer 混合 flow-matching（连续）+ 交叉熵（离散）目标，π0 的 action expert 结构follow 它（<a href="../05-theory/5-3-action-expert.html">5.3</a>）。它们的细节请回各章查证。</p>
+          <p>正文还借用了两个奠基工作的概念：<b>ACT</b>（Action Chunking with Transformers，ALOHA / Tony Zhao）——action chunking 的出处（<a href="../05-theory/5-1-action-chunking.html">5.1</a>）；<b>Transfusion</b>——单 transformer 混合 flow-matching（连续）+ 交叉熵（离散）目标，π0 的 action expert 结构follow 它（<a href="../05-theory/5-7-action-expert.html">5.7</a>）。它们的细节请回各章查证。</p>
         </div>
 
         <h2 id="code">代码 / 文档 / 数据</h2>
@@ -136,6 +136,7 @@
   <script src="../../content.js"></script>
   <script src="../../assets/js/widgets/registry.js"></script>
   <script src="../../assets/js/widgets/flow-matching-ode.js"></script>
+  <script src="../../assets/js/widgets/mode-averaging.js"></script>
   <script src="../../assets/js/widgets/action-chunking.js"></script>
   <script src="../../assets/js/widgets/eval-flow.js"></script>
   <script src="../../assets/js/widgets/action-dissector.js"></script>

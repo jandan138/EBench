@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Flow Matching：回归「流动方向」· EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="5-5">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 5 · VLA 理论 · 5-5</div>
+        <h1>Flow Matching：回归「流动方向」</h1>
+        <p class="lede">铺垫了三节，主角登场。有了"从噪声变换到数据""不同噪声→不同模态"的直觉，flow matching 其实只多问一句：<b>这个变换，能不能用一个"每一点该往哪走"的方向场来描述，然后我去回归那个方向？</b>答案是能。这一节我们把它讲成一个"水流"的故事，公式只在讲透处出现。</p>
+
+        <h2 id="picture">先建一幅画面：一池子在流动的点</h2>
+        <p>想象一个池子。<b>左边</b>撒满纯噪声的点（高斯一团）；<b>右边</b>是目标——合理动作聚成的几簇（"绕上"一簇、"绕下"一簇）。我们想要一股<b>水流</b>，把左边每个噪声点，顺顺当当地<b>漂</b>到右边某个合理动作上。</p>
+        <p>给这股水流配一个"时间旋钮" $\tau$（读 tau），从 $\tau=0$（全是噪声）转到 $\tau=1$（全是数据）。在中间任意时刻、任意位置，水流都有一个<b>速度方向</b>：告诉这一点的点"下一刻该往哪挪"。把整片空间里每一点的速度方向画出来，就是一个<b>向量场</b>（vector field），记作 $v(x, \tau)$——给定位置 $x$ 和时刻 $\tau$，返回一个速度向量。</p>
+        <div class="callout note"><div class="c-h">一句话抓住 flow matching</div>
+          <p>它要学的，<b>不是动作本身</b>，<b>也不是去噪结果</b>，而是这个<b>向量场 $v(x,\tau)$——每一点该朝哪个方向流</b>。学会了向量场，采样就是"放一个噪声点进去，顺着流漂到 $\tau=1$"。这就是标题"<b>回归流动方向</b>"的意思。</p>
+        </div>
+
+        <h2 id="target">那"正确的流动方向"是什么？—— 直接连一条线</h2>
+        <p>要回归，就得有"标准答案"：每个点的正确速度是多少？flow matching 用了一个简单到令人发笑的设定:<b>训练时,把一个噪声点和一个数据点配成一对,用直线连起来,这条直线的方向就是标准答案。</b></p>
+        <p>具体地，训练时我们这样造数据(这就是全部的"诀窍")：</p>
+        <ul>
+          <li>抓一个真实动作 $A$（数据点），抓一个噪声 $\varepsilon \sim \mathcal{N}(0,I)$（起点）。</li>
+          <li>选一个时刻 $\tau \in [0,1]$，把两者<b>线性插值</b>，得到一个"半路上的点"：
+            <div class="math-block">$$A^\tau \;=\; \tau\,A \;+\; (1-\tau)\,\varepsilon$$</div>
+            （$\tau=0$ 时就是噪声 $\varepsilon$，$\tau=1$ 时就是数据 $A$，中间是连线上的一点。）</li>
+          <li>这条直线从 $\varepsilon$ 指向 $A$，方向恒为 $A-\varepsilon$。于是这一点的<b>正确速度</b>就是它：$u = A - \varepsilon$。<span style="color:var(--ink-faint)">（π0 论文写成 $\varepsilon - A$，只是约定把流向反过来记，本质一样。）</span></li>
+        </ul>
+        <p>训练目标于是水落石出——还是老朋友 MSE，回归这个速度：</p>
+        <div class="math-block">$$\mathcal{L} \;=\; \mathbb{E}\,\bigl\lVert\, v_\theta(A^\tau,\,o,\,\tau) \;-\; (A-\varepsilon) \,\bigr\rVert^2$$</div>
+        <p>逐项读：$v_\theta$ 是网络（参数 $\theta$）在"半路点 $A^\tau$、观测 $o$、时刻 $\tau$"处<b>预测</b>的速度；$(A-\varepsilon)$ 是这一对配出来的<b>真实</b>速度；$\mathbb{E}\lVert\cdot\rVert^2$ 是对大量随机配对、随机 $\tau$ 求平均的平方误差。<b>网络就在学"每个位置每个时刻，该往哪个方向流多快"。</b></p>
+
+        <div class="callout warn"><div class="c-h">那 mode averaging 呢？这次为什么不平均了？</div>
+          <p>好问题。注意：网络回归的是<b>"这一对"的连线方向</b>，对每个具体的 $(A^\tau, A, \varepsilon)$ 三元组，方向是<b>唯一确定</b>的。多模态性藏在"<b>从哪个噪声出发、配到哪个数据</b>"里——采样时换一个起点噪声，就漂向另一个模态。和 diffusion 一样，把"多个都对"的歧义<b>转移</b>到了起点的随机性上，回归目标本身不再有歧义。所以不平均。</p>
+        </div>
+
+        <h2 id="sampling">采样：放一个点进去，顺流漂到底</h2>
+        <p>训练好 $v_\theta$ 后，怎么生成一个动作？把它当成<b>解一个常微分方程（ODE）</b>:从噪声 $A^0=\varepsilon$ 出发,顺着学到的速度场往前走,走到 $\tau=1$ 就到岸（这个解 ODE 的具体走法——forward Euler——是下一节的主题，这里先看整体效果）。</p>
+        <p>下面这个交互件就是这幅"水流"图。左边噪声点，右边三簇目标 mode，青色折线是顺着向量场积分出来的轨迹。先把模式设成 <b>rectified flow</b>，把步数拉到很小（比如 4），看它<b>几步就到位</b>；再切到 <b>diffusion</b>（弯路径），同样步数下落点就偏了——这正是下一节"把流拉直"要解决的事。</p>
+
+        <div class="lab">
+          <div class="lab-h"><span class="lab-tag">interactive</span><span class="lab-t">flow matching：顺着向量场，把噪声漂成动作</span></div>
+          <div class="lab-body" data-widget="flow-matching-ode"></div>
+          <div class="lab-cap">点"积分动画"看噪声沿流抵达目标 mode；调"步数"感受少步 vs 多步；切 rectified/diffusion 对比路径直弯与落点误差。"重采样 noise"换一批起点——注意它们会漂向<b>不同</b>的 mode（多模态）。</div>
+        </div>
+
+        <div class="bridge rl"><div class="c-h"><span class="tag">从 RL 看</span> 这是个什么策略</div>
+          <p>它是一个<b>生成式、随机策略</b>：给定观测 $o$，从 $p(A\mid o)$ 里采样动作。没有 Q、没有 critic、没有 Bellman——训练信号纯粹是"模仿演示"（behavior cloning），只是模仿的方式从"回归动作"升级成了"回归把噪声搬成动作的流"。最接近的 RL 类比是 stochastic actor，但它是被监督学出来的，不是 policy gradient 推出来的。</p>
+        </div>
+
+        <h2 id="recap">这一节你需要带走的</h2>
+        <p>(1) flow matching 学的是一个<b>向量场 $v_\theta$——每一点该往哪流</b>；(2) "标准答案"靠把噪声与数据<b>连直线</b>得到，方向 $A-\varepsilon$，训练还是 <b>MSE 回归</b>这个方向；(3) 多模态靠"起点噪声的随机性"保住，不再平均；(4) 采样 = 从噪声<b>顺流积分</b>到 $\tau=1$。下一节：为什么"把流拉直"能让我们只走 10 步就到。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/flow-matching-ode.js"></script>
+  <script src="../../assets/js/widgets/mode-averaging.js"></script>
+  <script src="../../assets/js/widgets/action-chunking.js"></script>
+  <script src="../../assets/js/widgets/eval-flow.js"></script>
+  <script src="../../assets/js/widgets/action-dissector.js"></script>
+  <script src="../../assets/js/widgets/capability-radar.js"></script>
+  <script src="../../assets/js/widgets/task-taxonomy.js"></script>
+  <script src="../../assets/js/widgets/moe-attention.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

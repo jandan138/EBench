@@ -85,7 +85,7 @@
 
         <h2 id="whats-next">这一节你需要带走的</h2>
         <p>三句话：(1) BC 的死穴是 <b>compounding error / covariate shift</b>——单步误差把状态推离训练分布，误差随 $T$ 滚雪球；(2) <b>action chunking</b> 一次预测 $H$ 个动作，把有效决策点从 $T$ 缩到 $T/H$，从根上削减累积、并让动作更平滑；(3) 执行上用 <b>receding horizon</b>——只执行前一段、用新观测 replan，在「平滑」与「反应」之间取平衡，π0 弃用了 temporal ensembling。</p>
-        <p>但我们还欠一个关键问题：这「一段 50 个动作」到底是<i>怎么被生成出来</i>的？早期 VLA 把动作离散成 token 自回归吐出，π0 认为这不适合高频灵巧控制。下一节，我们进入本书的数学高潮——<span class="term">flow matching</span>：用解一个 ODE 的方式，从纯噪声里「积分」出一整段连续动作。</p>
+        <p>但我们还欠一个关键问题：这「一段 50 个动作」到底是<i>怎么被生成出来</i>的？早期 VLA 把动作离散成 token 自回归吐出，π0 认为这不适合高频灵巧控制。接下来的五节（5.2–5.6）会<b>从零</b>带你走到答案——<span class="term">flow matching</span>：先补上回归与 MSE 的地基，看清传统 BC 为何会「平均化」，再一步步搭到「用解 ODE 的方式从噪声里积分出一整段连续动作」。下一节，我们从最基础的「回归」讲起。</p>
       </article>
     </main>
     <aside class="rail" id="rail"></aside>
@@ -101,6 +101,7 @@
   <script src="../../content.js"></script>
   <script src="../../assets/js/widgets/registry.js"></script>
   <script src="../../assets/js/widgets/flow-matching-ode.js"></script>
+  <script src="../../assets/js/widgets/mode-averaging.js"></script>
   <script src="../../assets/js/widgets/action-chunking.js"></script>
   <script src="../../assets/js/widgets/eval-flow.js"></script>
   <script src="../../assets/js/widgets/action-dissector.js"></script>

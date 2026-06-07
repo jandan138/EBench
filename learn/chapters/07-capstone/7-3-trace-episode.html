@@ -32,7 +32,7 @@
         <ul>
           <li><b>server</b>——云端/本机的 <span class="term">ray_eval_server.py</span>，里面是 Isaac Sim 物理世界（<a href="../02-sim/2-1-isaac-sim.html">2.1</a>）和 GenManip 任务（<a href="../02-sim/2-3-genmanip.html">2.3</a>）。它是黑盒（<a href="../04-engine/4-1-client-server.html">4.1</a>）。</li>
           <li><b>client</b>——<span class="term">EvalClient</span>，装在你模型的 env 里，负责通信与契约（<a href="../04-engine/4-2-evalclient.html">4.2</a>）。</li>
-          <li><b>model</b>——你在 <a href="07-1-custom-model.html">7.1</a> 写的 <span class="term">ModelClient</span>，里面是一个 flow-matching VLA（<a href="../05-theory/5-2-flow-matching.html">5.2</a>）。</li>
+          <li><b>model</b>——你在 <a href="07-1-custom-model.html">7.1</a> 写的 <span class="term">ModelClient</span>，里面是一个 flow-matching VLA（<a href="../05-theory/5-5-flow-matching.html">5.5</a>）。</li>
         </ul>
         <p>下面这段循环就是它们的全部对话，我们将逐行展开它代表的物理与计算：</p>
 
@@ -61,10 +61,10 @@ client.close()
         <p>进入 <span class="term">get_action(obs)</span>，第一步是解包。按 <span class="term">worker_id</span> 取出 <span class="term">obs["0"]["obs"]</span>，里面是 <span class="term">instruction</span>(str)、<span class="term">state.joints</span>(12)、<span class="term">state.gripper</span>(4)、<span class="term">state.base</span>(3)、<span class="term">state.ee_pose</span>、四路 <span class="term">video.{cam}_view</span>(480,640,3 uint8)、<span class="term">timestep</span>、<span class="term">reset</span>（schema 全貌见 <a href="../04-engine/4-2-evalclient.html">4.2</a>）。图像是 <b>uint8 HWC</b>，你得按训练时的口径归一化、相机命名对齐（<a href="07-1-custom-model.html">7.1</a> 第一坑）。低维 state 也要用训练统计量做归一化。</p>
 
         <h2 id="s4-sample">④ flow matching 采样：一团噪声变成一段动作</h2>
-        <p>这是 episode 里最"聪明"的一步，也是 Part 5 的核心。模型不是回归出一个动作均值，而是从分布 $p(A_t\mid o_t)$ 里<b>采样</b>一整段 action chunk $A_t=[a_t,\dots,a_{t+H-1}]$，让它能表达"多种正确做法"的多模态性（<a href="../05-theory/5-2-flow-matching.html">5.2</a>）。</p>
+        <p>这是 episode 里最"聪明"的一步，也是 Part 5 的核心。模型不是回归出一个动作均值，而是从分布 $p(A_t\mid o_t)$ 里<b>采样</b>一整段 action chunk $A_t=[a_t,\dots,a_{t+H-1}]$，让它能表达"多种正确做法"的多模态性（<a href="../05-theory/5-5-flow-matching.html">5.5</a>）。</p>
         <p>具体地：先抽噪声 $A_t^0\sim\mathcal N(0,I)$，然后沿 flow 时间 $\tau\in[0,1]$ 解一个 ODE，用 forward Euler 一步步把噪声"推"成干净动作：</p>
         <div class="math-block">$$A_t^{\tau+\delta}=A_t^{\tau}+\delta\,v_\theta(A_t^{\tau},o_t)$$</div>
-        <p>其中 $v_\theta$ 是网络学到的向量场。因为 π0 用 rectified flow，路径近乎直线，<b>10 步</b>（$\delta=0.1$）就够（<a href="../05-theory/5-2-flow-matching.html">5.2</a>）。观测前缀 $o_t$ 的 KV cache 只算一次，10 步只重算 action token——这套"image/text 走一组权重、state/action 走 action-expert 权重、共享一次 attention"的结构就是 <a href="../05-theory/5-3-action-expert.html">5.3</a> 的 Transfusion/MoE。</p>
+        <p>其中 $v_\theta$ 是网络学到的向量场。因为 π0 用 rectified flow，路径近乎直线，<b>10 步</b>（$\delta=0.1$）就够（<a href="../05-theory/5-5-flow-matching.html">5.5</a>）。观测前缀 $o_t$ 的 KV cache 只算一次，10 步只重算 action token——这套"image/text 走一组权重、state/action 走 action-expert 权重、共享一次 attention"的结构就是 <a href="../05-theory/5-7-action-expert.html">5.7</a> 的 Transfusion/MoE。</p>
         <div class="bridge g103">
           <div class="c-h"><span class="tag">从 GAMES103 看</span> 又一次数值积分</div>
           <p>采样动作和物理步进，本质是<b>同一件事的两次出现</b>：都是 forward Euler 解 ODE。第④步在 flow 时间 $\tau$ 上积分一个学出来的向量场 $v_\theta$ 得到动作；第⑥步将在物理时间上积分牛顿动力学得到下一个世界状态。你 GAMES103 的积分器直觉，在这条管线里用了两遍。</p>
@@ -113,6 +113,7 @@ client.close()
   <script src="../../content.js"></script>
   <script src="../../assets/js/widgets/registry.js"></script>
   <script src="../../assets/js/widgets/flow-matching-ode.js"></script>
+  <script src="../../assets/js/widgets/mode-averaging.js"></script>
   <script src="../../assets/js/widgets/action-chunking.js"></script>
   <script src="../../assets/js/widgets/eval-flow.js"></script>
   <script src="../../assets/js/widgets/action-dissector.js"></script>

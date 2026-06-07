@@ -35,7 +35,7 @@
             <tr><td>VLM</td><td>Vision-Language Model</td><td>同时吃图像和文本的多模态模型，作 VLA 的骨干。</td></tr>
             <tr><td>PaliGemma</td><td>—</td><td>π0 用的 3B 开放 VLM 骨干（SigLIP 视觉 + Gemma 语言为背景，paper 只说 3B）。</td></tr>
             <tr><td>action chunking</td><td>—</td><td>一次预测 H 个未来动作而非每步一个，源自 ACT（<a href="../05-theory/5-1-action-chunking.html">5.1</a>）。</td></tr>
-            <tr><td>action expert</td><td>—</td><td>专门处理 state/action token 的一组独立权重（≈300M），与 image/text 权重共享一次 attention（<a href="../05-theory/5-3-action-expert.html">5.3</a>）。</td></tr>
+            <tr><td>action expert</td><td>—</td><td>专门处理 state/action token 的一组独立权重（≈300M），与 image/text 权重共享一次 attention（<a href="../05-theory/5-7-action-expert.html">5.7</a>）。</td></tr>
             <tr><td>action horizon</td><td>—</td><td>一个 chunk 里预测的动作步数 H（π0 H=50）。</td></tr>
             <tr><td>receding horizon</td><td>—</td><td>开环执行 chunk 的前几步后再 replan，而非执行整段（<a href="../05-theory/5-1-action-chunking.html">5.1</a>）。</td></tr>
             <tr><td>Mixture-of-Transformers</td><td>MoT</td><td>多个专家共享一次 unified self-attention 的结构，InternVLA-A1 用它统一 understanding/generation/action（<a href="../06-baselines/6-3-internvla-a1.html">6.3</a>）。</td></tr>
@@ -49,12 +49,12 @@
         <table>
           <thead><tr><th>术语</th><th>英文全称</th><th>一句话解释</th></tr></thead>
           <tbody>
-            <tr><td>flow matching</td><td>—</td><td>训练一个向量场把噪声推成动作的生成式策略训练法，π0 用条件 flow matching（<a href="../05-theory/5-2-flow-matching.html">5.2</a>）。</td></tr>
+            <tr><td>flow matching</td><td>—</td><td>训练一个向量场把噪声推成动作的生成式策略训练法，π0 用条件 flow matching（<a href="../05-theory/5-5-flow-matching.html">5.5</a>）。</td></tr>
             <tr><td>rectified flow</td><td>—</td><td>线性高斯（OT）概率路径下的 flow matching，路径近直线、推理可极少步积分（π0 10 步）。</td></tr>
             <tr><td>compounding error</td><td>—</td><td>单步误差把机器人推到没见过的状态、误差滚雪球，action chunking 要对抗的问题（<a href="../05-theory/5-1-action-chunking.html">5.1</a>）。</td></tr>
             <tr><td>covariate shift</td><td>—</td><td>策略遇到的状态分布偏离训练分布；compounding error 的根因。</td></tr>
-            <tr><td>knowledge insulation</td><td>—</td><td>训 action expert 时停止其梯度回流 backbone（stop-gradient），保住 VLM 的 web 知识、加快训练（arXiv 2505.23705，<a href="../05-theory/5-4-discrete-continuous.html">5.4</a>）。</td></tr>
-            <tr><td>FAST tokenizer</td><td>FAST action tokenizer</td><td>把连续动作离散化的 tokenizer，π0.5 预训练阶段用它做交叉熵 next-token（<a href="../05-theory/5-4-discrete-continuous.html">5.4</a>）。</td></tr>
+            <tr><td>knowledge insulation</td><td>—</td><td>训 action expert 时停止其梯度回流 backbone（stop-gradient），保住 VLM 的 web 知识、加快训练（arXiv 2505.23705，<a href="../05-theory/5-8-discrete-continuous.html">5.8</a>）。</td></tr>
+            <tr><td>FAST tokenizer</td><td>FAST action tokenizer</td><td>把连续动作离散化的 tokenizer，π0.5 预训练阶段用它做交叉熵 next-token（<a href="../05-theory/5-8-discrete-continuous.html">5.8</a>）。</td></tr>
           </tbody>
         </table>
 
@@ -111,6 +111,7 @@
   <script src="../../content.js"></script>
   <script src="../../assets/js/widgets/registry.js"></script>
   <script src="../../assets/js/widgets/flow-matching-ode.js"></script>
+  <script src="../../assets/js/widgets/mode-averaging.js"></script>
   <script src="../../assets/js/widgets/action-chunking.js"></script>
   <script src="../../assets/js/widgets/eval-flow.js"></script>
   <script src="../../assets/js/widgets/action-dissector.js"></script>

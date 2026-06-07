@@ -58,7 +58,7 @@
           <p>生成式策略最接近的 RL 类比是一个 <span class="term">stochastic actor</span>——一个会输出动作<b>分布</b>、可以从中采样的随机策略。但有两点关键不同：(1) 它<b>不靠 policy gradient / TD</b> 训练，而是用模仿（behavior cloning）的去噪 / 似然损失；(2) 它<b>不是 argmax over $Q$</b>——value-based 方法选「Q 值最高的那一个」动作，本质是单峰、确定的；生成式策略要的恰恰相反：保留并采样整个多模态分布。换句话说，没有 critic、没有 Bellman，只有「学会专家动作的分布」。</p>
         </div>
 
-        <p>那「生成模型」具体用什么？早期 VLA 把动作离散成 token 自回归地吐（RT-2 / OpenVLA），后来 π0 这一路改用 <span class="term">flow matching</span>——一种能在连续高维动作空间上高效采样多模态分布、且推理只需极少步的生成方法（<a href="../01-problem/1-2-what-is-vla.html">1.2</a> 先点名，<a href="../05-theory/5-2-flow-matching.html">5.2</a> 钻数学）。它训练时本质就是 behavior cloning：从 $p(A_t\mid o_t)$ 采样，没有 Q、没有 critic。这正是我们为 Part 5 埋下的伏笔。</p>
+        <p>那「生成模型」具体用什么？早期 VLA 把动作离散成 token 自回归地吐（RT-2 / OpenVLA），后来 π0 这一路改用 <span class="term">flow matching</span>——一种能在连续高维动作空间上高效采样多模态分布、且推理只需极少步的生成方法（<a href="../01-problem/1-2-what-is-vla.html">1.2</a> 先点名，<a href="../05-theory/5-5-flow-matching.html">5.5</a> 钻数学）。它训练时本质就是 behavior cloning：从 $p(A_t\mid o_t)$ 采样，没有 Q、没有 critic。这正是我们为 Part 5 埋下的伏笔。</p>
 
         <div class="callout note">
           <div class="c-h">一句话拎清三个词的关系</div>
@@ -83,6 +83,7 @@
   <script src="../../content.js"></script>
   <script src="../../assets/js/widgets/registry.js"></script>
   <script src="../../assets/js/widgets/flow-matching-ode.js"></script>
+  <script src="../../assets/js/widgets/mode-averaging.js"></script>
   <script src="../../assets/js/widgets/action-chunking.js"></script>
   <script src="../../assets/js/widgets/eval-flow.js"></script>
   <script src="../../assets/js/widgets/action-dissector.js"></script>

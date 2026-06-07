@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>生成模型的思路：从噪声到答案 · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="5-4">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 5 · VLA 理论 · 5-4</div>
+        <h1>生成模型的思路：从噪声到答案</h1>
+        <p class="lede">上一节的结论是：别再回归"那一个动作"，要学一个能采样的<b>分布</b>。这一节我们建立"生成模型"的核心直觉——它换了一个看问题的角度：不直接预测答案，而是学会<b>把随机噪声逐步雕琢成答案</b>。理解了这个角度，flow matching 就只剩一层窗户纸。全程几乎不用公式。</p>
+
+        <h2 id="what-is-generative">什么叫"生成"一个东西</h2>
+        <p>先分清两种任务。<b>判别式（discriminative）</b>：给图片判断是猫是狗——输入复杂、输出简单。<b>生成式（generative）</b>：凭空画出一张<b>新的、没见过的</b>猫——输出比输入复杂得多。前几节的回归属于判别式那一类（输出一个数）；现在我们要的是生成式：<b>产出一个完整的、合理的动作序列</b>，而且能产出"多种合理的"（多模态）。</p>
+        <p>生成模型的目标，用一句话说：<b>学会从目标数据的分布里采样</b>。对我们来说，"目标数据分布"就是"在观测 $o$ 下，所有合理动作组成的那一坨"——它可能有"绕上"和"绕下"两个峰。我们想要一个能不断从这坨里随机掏出合理样本的机器。</p>
+
+        <h2 id="noise-to-data">关键招式：从噪声出发</h2>
+        <p>怎么造这样一台机器？有一个惊人好用的套路，diffusion 和 flow matching 都用它：</p>
+        <div class="callout note">
+          <div class="c-h">核心思想（请记住这一句）</div>
+          <p>先准备一坨<b>纯随机噪声</b>（一个谁都会采样的简单分布，比如标准高斯 $\mathcal{N}(0, I)$），然后学一个<b>变换</b>，把这坨噪声<b>搬运/雕琢</b>成目标数据的形状。采样时，抓一把新噪声，跑一遍变换，就得到一个新样本。</p>
+        </div>
+        <p>为什么从噪声出发这么妙？因为<b>噪声极容易采样</b>（调个随机数生成器就有），而目标分布（合理动作）<b>极难直接采样</b>（你不知道它长啥样）。我们把"难"全压进那个<b>变换</b>里去学。噪声是免费的起点，变换是要训练的核心。</p>
+        <p>而且——这正是它打败 mode averaging 的地方——<b>不同的初始噪声会被搬运到不同的模态</b>。这一把噪声被推向"绕上"，下一把被推向"绕下"。于是同一个观测下，你采样多次，能拿到多种合理动作，而不是它们的平均。<b>多模态被保住了。</b></p>
+
+        <h2 id="diffusion-intuition">Diffusion 的直觉：回归"去噪结果"</h2>
+        <p>历史上第一个把这套做爆的是 <span class="term">diffusion</span>（扩散模型，画图的 Stable Diffusion 就是它）。它的训练思路特别符合直觉，分两个方向想：</p>
+        <ul>
+          <li><b>加噪（forward，固定不学）</b>：拿一个真实样本（一张合理动作），一点点往上撒高斯噪声，撒很多步，直到它彻底变成一团纯噪声。这个过程是<b>已知的、不用学的</b>——撒噪声谁都会。</li>
+          <li><b>去噪（reverse，要学的）</b>：训练一个网络<b>把这个过程倒过来</b>——给它一个带噪样本，让它预测"该去掉的噪声"（或者"去噪后该是什么样"）。这一步就是<b>回归</b>：拿 MSE 让网络的预测接近"真正被撒上去的噪声"。</li>
+        </ul>
+        <p>你品出来了吗——回到了我们的主线：<b>diffusion 也是在做回归，只不过它回归的不是"动作本身"，而是"去噪结果 / 该减掉的噪声"。</b>这是个绝妙的偷换：回归一团噪声不会 mode averaging，因为对每个带噪输入，"该减掉的噪声"是<b>唯一确定</b>的（加噪时记录下来的那一份），没有"多个都对"的歧义。多模态性被巧妙地转移到了"从哪团噪声出发"上。</p>
+        <p>采样时：抓一把纯噪声，让网络一小步一小步地去噪，几十步之后，噪声就被雕成了一个合理动作。</p>
+
+        <div class="bridge g103"><div class="c-h"><span class="tag">从 GAMES103 看</span> 像反向积分一个扩散过程</div>
+          <p>加噪过程在数学上是一个随机微分方程（把粒子越搅越乱，类似布朗运动 / 热扩散——你在物理仿真里见过扩散方程）。去噪 = <b>把这个扩散过程沿时间反向积分</b>回去。每一步去噪就像数值积分里走一个时间步，只是方向是从"混乱"走向"有序"。这个"反向沿时间积分"的视角，下一节会被 flow matching 用更干净的方式重述。</p>
+        </div>
+
+        <h2 id="diffusion-cost">Diffusion 的代价：步数太多</h2>
+        <p>diffusion 效果惊艳，但有个现实痛点：去噪要<b>很多步</b>（经典实现几十到上千步），每步都得跑一遍网络。画图慢一点能忍，但机器人要 <b>50Hz 实时控制</b>——每秒要出几十次动作，根本等不起几百步去噪。</p>
+        <p>而且 diffusion 的去噪路径是<b>弯弯曲曲</b>的（噪声到数据走的不是直线），所以步子不能迈大，否则积分误差爆炸。<b>路径越弯，需要的步数越多。</b></p>
+        <p>这就引出了下一节的主角：能不能让"从噪声到动作"的路径<b>尽量直</b>，从而<b>极少步</b>就到？这正是 flow matching（以及把它拉到极致的 rectified flow）的卖点。π0 用它做到了 <b>10 步</b>搞定。</p>
+
+        <h2 id="recap">这一节你需要带走的</h2>
+        <p>(1) <b>生成模型</b> = 学会从目标分布采样，套路是<b>把易采样的噪声变换成数据</b>；(2) 不同噪声→不同模态，所以<b>天然保住多模态</b>，治好了 mode averaging；(3) <b>diffusion</b> = 学着把"加噪"反过来，本质是<b>回归"去噪结果"</b>，但路径弯、步数多，不够实时。下一节，flow matching 把路径"捋直"。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/flow-matching-ode.js"></script>
+  <script src="../../assets/js/widgets/mode-averaging.js"></script>
+  <script src="../../assets/js/widgets/action-chunking.js"></script>
+  <script src="../../assets/js/widgets/eval-flow.js"></script>
+  <script src="../../assets/js/widgets/action-dissector.js"></script>
+  <script src="../../assets/js/widgets/capability-radar.js"></script>
+  <script src="../../assets/js/widgets/task-taxonomy.js"></script>
+  <script src="../../assets/js/widgets/moe-attention.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

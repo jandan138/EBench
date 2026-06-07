@@ -59,7 +59,7 @@ def get_action_chunk(self, obs):
 
         <div class="bridge rl">
           <div class="c-h"><span class="tag">从 RL 看</span> 和 MPC 的滚动时域是同一招</div>
-          <p>receding horizon 这个名字你在最优控制 / MPC 里见过：求解一段 horizon 的最优序列，只执行第一步（或前几步），下一时刻拿新状态重解。VLA 的 chunk + replan 是它的学习版——「求解」换成了一次策略前向（flow matching 出 chunk，见 <a href="../05-theory/5-2-flow-matching.html">5.2</a>），但「预测一长段、只走一截、再重规划」的骨架完全一致。长 chunk = 更平滑但更迟钝；短 chunk = 反应快但 covariate shift 更多——这条 tradeoff 是 5.1 的主线。</p>
+          <p>receding horizon 这个名字你在最优控制 / MPC 里见过：求解一段 horizon 的最优序列，只执行第一步（或前几步），下一时刻拿新状态重解。VLA 的 chunk + replan 是它的学习版——「求解」换成了一次策略前向（flow matching 出 chunk，见 <a href="../05-theory/5-5-flow-matching.html">5.5</a>），但「预测一长段、只走一截、再重规划」的骨架完全一致。长 chunk = 更平滑但更迟钝；短 chunk = 反应快但 covariate shift 更多——这条 tradeoff 是 5.1 的主线。</p>
         </div>
 
         <p>这一节只建立直觉；receding horizon 的完整展开——它从 ACT 来、怎么对抗 compounding error、H 和 exec horizon 怎么选——在 <a href="../05-theory/5-1-action-chunking.html">5.1</a>，那里也有专门的 <code>action-chunking</code> 交互部件让你拨弄 H 与 exec 看效果。</p>
@@ -91,6 +91,7 @@ def get_action_chunk(self, obs):
   <script src="../../content.js"></script>
   <script src="../../assets/js/widgets/registry.js"></script>
   <script src="../../assets/js/widgets/flow-matching-ode.js"></script>
+  <script src="../../assets/js/widgets/mode-averaging.js"></script>
   <script src="../../assets/js/widgets/action-chunking.js"></script>
   <script src="../../assets/js/widgets/eval-flow.js"></script>
   <script src="../../assets/js/widgets/action-dissector.js"></script>

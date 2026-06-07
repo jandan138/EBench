@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Rectified Flow：把流拉直 = 回归速度场 · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="5-6">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 5 · VLA 理论 · 5-6</div>
+        <h1>Rectified Flow：把流拉直 = 回归速度场</h1>
+        <p class="lede">上一节我们学会了"回归流动方向"。但有个隐患：流可以是弯的，弯的流必须小步慢走，否则积分跑偏。<span class="term">rectified flow</span>（rectified = 矫直）的全部主张就是：<b>把流尽量拉成直线</b>，于是可以大步快走——π0 因此只用 10 步就采出一个动作。这一节把"积分"这件事讲清楚，正好接上你 GAMES103 的数值积分直觉。</p>
+
+        <h2 id="ode-recap">先把"采样 = 解 ODE"说透</h2>
+        <p>回忆上一节:采样时我们让噪声点<b>顺着向量场 $v_\theta$ 往前漂</b>。"漂"在数学上就是解一个常微分方程(ODE):位置对时间的变化率 = 速度场。</p>
+        <div class="math-block">$$\frac{dA}{d\tau} \;=\; v_\theta(A, o, \tau)$$</div>
+        <p>读法：在 $\tau$ 时刻、位置 $A$ 处，点的移动速度由网络 $v_\theta$ 给出。我们要从 $\tau=0$ 的噪声，积分到 $\tau=1$ 的动作。计算机不会"连续地积分"，它只能<b>切成若干小步、一步步逼近</b>——这就是数值积分。</p>
+
+        <div class="bridge g103"><div class="c-h"><span class="tag">从 GAMES103 看</span> 这就是你写过无数遍的 forward Euler</div>
+          <p>$\frac{dA}{d\tau}=v$ 配上"切小步逼近"，正是 GAMES103 第一课的<b>显式欧拉（forward Euler）</b>积分：已知当前位置和速度，乘一个时间步 $\delta$ 往前推一格。物理仿真里你用它推粒子位置 $x \leftarrow x + \delta\,\dot{x}$；这里一模一样，只是被推的"粒子"是动作向量，"速度"由神经网络给：</p>
+          <div class="math-block">$$A^{\tau+\delta} \;=\; A^{\tau} \;+\; \delta \cdot v_\theta(A^{\tau}, o, \tau)$$</div>
+          <p>步数 = 把 $[0,1]$ 切成几段。切 10 段就是 $\delta=0.1$，跑 10 次网络。你也熟悉它的代价：<b>步子迈太大、路径又弯，就会偏离真实轨迹（积分误差）</b>——这正是下面要解决的。</p>
+        </div>
+
+        <h2 id="why-straight">为什么"直"就能少步</h2>
+        <p>forward Euler 每一步都假设"这一小段内速度不变，沿直线走"。如果真实轨迹本身就<b>近乎直线</b>，那这个假设几乎不犯错，<b>一大步就能跨很远</b>，10 步足矣。如果真实轨迹<b>弯弯绕绕</b>（diffusion 那种），大步就会"切弯道"飞出去，必须把步子剁碎成几百步才跟得上。</p>
+        <p>所以提速的关键不在积分器，而在<b>让被积分的那条路本身变直</b>。rectified flow 就是冲这个去的。回忆上一节训练时我们怎么造样本——<b>把噪声和数据用直线连起来</b>（$A^\tau=\tau A+(1-\tau)\varepsilon$）。这个"直线插值"的设定，本身就在鼓励学出来的流走直线。rectified flow 进一步可以用"重流（reflow）"等手段把它矫得更直，让噪声到数据的对应关系尽量是一条条不交叉的直线。</p>
+        <p>"回归速度场"这个标题也就解释清楚了：当路径是直线，速度沿途<b>恒定</b>（方向和大小都不变），网络要回归的就是这个<b>稳定的速度场</b>——比回归一个时刻剧变的弯曲场容易得多，也好积分得多。</p>
+
+        <div class="lab">
+          <div class="lab-h"><span class="lab-tag">interactive</span><span class="lab-t">直 vs 弯：同样步数，落点差多少</span></div>
+          <div class="lab-body" data-widget="flow-matching-ode"></div>
+          <div class="lab-cap">把"步数"调到很小（如 3–4）。在 <b>rectified flow（直）</b> 下，青色折线几乎贴着灰色真实路径、落点误差很小；切到 <b>diffusion（弯）</b>，同样步数下折线"切弯道"、落点明显偏离。这就是 π0 敢只用 10 步的底气。</p></div>
+        </div>
+
+        <h2 id="pi0-recap">回到 π0：把这套用在动作上</h2>
+        <p>现在你可以无障碍读懂 π0 的做法了，把前几节的词对号入座：</p>
+        <ul>
+          <li>要生成的"数据"是一整段 <span class="term">action chunk</span> $A_t=[a_t,\dots,a_{t+H-1}]$（H=50，见 <a href="5-1-action-chunking.html">5.1</a>）。</li>
+          <li>训练：噪声与真实 chunk 连直线，回归速度场（<b>conditional flow matching</b>，条件是观测 $o_t$）。</li>
+          <li>采样：从噪声出发，forward Euler <b>10 步</b>（$\delta=0.1$）积出整段 chunk。</li>
+          <li>工程巧思：观测前缀 $o_t$（图像、语言、状态）的内部表示只需算一次并缓存（<span class="term">KV cache</span>），10 步里只重算正在被雕琢的 action token——所以 10 步并不慢。这套"图文/动作分两组权重、共享一次 attention"的结构，正是下一节 <a href="5-7-action-expert.html">5.7</a> 的 <span class="term">action expert</span>。</li>
+        </ul>
+
+        <div class="callout note"><div class="c-h">一图总结整条主线（5.2 → 5.6）</div>
+          <p><b>回归动作</b>(MSE·BC) → 多模态被<b>平均</b>成废动作 → 改学<b>生成分布</b>(从噪声变换到数据,不同噪声→不同模态) → <b>diffusion</b> 回归"去噪结果"但路径弯·步数多 → <b>flow matching</b> 回归"流动方向"(向量场) → <b>rectified flow</b> 把流<b>拉直</b>,forward Euler <b>少步</b>即达,满足 50Hz 实时。你最初那条线索,现在每一环都接上了。</p>
+        </div>
+
+        <h2 id="recap">这一节你需要带走的</h2>
+        <p>(1) 采样 = 解 ODE，计算机用 <b>forward Euler</b>（你 GAMES103 的老朋友）切小步逼近；(2) <b>路径越直，步子能越大、步数越少</b>；(3) <b>rectified flow</b> = 想方设法把噪声→数据的流拉直，于是回归一个稳定<b>速度场</b>、推理只需 ~10 步；(4) π0 据此实现实时连续控制。理论主线到此闭环——下一节起，我们看这套理论在真实模型里怎么搭（action expert）。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/flow-matching-ode.js"></script>
+  <script src="../../assets/js/widgets/mode-averaging.js"></script>
+  <script src="../../assets/js/widgets/action-chunking.js"></script>
+  <script src="../../assets/js/widgets/eval-flow.js"></script>
+  <script src="../../assets/js/widgets/action-dissector.js"></script>
+  <script src="../../assets/js/widgets/capability-radar.js"></script>
+  <script src="../../assets/js/widgets/task-taxonomy.js"></script>
+  <script src="../../assets/js/widgets/moe-attention.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>回归与 MSE：最基础的「拟合」· EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="5-2">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 5 · VLA 理论 · 5-2</div>
+        <h1>回归与 MSE：最基础的「拟合」</h1>
+        <p class="lede">接下来的五节，我们要一步步走到 flow matching。但我答应你<b>从零起步</b>——所以这一节先把最朴素的一块地基打牢：什么叫「回归」，什么叫 MSE。后面每一种方法（diffusion、flow matching、rectified flow），本质都只是<b>「回归一个不同的东西」</b>。先把"回归"这个词彻底搞懂，后面就顺了。</p>
+
+        <h2 id="fit-a-line">先看一个最小的例子：拟合一条线</h2>
+        <p>假设你收集了一堆数据点：每个点是一对数字 $(x, y)$。比如 $x$ 是"踩油门的力度"，$y$ 是"车速"。你把它们画在坐标纸上，发现大致排成一条向上的趋势，但有抖动、不完全在一条直线上。</p>
+        <p>现在你想要一个<b>函数</b> $f$，给它一个新的 $x$，它能<b>预测</b>对应的 $y$。最简单的选择是一条直线 $f(x) = w\,x + b$，你要做的就是调 $w$（斜率）和 $b$（截距），让这条线尽量<b>穿过</b>这堆点。</p>
+        <p>这件事——<b>用一个函数去拟合"输入 → 输出"的数据，使预测值尽量接近真实值</b>——就叫 <span class="term">regression</span>（回归）。它是监督学习里最基本的一类任务。"回归"这个名字是历史遗留，你完全可以在脑子里把它替换成"<b>拟合</b>"或"<b>预测一个连续数值</b>"，意思一样。</p>
+
+        <div class="callout note">
+          <div class="c-h">回归 vs 分类</div>
+          <p>如果输出 $y$ 是一个<b>连续数值</b>（车速 80.3 km/h、关节角 1.27 弧度），叫 <span class="term">regression</span>。如果输出是<b>从几个类别里选一个</b>（猫/狗、左转/右转），叫 <span class="term">classification</span>（分类）。机器人动作是连续的物理量，所以我们主要和回归打交道——这一点记住，到 5.8 讲"离散 token"时会形成对照。</p>
+        </div>
+
+        <h2 id="how-close">怎么衡量"接近"？这就是 loss</h2>
+        <p>"让线尽量穿过点"是句空话——计算机需要一个<b>能算出数字的标准</b>，告诉它"现在差多少"。这个标准叫 <span class="term">loss function</span>（损失函数）：它吃进"预测值"和"真实值"，吐出一个数，<b>越小代表拟合得越好</b>。训练，就是不停调参数让这个数变小。</p>
+        <p>对每一个数据点，最自然的"差多少"就是<b>预测值和真实值的差</b>：$f(x_i) - y_i$。但这个差有正有负（预测高了为正，低了为负），直接加起来会正负抵消。于是我们把它<b>平方</b>（负号没了，而且差得越远惩罚越重），再对所有点<b>取平均</b>：</p>
+
+        <div class="math-block">$$\text{MSE} \;=\; \frac{1}{N}\sum_{i=1}^{N}\bigl(f(x_i) - y_i\bigr)^2$$</div>
+
+        <p>这就是大名鼎鼎的 <span class="term">MSE</span>（Mean Squared Error，均方误差）。逐字拆开：</p>
+        <ul>
+          <li><b>Error（误差）</b> = $f(x_i) - y_i$，预测减真实，一个点差多少。</li>
+          <li><b>Squared（平方）</b> = $(\cdots)^2$，去掉正负号，并放大大误差。</li>
+          <li><b>Mean（均值）</b> = $\frac{1}{N}\sum$，对 $N$ 个点求平均，得到一个总分。</li>
+        </ul>
+        <p>MSE = 0 意味着每个预测都精确命中。MSE 越大，整体偏得越离谱。训练算法（梯度下降）就是顺着"让 MSE 变小"的方向，一点点挪动 $w, b$。</p>
+
+        <div class="bridge rl">
+          <div class="c-h"><span class="tag">从 RL 看</span> 你早就见过它</div>
+          <p>如果你做过 RL，MSE 对你不陌生：拟合 value function $V_\phi(s)$ 时，你最小化的 $\bigl(V_\phi(s) - \text{target}\bigr)^2$ 就是 MSE；critic 的回归、TD 误差的平方，全是这套。区别只在"回归的目标"不同——这恰恰是本系列的主线：<b>每种方法都在回归某个东西，换的只是那个"东西"。</b></p>
+        </div>
+
+        <h2 id="why-mse-matters">一个将决定一切的性质：MSE 偏爱"平均值"</h2>
+        <p>这一节最重要的一句话，请慢读：<b>当同一个输入 $x$ 对应多个不同的"正确" $y$ 时，最小化 MSE 会让模型输出它们的平均值。</b></p>
+        <p>为什么？想象同一个 $x$ 在数据里出现了两次，一次标注 $y=+1$，一次标注 $y=-1$（两个都对，只是两种做法）。模型只能为这个 $x$ 输出<b>一个</b>预测值 $\hat{y}$。它要让 $(\hat{y}-1)^2 + (\hat{y}+1)^2$ 最小——你求个导就知道，答案是 $\hat{y}=0$，正好是两者的平均。</p>
+        <p>可问题是：$+1$ 对、$-1$ 对，但平均出来的 $0$ <b>可能完全不对</b>。这个看似无害的数学性质，正是传统 behavior cloning 在机器人上栽跟头的根源。下一节我们就用一个"绕开障碍物"的例子，把这个坑挖给你看。</p>
+
+        <h2 id="recap">这一节你需要带走的</h2>
+        <p>三句话：(1) <b>回归</b> = 用函数拟合"输入→输出"、预测一个连续值；(2) <b>MSE</b> = 预测与真实之差，平方再平均，是衡量拟合好坏、驱动训练的标尺；(3) MSE 有个致命脾气——<b>面对"多个都对的答案"，它会取平均</b>。记住第三点，下一节见。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/flow-matching-ode.js"></script>
+  <script src="../../assets/js/widgets/mode-averaging.js"></script>
+  <script src="../../assets/js/widgets/action-chunking.js"></script>
+  <script src="../../assets/js/widgets/eval-flow.js"></script>
+  <script src="../../assets/js/widgets/action-dissector.js"></script>
+  <script src="../../assets/js/widgets/capability-radar.js"></script>
+  <script src="../../assets/js/widgets/task-taxonomy.js"></script>
+  <script src="../../assets/js/widgets/moe-attention.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

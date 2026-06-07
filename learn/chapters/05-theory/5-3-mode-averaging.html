@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>为什么「回归动作本身」会平均化 · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="5-3">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 5 · VLA 理论 · 5-3</div>
+        <h1>为什么「回归动作本身」会平均化</h1>
+        <p class="lede">上一节末尾我留了一个钩子：MSE 面对"多个都对的答案"会取平均，而平均可能完全不对。这一节我们把这个抽象性质，落到一个具体得不能再具体的机器人场景上——你会亲眼看到那条"平均线"一头撞进障碍物。这就是传统 behavior cloning 的命门，也是后面所有花哨方法的<b>动机</b>。</p>
+
+        <h2 id="bc-is-regression">behavior cloning 就是回归</h2>
+        <p>先把名字对上。<span class="term">behavior cloning</span>（BC，行为克隆）是最直接的模仿学习：收集人类/专家的演示数据，每一帧是一对"<b>当前观测 → 当时采取的动作</b>"，记作 $(o, a)$。然后训练一个策略网络 $\pi_\theta(o)$，让它的输出尽量接近演示里的动作。</p>
+        <p>"让输出接近演示动作"——这不就是上一节的回归吗？没错。最朴素的 BC 就是<b>拿 MSE 回归动作本身</b>：</p>
+        <div class="math-block">$$\mathcal{L}_{\text{BC}} \;=\; \frac{1}{N}\sum_{i=1}^{N}\bigl\lVert \pi_\theta(o_i) - a_i \bigr\rVert^2$$</div>
+        <p>$\lVert\cdot\rVert^2$ 是向量版的平方（动作是多维向量，各维平方再求和）。所以 BC 继承了 MSE 的一切优点——简单、好训——也继承了它那个致命脾气。</p>
+
+        <h2 id="the-trap">障碍物前的两条路</h2>
+        <p>设想最经典的场景：机器人手臂要从起点移动到终点，中间<b>正好有一个障碍物</b>。人类示范时，有时<b>从上面绕</b>，有时<b>从下面绕</b>——两种都是完美的演示，都成功了。</p>
+        <p>于是数据里，对<b>几乎相同的观测 $o$</b>（手在起点、看到障碍物），存在两簇截然不同的动作：一簇"向上抬"，一簇"向下压"。这正是上一节说的"同一个 $x$ 对应多个都对的 $y$"——术语叫 <span class="term">multimodal</span>（多模态）动作分布,"模态"就是那两簇各自的峰。</p>
+        <p>现在 MSE 登场。它要为这个 $o$ 找<b>一个</b>输出去最小化到所有演示的平方距离。答案你已经知道了：<b>两簇的平均</b>——既不向上也不向下，而是<b>笔直向前</b>。笔直向前是什么？<b>正对着障碍物撞过去。</b></p>
+
+        <div class="lab">
+          <div class="lab-h"><span class="lab-tag">interactive</span><span class="lab-t">mode averaging：两条都对的路，平均出一条撞墙的路</span></div>
+          <div class="lab-body" data-widget="mode-averaging"></div>
+          <div class="lab-cap">青线"绕上"、蓝线"绕下"都是成功演示；黑色虚线是 MSE 回归学出的输出（两者的加权平均）。拖动滑块改变数据里两种走法的比例——当上下大致各半（≈0.5）时，平均线正好穿过障碍物中心。</div>
+        </div>
+
+        <p>这个现象有个专名：<span class="term">mode averaging</span>（模态平均化），也叫 mode collapse 的一种表现。它不是 bug，是<b>用 MSE 回归一个多模态目标的必然数学后果</b>。数据越是"有多种正确做法"，平均出来的那个"四不像"就越危险。</p>
+
+        <div class="bridge rl">
+          <div class="c-h"><span class="tag">从 RL 看</span> 为什么 RL 里不太喊这个疼</div>
+          <p>在 RL 里你通常用<b>随机策略</b> $\pi(a\mid s)$，并且有 reward 把"撞墙"那条路狠狠扣分——探索 + 价值信号会把策略推向某一个 mode，而不是停在平均点。但 BC <b>没有 reward、没有探索</b>，只有"模仿演示"这一个信号。它看不到"撞墙=坏"，只看到"上下都被演示过"，于是老老实实回归到中点。这就是为什么从 RL 转到 imitation 时，mode averaging 会突然变成头号敌人。</p>
+        </div>
+
+        <h2 id="why-not-just">"那我让网络输出一个分布不就行了？"</h2>
+        <p>聪明的你可能立刻想到：别让网络只吐一个动作，让它吐一个<b>概率分布</b>，能同时表达"向上"和"向下"两个峰，采样时随机挑一个不就躲开平均了？</p>
+        <p>方向完全正确——这正是出路。但"让网络输出一个任意形状的高维连续分布"本身是个难题：高斯分布只有一个峰，盖不住两簇；混合高斯要预先定几个峰、训练不稳；在几十维的动作空间上更是雪上加霜。<b>如何高效地表示并采样一个复杂的多模态连续分布</b>——这正是 diffusion 和 flow matching 要解决的核心问题。</p>
+        <p>所以请记住这条逻辑链,它是接下来三节的纲领：</p>
+        <div class="callout">
+          <div class="c-h">本系列的主线</div>
+          <p><b>回归动作本身</b>（BC + MSE）→ 多模态被<b>平均</b>成废动作 → 改为<b>学一个生成分布</b>，从中采样 → 但分布难表示 → <b>diffusion / flow matching</b> 给出可行的表示与采样方法。</p>
+        </div>
+
+        <h2 id="recap">这一节你需要带走的</h2>
+        <p>(1) BC = 拿 MSE 回归动作；(2) 当一个观测有多种正确动作（multimodal）时，MSE 把它们<b>平均</b>成一个常常错误的动作（mode averaging，那条撞墙的线）；(3) 出路是不再回归单个动作、而是<b>学一个能采样的分布</b>——下一节就讲生成模型这个大思路。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/flow-matching-ode.js"></script>
+  <script src="../../assets/js/widgets/mode-averaging.js"></script>
+  <script src="../../assets/js/widgets/action-chunking.js"></script>
+  <script src="../../assets/js/widgets/eval-flow.js"></script>
+  <script src="../../assets/js/widgets/action-dissector.js"></script>
+  <script src="../../assets/js/widgets/capability-radar.js"></script>
+  <script src="../../assets/js/widgets/task-taxonomy.js"></script>
+  <script src="../../assets/js/widgets/moe-attention.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

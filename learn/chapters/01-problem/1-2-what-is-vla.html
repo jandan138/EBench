@@ -56,7 +56,7 @@
         <p>π0 这一路主张：离散 token 自回归<b>不适合</b>高频灵巧控制，转而用 <span class="term">flow matching</span> 直接在连续动作空间上生成。这正好接上 <a href="1-1-rl-to-bc.html">1.1</a> 说的生成式策略——flow matching 能表达多模态连续动作分布，且因为走「近直线」的概率路径，推理只需极少步积分，适合实时控制。</p>
         <div class="callout">
           <div class="c-h">点到为止</div>
-          <p>flow matching 的数学（概率路径、向量场、forward Euler 解 ODE、rectified flow 为何能少步）是 Part 5 的重头戏，<a href="../05-theory/5-2-flow-matching.html">5.2</a> 会带你一步步推。这里你只要知道它是「连续、生成、可少步采样」的路线，和离散自回归并列即可。EBench 的几个 baseline（π0/π0.5/X-VLA/InternVLA-A1）都属于这一连续生成路线。</p>
+          <p>flow matching 的数学（概率路径、向量场、forward Euler 解 ODE、rectified flow 为何能少步）是 Part 5 的重头戏，<a href="../05-theory/5-5-flow-matching.html">5.5</a> 会带你一步步推。这里你只要知道它是「连续、生成、可少步采样」的路线，和离散自回归并列即可。EBench 的几个 baseline（π0/π0.5/X-VLA/InternVLA-A1）都属于这一连续生成路线。</p>
         </div>
 
         <h2 id="io-shape">输入输出长什么形状</h2>
@@ -90,6 +90,7 @@
   <script src="../../content.js"></script>
   <script src="../../assets/js/widgets/registry.js"></script>
   <script src="../../assets/js/widgets/flow-matching-ode.js"></script>
+  <script src="../../assets/js/widgets/mode-averaging.js"></script>
   <script src="../../assets/js/widgets/action-chunking.js"></script>
   <script src="../../assets/js/widgets/eval-flow.js"></script>
   <script src="../../assets/js/widgets/action-dissector.js"></script>
