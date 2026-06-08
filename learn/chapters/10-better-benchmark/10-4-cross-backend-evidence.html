@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>cross-backend 评测与证据分级 · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="10-4">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 10 · 造一个更好的评测系统 · 10-4</div>
+        <h1>cross-backend 评测与证据分级</h1>
+        <p class="lede">现在是整个 Part 最难的一块。一旦你想跨仿真器比较（MuJoCo vs Genesis vs Isaac），甚至往真机靠，你立刻撞上一堵墙：<b>不同后端的「成功」根本不是同一个东西</b>。同一个动作在两个物理引擎里接触力不同、求解器不同、渲染不同。这时候再报一个二元的 success/fail，几乎一定是在过度声明（overclaim）。EOS 的回答不是「想办法让它们相等」，而是<b>诚实地分级</b>：用一道 evidence tier 阶梯代替 0/1，每一级都背着一个写死的 <span class="term">claim_boundary</span>。这一节我们爬这道阶梯，并看 EOS 是怎么在一个真实 pickup 任务上一级一级往上走、又在哪一级停住的。</p>
+
+        <h2 id="the-hard-problem">为什么 cross-backend 的 success/fail 是个陷阱</h2>
+        <p>设想你在 MuJoCo 里把试管夹起来了，记为 success。同样的策略、同样的动作序列搬到 Genesis，因为接触求解不同，试管滑掉了，记为 fail。现在你手里有两个数：MuJoCo 1.0、Genesis 0.0。<b>这两个数能比吗？</b> 它们看起来是同一把尺子上的两个点，其实测的是两个不同世界。把它们并排放进一张表、再算个差值，就是在偷偷声明「这两个后端的物理是可比的」——而你根本没证明过这件事。</p>
+        <p>这正是 <a href="../08-eval-systems/8-4-reproducibility.html">8.4</a> 讲的 overclaiming 的升级版。8.4 里我们担心的是「换个 seed 数就变」；这里更狠：<b>连「成功」的定义都跨不过后端边界</b>。EOS 的 <span class="term">CLAUDE.md</span> 把这条红线写成硬规则之一——「<code>compatibility smoke</code> 不是 full benchmark reproduction」「<code>simulator-only hazard</code> 不是 real-world safety certification」。结论很硬：<b>state transfer / parity 永远不被声明为 equivalence。</b></p>
+
+        <div class="bridge g103">
+          <div class="c-h"><span class="tag">从 GAMES103 看</span> 两个积分器，永远不会逐位相等</div>
+          <p>你在 GAMES103 写过不止一个时间积分器：同一个刚体系统，explicit Euler、semi-implicit、RK4 跑出来的轨迹会随步数发散，接触/约束的处理差异更大。你不会指望两个求解器逐帧相等，只会问「它们在某个容差内、某个量上对得上吗」。cross-backend 评测就是把这个常识制度化：<b>不同物理后端不该被假设等价，只能在<i>具名的轴</i>上、<i>给定容差</i>下，声明对齐到什么程度。</b></p>
+        </div>
+
+        <h2 id="the-ladder">用 evidence tier 代替二元结果</h2>
+        <p>EOS 不报「成功 / 失败」，它报「我现在站在证据阶梯的哪一级」。这道阶梯来自 autobio 复现 suite 和 <span class="term">reporting-and-claim-boundary.md</span>，每一级都对应一类真实存在的 artifact，且都<b>自带一句 claim boundary</b>：</p>
+
+        <div class="lab">
+          <div class="lab-h"><span class="lab-tag">interactive</span><span class="lab-t">evidence tier：爬阶梯，看每一级能 claim 什么、不能 claim 什么</span></div>
+          <div class="lab-body" data-widget="evidence-tier"></div>
+          <div class="lab-cap">点 tier 0→3 往上爬。注意每往上一级都需要<b>更多 artifact</b>，但<b>claim boundary 从不消失</b>——哪怕到最高一级，「对齐」依旧不等于「等价」「忠实复现」「真实安全」。</div>
+        </div>
+
+        <table>
+          <thead><tr><th>tier</th><th>需要的证据</th><th>允许 claim</th><th>禁止 claim</th></tr></thead>
+          <tbody>
+            <tr><td><b>blocked_with_evidence</b></td><td>已具备的 artifact + 显式 blockers 清单</td><td>「证据路已铺到这，还缺这几样能力」</td><td>任何 task 结果 / 复现</td></tr>
+            <tr><td><b>native_state_trace</b></td><td>后端原生状态轨迹（如 MuJoCo qpos/qvel 流）</td><td>「后端原生状态被如实记录，可审计」</td><td>任务成功 / evaluator 兼容</td></tr>
+            <tr><td><b>evaluator_compatible</b></td><td>trace 能喂进某 evaluator 子集，产出 MetricResult</td><td>「通过了某 evaluator 的一个子集」</td><td>整个 benchmark 复现 / 跨后端等价</td></tr>
+            <tr><td><b>native_parity_matched</b></td><td>跨后端状态迁移在容差内逐分量对齐</td><td>「state transfer 在容差内 matched」</td><td>任务成功 / 后端等价 / 忠实复现 / 真实结论</td></tr>
+          </tbody>
+        </table>
+        <p>这道阶梯的纪律全在最后一列：<b>越往上需要的证据越多，但 claim boundary 永远在</b>。哪怕爬到 native_parity_matched，你也只能说「这几个具名分量的状态对齐了」，绝不能升格为「这两个后端等价」。<span class="term">blocked_with_evidence</span> 那一级尤其重要——它把「还差什么」本身当成一种合格产物。诚实地列出 blockers，远好过把缺口偷偷跳过、报一个虚高的 success。</p>
+
+        <h2 id="real-walk">一次真实的爬梯：pickup 任务</h2>
+        <p>这不是纸面设计。EOS 的 worldstate-runtime 路线图记录了一次具体的爬梯，目标是「把 MuJoCo 里测得的试管/试管架 reset 状态，搬到 Genesis 里 apply，再比对」：</p>
+        <ul>
+          <li>先拿到 <b>native_state_trace</b>：真实的 MuJoCo pickup reset 状态被记成一个 <span class="term">RuntimeMeasurementSnapshot</span>（即 9.4 / 9.8 里的 L3 测量层，<a href="../09-eos-arch/9-4-state-layer.html">9.4</a>）。</li>
+          <li>第一次比对（路线图 WR-6）收在 <b>blocked_with_evidence</b>：证据链已经连到能比对，但「reset 状态精确对齐」<b>不声明</b>——<code>comparison_status=blocked_with_evidence</code>、<code>task_success_claimed=false</code>。诚实地停住。</li>
+          <li>补足证据后（WR-6-2）才升到 <b>native_parity_matched</b>：换上真实 Genesis SDK provider、拿到 exact 覆盖的目标快照、逐分量比对 <code>comparison_status=matched</code>。</li>
+        </ul>
+        <p>而升到 matched 的同时，记录里仍然钉着一长串「不声明」：<code>task_success_claimed=false</code>、<code>backend_equivalence_claimed=false</code>——<b>只声明「这四个具名分量（tube_body / tube_cap / rack_slot / robot_joints）的 reset 拓扑在 scenario-pack 容差下对齐了」</b>，绝不声明 pickup 任务做成了、也绝不声明 MuJoCo 和 Genesis 等价。更往后的动态对比（WR-7）甚至<b>故意</b>停在 <code>gate_status=failed</code>：逐轴报告 MuJoCo 和 Genesis 在哪一步首次发散，把发散当成有用的诊断证据，而不是粉饰成 parity。这就是 evidence tier 在真实代码里的样子。</p>
+
+        <div class="callout warn">
+          <div class="c-h">这是 EOS 的现状，也是它的诚实之处</div>
+          <p>请注意上面这条爬梯的真实尺度：跑通的只有<b>一个</b> pickup 任务、<b>一对</b> 后端、<b>一个</b> reset_topology 轴。这远不是「EOS 解决了 cross-backend 评测」。但它恰恰展示了正确的工程姿态——<b>把能证明的精确声明、把不能证明的明确列为 blocker</b>，宁可报 blocked_with_evidence，也不报一个无法支撑的 success。一个会说「我还不能 claim 这个」的评测系统，比一个永远报漂亮数字的系统可信得多。</p>
+        </div>
+
+        <h2 id="composability">这一切之所以可能：BackendProfile 的可组合性</h2>
+        <p>能在「同一个任务、不同后端」之间搬状态、做比对，前提是后端不再是一个不透明的名字。这正是 <a href="../09-eos-arch/9-3-backend-profile.html">9.3</a> 的 <span class="term">BackendProfile</span> 在兑现承诺：把后端拆成 physics / renderer / sensor / control / process runtime 各自可换的组件，并要求<b>每份报告都写明用了哪套 physics_profile、renderer_profile…</b>（reporting-and-claim-boundary.md 的必填元数据）。正因为后端被拆开、被显式记录，「换了哪个组件导致结果变化」才有据可查，跨后端比较才不是把两个黑箱并排猜。EBench 在这条线上是另一极：它把后端写死成 Isaac Sim 4.1.0 一个版本（<a href="../02-sim/2-1-isaac-sim.html">2.1</a>），这让它<b>无比可复现</b>，但也让「跨后端」这个问题在它的世界里压根不存在——又一次「不同目标，不同纪律」。</p>
+
+        <h2 id="recap">这一节你需要带走的</h2>
+        <p>(1) 跨后端的二元 success/fail 是陷阱——不同后端的「成功」不是同一把尺子，并排报数就是 overclaim；(2) EOS 用 4 级 <span class="term">evidence tier</span>（blocked_with_evidence → native_state_trace → evaluator_compatible → native_parity_matched）代替 0/1，每级背一个 claim_boundary，越往上证据越多但 boundary 从不消失；(3) <b>transfer / parity 永不声明为 equivalence</b>；(4) 真实的 pickup 爬梯只到「一个任务、一对后端、一个轴的 reset 对齐」，且仍钉着 <code>task_success_claimed=false</code>——这是诚实而非缺陷；(5) 这一切靠 9.3 的可组合 <span class="term">BackendProfile</span> 才成立。下一节，我们看让这套分级<b>不退化</b>的工程护栏。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/evidence-tier.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

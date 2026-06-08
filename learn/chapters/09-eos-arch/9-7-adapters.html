@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Adapter 层：BackendAdapter 与 ModelAdapter · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="9-7">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 9 · EOS 架构精读 · 9-7</div>
+        <h1>Adapter 层：BackendAdapter 与 ModelAdapter</h1>
+        <p class="lede">到此 core 的「评什么 / 什么状态 / 什么证据」都齐了，但还差最后两扇门：外面那个具体的 <b>simulator</b> 怎么进来？外面那个具体的 <b>model</b> 怎么进来？EOS 的回答是两道<b>窄契约</b>——<span class="term">BackendAdapter</span> 与 <span class="term">ModelAdapter</span>。窄，是它们的全部美德：契约越窄，能插进来的东西就越多。这一节我们逐方法读这两个 ABC，看它们如何分别成为「通往任意仿真」和「通往任意模型族」的防腐门。</p>
+
+        <h2 id="backend">BackendAdapter：通往任意 simulator 的防腐门</h2>
+        <p>先看后端。<span class="term">BackendAdapter</span> 是一个 ABC，它的 docstring 把边界写得很硬：「<i>This must not contain scenario-specific benchmark logic.</i> 它只负责<b>加载场景、执行动作、暴露归一化的状态/观测</b>。」——这正是 9-1 说的 anti-corruption layer：把外部仿真的脏假设挡在门外，只让归一化的东西进来。</p>
+        <div class="code" data-lang="python"><div class="code-h"><span class="fn">backends/base.py</span><button class="cp">复制</button></div><pre><code>@dataclass
+class BackendStepResult:
+    observation: dict[str, Any]
+    reward: float = 0.0
+    terminated: bool = False
+    truncated: bool = False
+    info: dict[str, Any] = field(default_factory=dict)
+
+
+class BackendAdapter(ABC):
+    backend_profile_id: str
+
+    @abstractmethod
+    def load_scene(self, scene_spec: SceneSpec) -&gt; None: ...
+
+    @abstractmethod
+    def reset(self, seed: int | None = None,
+              initial_state: dict[str, Any] | None = None) -&gt; dict[str, Any]: ...
+
+    @abstractmethod
+    def step(self, action: dict[str, Any] | list[float]) -&gt; BackendStepResult: ...
+
+    @abstractmethod
+    def get_observation(self) -&gt; dict[str, Any]: ...
+
+    @abstractmethod
+    def get_canonical_state(self) -&gt; CanonicalPhysicalState: ...
+
+    def set_state(self, state: CanonicalPhysicalState) -&gt; None:
+        raise NotImplementedError("This backend does not support set_state().")
+
+    def close(self) -&gt; None:
+        pass</code></pre></div>
+        <p>五个必须实现的方法，把一个仿真器对评测<b>唯一需要暴露</b>的能力压到了最小：<code>load_scene</code>（按 <span class="term">SceneSpec</span> 摆好场景）、<code>reset</code>（按 seed 复位）、<code>step</code>（执行一个动作、回一个 <span class="term">BackendStepResult</span>）、<code>get_observation</code>（吐模型能看的观测）、<code>get_canonical_state</code>（吐 9-4 那个后端归一化的 <span class="term">CanonicalPhysicalState</span>）。注意这个 ABC<b>对任务一无所知</b>——它不知道什么叫成功、不算分、不读 task spec。它是「无状态于任务」的：成败判定属于 evaluator，它只管把世界往前推一步、如实报告状态。</p>
+        <p>两个非抽象方法暴露了设计的取舍。<code>set_state</code> 默认直接 <code>raise NotImplementedError</code>——因为「把世界设到任意状态」是很多真实仿真（尤其真机）<b>做不到</b>的强能力，所以它不是必需，而是「能做就重写、做不到就如实拒绝」。这种「默认抛 NotImplemented、可选覆盖」的写法，是 EOS 表达「可选能力」的统一手法，等下在 model 那边会再见到它。</p>
+        <p>来看最小实现 <span class="term">DummyBackend</span>——一个确定性的 smoke 后端，它一行 Isaac、一行 MuJoCo 都没有，却能跑通整条评测链路：</p>
+        <div class="code" data-lang="python"><div class="code-h"><span class="fn">backends/dummy.py</span><button class="cp">复制</button></div><pre><code>class DummyBackend(BackendAdapter):
+    """Minimal deterministic backend for smoke tests."""
+    backend_profile_id = "dummy_backend"
+    backend_components = {
+        "platform": "dummy_backend", "physics": "semantic_proxy",
+        "renderer": "none", "sensors": "none",
+        "control": "direct_delta", "process_runtime": "none",
+    }
+
+    def step(self, action):
+        self._t += 1
+        delta = float(action.get("delta", 0.0)) if isinstance(action, dict) else (float(action[0]) if action else 0.0)
+        self._position += delta
+        obs = self.get_observation()
+        return BackendStepResult(observation=obs,
+                                 reward=1.0 if self._position &gt;= 1.0 else 0.0,
+                                 terminated=self._position &gt;= 1.0,
+                                 info={"position": self._position})
+
+    def get_canonical_state(self) -&gt; CanonicalPhysicalState:
+        return CanonicalPhysicalState(time_s=float(self._t),
+                                      objects={"dummy_object": {"position": self._position}},
+                                      metadata={"scene_id": self._scene_id})</code></pre></div>
+        <p>它把「世界」简化成一个标量 <code>position</code>，动作就是给它加 <code>delta</code>，到 1.0 就算 terminated。但请注意它已经把契约填全了：它声明了 <code>backend_profile_id</code>，声明了 9-3 的六件套 <code>backend_components</code>（这些会被 9-5 的 trace 原样记下），并且 <code>get_canonical_state</code> 真的吐出了归一化的物理态。这就是窄契约的力量——一个真实仿真器要接入，无非是把这五个方法换成真的 Isaac / MuJoCo 调用，core 一行不改。<code>DummyBackend</code> 本身是<b>已实现</b>的；真实后端 provider（MuJoCo / Genesis / USD-Isaac）的接入则属于 9-8 会讲的 WorldState runtime 主线工作，目前多为 WIP / smoke 阶段。</p>
+
+        <h2 id="model">ModelAdapter：一个模型可以同时是好几种角色</h2>
+        <p>另一道门是模型。<span class="term">ModelAdapter</span> 的 docstring 一句话点题：「不同模型可以实现<b>一个或多个</b>方法：actor policy、world predictor、planner、safety critic、autonomous agent。」——也就是说，模型族不是用「继承哪个类」来区分的，而是用「实现了哪几个方法」来区分的。</p>
+        <div class="code" data-lang="python"><div class="code-h"><span class="fn">model_adapters/base.py</span><button class="cp">复制</button></div><pre><code>class ModelAdapter(ABC):
+    model_id: str
+
+    def reset(self, task_context: dict[str, Any]) -&gt; None:
+        pass
+
+    @abstractmethod
+    def act(self, observation: dict[str, Any]) -&gt; dict[str, Any] | list[float]:
+        pass
+
+    def predict_future(self, observation, action_sequence) -&gt; PredictedFuture:
+        raise NotImplementedError
+
+    def rank_plans(self, observation, candidate_plans) -&gt; list[Any]:
+        raise NotImplementedError
+
+    def assess_safety(self, observation, candidate_action) -&gt; dict[str, float]:
+        raise NotImplementedError</code></pre></div>
+        <p>只有 <code>act</code> 是 <code>@abstractmethod</code>——<b>必须</b>实现。因为「给观测、出动作」是 actor 的最低门槛，是所有被评模型的公约数。其余三个方法用的还是那招「默认 <code>raise NotImplementedError</code>、能力可选」：实现了 <code>predict_future</code>，你这个 adapter 就<b>额外</b>是个世界模型，可以被 prediction 指标族评（它返回的正是 9-4 那个 <span class="term">PredictedFuture</span>）；实现了 <code>rank_plans</code>，就额外是个 planner；实现了 <code>assess_safety</code>，就额外是个 safety critic。一个模型可以同时是 actor + world model + planner + safety critic——四顶帽子戴在同一个 adapter 上。<span class="term">model-adapter-contract.md</span> 把这条说死：「a model adapter should expose <b>only the methods it supports</b>，不支持的就抛清晰的 NotImplementedError 并上报 capability 元数据。」</p>
+        <p>最小实现 <span class="term">RandomPolicyAdapter</span> 只实现了 <code>act</code>——它就是个纯 actor，恒定吐一个 <code>delta</code>：</p>
+        <div class="code" data-lang="python"><div class="code-h"><span class="fn">model_adapters/random_policy.py</span><button class="cp">复制</button></div><pre><code>class RandomPolicyAdapter(ModelAdapter):
+    model_id = "random_policy"
+
+    def __init__(self, delta: float = 0.25) -&gt; None:
+        self.delta = delta
+
+    def act(self, observation: dict) -&gt; dict[str, float]:
+        return {"delta": self.delta}</code></pre></div>
+        <p>它没实现 <code>predict_future</code> / <code>rank_plans</code> / <code>assess_safety</code>，于是这三个能力自动落回基类的 <code>NotImplementedError</code>——runtime 据此就知道「这个模型只能当 actor，别拿 prediction 指标族去评它」。这套「方法即能力声明」的设计，让加一个新模型族（比如未来的 autonomous agent）不需要改 core：只要它能写进 <span class="term">EpisodeTrace</span> 且至少映射到一个指标族即可（<span class="term">model-adapter-contract.md §10</span> 的入场条件）。</p>
+
+        <div class="bridge rl">
+          <div class="c-h"><span class="tag">从 RL 看</span> model-free 和 model-based 共用一套接口</div>
+          <p>RL 里 <b>model-free</b>（只学 policy）和 <b>model-based</b>（还学 dynamics model）通常是两套完全不同的代码。EOS 用一个 <span class="term">ModelAdapter</span> 把它们统一了：<code>act</code> 是 policy（model-free 的全部），<code>predict_future</code> 是 dynamics model（model-based 多出来的那块）。同一个对象可以两者都有。这恰好回应了 9-4 的 <span class="term">PredictedFuture</span>——评测系统这边给世界模型留好了被评的位置，模型这边就给世界模型留好了产出预测的方法，两端对齐。</p>
+        </div>
+
+        <h2 id="narrow">为什么「窄」是优点</h2>
+        <p>把两道门并排看：<span class="term">BackendAdapter</span> 五个方法、<span class="term">ModelAdapter</span> 一个必需方法。契约窄到这个程度，好处是<b>组合爆炸</b>地省事——任意一个满足 5 方法契约的后端，配上任意一个满足 <code>act</code> 契约的模型，就是一次合法评测；而它们之间的桥梁（spec、canonical state、trace）全是 core 已经定好的。这就是 9-1 「domain-agnostic core + backend-composable」最终在接口层的兑现：core 不认识 Isaac、不认识 π0，它只认识「能 step 的后端」和「能 act 的模型」。</p>
+
+        <div class="callout">
+          <div class="c-h">「EBench 做到了吗？」</div>
+          <p>一半做到了，而且做得很好；另一半结构上没有。先说做到的：<span class="term">EBench</span> <b>有</b>清晰的模型契约——<span class="term">EvalClient</span> + <span class="term">ModelClient</span> 那套 <code>reset / get_action / step / close</code>（见 <a href="../04-engine/4-2-evalclient.html">4.2</a>），这本身就是一道漂亮的模型侧防腐层，让模型装在自己的 env 里、不和 server 抢依赖。但两点关键差异：其一，EBench <b>没有</b>可替换的 <span class="term">BackendAdapter</span>——它的后端<b>焊死</b>在 GenManip / Isaac Sim 上（server 就是把 Isaac 当黑盒，见 <a href="../04-engine/4-1-client-server.html">4.1</a>、<a href="../02-sim/2-1-isaac-sim.html">2.1</a>），换不了 MuJoCo、换不了真机。其二，它的模型契约是 <b>actor-only</b>：只有 <code>get_action</code> / <code>get_action_chunk</code>，没有 <code>predict_future</code> / <code>assess_safety</code>——因为 EBench 评的就是 actor 的任务成败，不评世界模型、不评安全 critic。再次强调：对一个 Isaac-only、评 actor 的 benchmark，这套设计精准且够用；EOS 要插任意 sim、评任意模型族，才必须把后端也抽成可换的 adapter、把模型契约扩成多能力可选。</p>
+        </div>
+
+        <h2 id="recap">这一节你需要带走的</h2>
+        <p>(1) <span class="term">BackendAdapter</span> 用五个方法（<code>load_scene/reset/step/get_observation/get_canonical_state</code>）把仿真器对评测的暴露压到最小，对任务一无所知，是通往任意 simulator 的防腐门；<code>set_state</code> 默认抛 NotImplemented 表达「可选强能力」；<span class="term">DummyBackend</span> 是已实现的最小后端。(2) <span class="term">ModelAdapter</span> 只强制 <code>act</code>，<code>predict_future/rank_plans/assess_safety</code> 用「默认抛 NotImplemented、可选覆盖」表达「一个模型可同时是 actor / world model / planner / safety critic」；<span class="term">RandomPolicyAdapter</span> 是纯 actor。(3) 契约越窄越能组合：任意后端 × 任意模型 = 一次合法评测，core 不认识具体 sim 或模型。下一节是 Part 9 的收束：<span class="term">Evaluator</span> 与 9 个 <span class="term">MetricFamily</span>，加上 Runtime 的分层——从简单同步的 <span class="term">EpisodeRunner</span>，到正在推进的 WorldState runtime 主线，并用 <code>run_smoke.py</code> 把整条链路真的跑一遍。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

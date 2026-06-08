@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>指标与聚合的陷阱：no single scalar · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="8-5">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 8 · 评测系统通论 · 8-5</div>
+        <h1>指标与聚合的陷阱：no single scalar</h1>
+        <p class="lede">8.1 我们说「别把能力压成一个数」，那时是从 construct validity 讲的。这一节我们把刀子往下扎：哪怕你的<i>每一个</i>子指标都干净可信，<b>把它们聚合成一个标量</b>的那一步，依然能凭空制造出误导，甚至能让排行榜的冠亚军<b>当场对调</b>。聚合不是无害的求平均——它是一处藏满陷阱的设计决策。</p>
+
+        <h2 id="collapse">压成一个标量，就抹掉了能力结构</h2>
+        <p>回忆 <a href="8-1-what-we-measure.html">8.1</a>：一个潜在能力是多维的——长流程规划、灵巧对位、移动协调、指令理解，是不同的 construct。当你把它们各自的分加权平均成<i>一个</i>总分，你做的事情在数学上很清楚：<b>把一个高维向量投影到一根数轴上</b>。投影必然丢信息。投影之后，「均衡型选手」和「偏科型选手」可能落在同一个点上，可它们的能力结构南辕北辙。</p>
+        <p>这就是「<span class="term">no single scalar</span>」的核心：一个标量回答不了你真正想问的问题。你想知道的不是「谁的总分高」，而是「<i>谁在哪方面强</i>、它会<i>在哪里崩</i>」——而这恰恰是被投影那一步抹掉的东西。标量给你一个排名，却拿走了你诊断和改进所需的一切结构。</p>
+
+        <h2 id="partial-credit">先把单个分做厚：部分分与时序打分</h2>
+        <p>在担心「怎么聚合」之前，先让被聚合的<b>单个分</b>本身别那么贫穷。最贫穷的指标是二值的 success / fail：它把「差最后一步」和「全程乱来」都记成 0，把大量结构信息在<i>最底层</i>就丢掉了。</p>
+        <p><span class="term">EBench</span> 的打分（细节见 <a href="../03-methodology/3-3-tasks-scoring.html">3.3</a>）就刻意做厚：每个 episode 的 task score ∈ [0,1]，很多任务给<b>部分分（partial credit）</b>——把任务拆成子目标，完成几个就得几分；还带<b>时序条件（temporal conditions）</b>——后续子目标只有在前置子目标已满足时才计分，从而尊重长流程任务里的<i>先后依赖</i>（你得先开微波炉门，「放进食物」这一步才有意义）。这样一个连续、带结构的分，比一个 0/1 携带了多得多的信息。</p>
+        <div class="callout note"><div class="c-h">两层聚合，两类风险</div>
+          <p>注意 EBench 的聚合发生在<b>两层</b>：先把一个 track/split 内所有 episode 的分<b>平均</b>成 track score（这一层相对安全，因为同 track 内任务较同质）；再由 leaderboard 把不同 track 的分聚到一起（这一层危险，因为 track 之间是<b>异质</b>的）。下面所有的陷阱，几乎都发生在「跨异质子群聚合」这第二层。</p>
+        </div>
+
+        <h2 id="heterogeneous">跨异质任务求平均，是在比较苹果和橘子</h2>
+        <p>把分做厚之后，第一个真陷阱来了：<b>对异质的任务取平均</b>。long-horizon 的分和 dexterous 的分，量纲虽然都在 [0,1]，<i>意义</i>却完全不同——前者衡量「能不能把多步流程走完」，后者衡量「手够不够稳能对上位」。把它们直接相加平均，就像把「跑步成绩」和「数学成绩」加起来排名：得出的总分是个数，但它对应不到任何一个真实的 construct。异质子群的均值，<b>不代理任何东西</b>。</p>
+
+        <h2 id="weighting">权重不是中立的：换个权重，换个冠军</h2>
+        <p>「那我加权平均，给重要的任务更高权重不就好了？」——问题恰恰在这里：<b>权重的选择本身就是一个隐含的价值判断，而且它能改变排名</b>。</p>
+        <p>设想模型 A 长流程强、灵巧弱，模型 B 反过来。如果聚合时长流程任务占的权重大（比如因为它们数量多），总分 A 赢；把权重调向灵巧任务，总分 B 赢。<b>同一批一模一样的子指标，只因聚合权重不同，冠军就换人了。</b>于是排行榜的名次，一部分其实是「评测设计者（有意或无意地）选了什么权重」的产物，而不纯是模型能力的产物。当权重是<i>隐式</i>的（比如「碰巧某类任务多」），这种价值判断就藏起来了，读者还以为自己看到的是客观能力序。</p>
+
+        <h2 id="simpson">最阴险的一个：Simpson's paradox</h2>
+        <p>权重的问题还有个更反直觉、更危险的极端形态——<span class="term">Simpson's paradox</span>：<b>模型 A 在每一个子群上都<i>不输</i>给 B，合并之后的总平均却是 B 赢。</b>不是 A 险胜变小胜，是排名<i>整个翻过来</i>。</p>
+        <p>它怎么发生的？因为「合并平均」会被各子群的<b>样本配比</b>悄悄加权。假设 A 在「简单任务」和「困难任务」上都略强，但两个 benchmark 里简单 : 困难的任务<i>数量配比</i>不同：在困难任务占比高的那个 benchmark 上，整体均值会被「大家都低分的困难任务」往下拽，而如果 B 恰好在困难任务上的<i>劣势更小</i>，配比就能把 A 的两处小优势淹没掉，让 B 的总平均反超。子群结论和合并结论<b>方向相反</b>——这不是算错，是「跨异质子群求平均」这个操作的内在病理。下面这个交互件让你亲手把它逼出来：</p>
+
+        <div class="lab">
+          <div class="lab-h"><span class="lab-tag">interactive</span><span class="lab-t">Simpson's paradox：拖动配比，让排名翻转</span></div>
+          <div class="lab-body" data-widget="aggregation-pitfall"></div>
+          <div class="lab-cap">两个模型在「简单任务」和「困难任务」子群上的均分固定不变；只拖动「简单 : 困难」的任务配比，看「总平均」的冠军如何被配比单独翻转——子群没变，结论却反了。</div>
+        </div>
+
+        <div class="bridge rl">
+          <div class="c-h"><span class="tag">从 RL 看</span> 标量 return 与多目标</div>
+          <p>这套陷阱你在 RL 的奖励设计里见过同构的版本。把多个子目标用一组权重线性组合成一个标量 <span class="term">reward</span>，权重一调，最优策略就偏向不同的子目标——单一标量的「最优」永远是<b>相对于你选的权重</b>而言的。<span class="term">multi-objective RL</span> 之所以宁可去求一整条 <span class="term">Pareto front</span> 而非一个加权和，正是因为它知道：一旦塌成标量，权重就在替你做一个被藏起来的价值判断。评测里的聚合是同一回事——所以负责任的报告，给的是一张多轴 <span class="term">capability profile</span>（一条 Pareto 式的能力前沿），而不是一个替读者把权重选好了的总分。</p>
+        </div>
+
+        <h2 id="recap">这一节你需要带走的</h2>
+        <p>(1) 聚合成标量 = 把高维能力投影到一根轴，必然抹掉「谁强在哪、会在哪崩」的结构；(2) 先把<b>单个分</b>做厚——用 EBench 式的部分分 + 时序条件，而非二值 success/fail；(3) 跨<b>异质</b>任务求平均不代理任何 construct；(4) <b>权重不中立</b>，换权重能换冠军，隐式权重最危险；(5) <span class="term">Simpson's paradox</span> 是极端形态——子群全不输，合并却翻盘，病根在样本配比。结论只有一个：<b>no single scalar</b>，给一张多轴画像。下一节是 Part 8 的收尾——既然「在测试分布上高分」根本不证明泛化，那<b>泛化到底该怎么测</b>？我们去看 train/test 隔离与 data leakage。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/aggregation-pitfall.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

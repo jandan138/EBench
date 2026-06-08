@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>工程纪律：让系统不退化的护栏 · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="10-5">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 10 · 造一个更好的评测系统 · 10-5</div>
+        <h1>工程纪律：让系统不退化的护栏</h1>
+        <p class="lede">前面四节描述了一个野心很大的东西：多场景、多后端、多能力轴、还要分级声明证据。但野心大的系统有个共同的死法——<b>熵增</b>。每加一个场景，core 就被腌进一点场景假设；每加一份报告，就多一次「悄悄把话说大」的机会；每加一个 baseline，就多一次「把参考策略当成被评模型」的混淆。一个分层评测系统不会因为某次失败而崩，它会<b>慢慢退化</b>，直到边界形同虚设。这一节讲 EOS 用来对抗退化的几道护栏——它们和你写代码时靠 type checker、断言、不变量来保住重构安全，是同一个思路。</p>
+
+        <h2 id="leakage-check">护栏一：core leakage check（PR 时强制边界）</h2>
+        <p>第一道也是最硬的一道，我们在 <a href="../09-eos-arch/9-1-design-stance.html">9.1</a> 已经见过：<span class="term">scripts/check_core_leakage.py</span>。它遍历 <code>core/</code> 下所有 <code>.py</code>，对一张黑名单逐条正则匹配，命中就 <code>return 1</code> 让 CI 挂掉。黑名单里是所有最容易渗进 core 的私有名——<code>ebench</code> / <code>genmanip</code> / <code>lift2</code> / <code>isaac41</code> / <code>autobio</code> / <code>mujoco</code> / <code>pipette</code> / <code>centrifuge</code> ……</p>
+        <div class="code" data-lang="python"><div class="code-h"><span class="fn">scripts/check_core_leakage.py</span><button class="cp">复制</button></div><pre><code>def main() -&gt; int:
+    bad = find_forbidden_tokens(ROOT)   # ROOT = src/embodied_eval_os/core
+    if bad:
+        for path, token in bad:
+            print(f"FORBIDDEN token {token!r} found in {path}")
+        return 1
+    print("OK: no forbidden benchmark/scenario leakage in core")
+    return 0</code></pre></div>
+        <p>它甚至区分两种匹配：<code>_contains_pattern</code>（子串即命中，用于 <code>ebench</code> 这种独一无二的串）和 <code>_word_pattern</code>（带词边界，用于 <code>lab</code> 这种短词，免得误伤 <code>collaborate</code>）。关键不在脚本多聪明，而在它的<b>时机</b>：<span class="term">CLAUDE.md</span> 把它和 <code>pytest -q</code>、<code>python examples/run_smoke.py</code> 一起列进 "Required Commands Before PR"。也就是说，<b>边界纪律不是口头约定，而是合并前必须绿的硬门槛</b>。人会忘、会偷懒、会「就这一次」，但 CI 不会。</p>
+
+        <div class="bridge rl">
+          <div class="c-h"><span class="tag">从 RL 看</span> 这是给架构装的 unit test</div>
+          <p>你写 RL 代码时会给 replay buffer、给 advantage 计算写测试，因为你知道这些地方一旦悄悄错了，整个训练会无声地崩。leakage check 是同一种东西，只不过它测的不是数值，而是<b>架构边界</b>：「core 还干净吗」被变成了一个会失败的测试。把「设计原则」编译成「会红的检查」，是它能在几十次 PR 后依然成立的唯一原因。</p>
+        </div>
+
+        <h2 id="claim-validation">护栏二：claim_boundary 不是注释，是被校验的字段</h2>
+        <p>10.4 讲的 evidence tier 全靠 <span class="term">claim_boundary</span> 撑着。但如果 claim_boundary 只是个可写可不写的字符串，它迟早会被留空、被复制粘贴、被遗忘。EOS 的做法是把它做成<b>被校验的一等字段</b>：在 L3 的 <span class="term">RuntimeMeasurement</span> 证据里，claim_boundary 要经过格式/正则校验才能通过（见 <a href="../09-eos-arch/9-8-evaluator-runtime.html">9.8</a> 的 runtime 分层）。autobio 复现 suite 里的每一个 case，无论是 <code>native_state_trace</code> 还是 <code>blocked_requirement</code>，都<b>必须</b>带一句 claim_boundary：</p>
+        <div class="code" data-lang="yaml"><div class="code-h"><span class="fn">configs/autobio_native_reproduction_suites/ · 每个 case 都带 claim_boundary</span><button class="cp">复制</button></div><pre><code>- case_id: pickup_native_state
+  case_type: trace_json
+  fidelity_tier: native-state
+  claim_boundary: "Pickup native MuJoCo state trace only;
+                   not evaluator-compatible whole task reproduction."
+
+- case_id: instrument_ui_device_runtime
+  case_type: blocked_requirement
+  claim_boundary: "Blocked requirement only; broad instrument UI/device
+                   state machines are not certified."
+  blockers:
+    - centrifuge/thermal/vortex UI systems are not implemented natively.</code></pre></div>
+        <p>这条护栏的意义是：<b>「说清楚这证据不证明什么」成了一件没法跳过的事</b>。一个 case 不能只报「我做到了」，它必须同时声明边界，否则连 schema 都过不了。这就把 10.4 那条「claim boundary 永不消失」从一句道德倡议，变成了机器强制的结构。</p>
+
+        <h2 id="reference-vs-model">护栏三：参考策略永远不会被当成被评模型</h2>
+        <p>这是一个特别隐蔽、却特别容易出大事的混淆。评测里常有两类「会输出动作的东西」：一类是你真正想打分的<b>被评模型</b>，另一类是用来生成示范/做 oracle/做遥操的<b>参考策略</b>（reference / teleop policy）。如果系统不区分它们，一个用来铺数据的 oracle 策略，就可能被悄悄当成「某模型的评测得分」报出去——这不是小数点错误，这是直接伪造结论。</p>
+        <p>EOS 在 spec 层就把这两者做成了<b>不同的类型</b>，而不是同一个类加个标志位。<span class="term">ModelProfile</span> 是被评模型；<span class="term">ReferencePolicyProfile</span> 是参考策略，且它的 <code>is_evaluated_model</code> 默认就是 <code>False</code>，还自带一句写死的 claim_boundary：</p>
+        <div class="code" data-lang="python"><div class="code-h"><span class="fn">src/embodied_eval_os/core/specs/model_spec.py</span><button class="cp">复制</button></div><pre><code>@dataclass(frozen=True)
+class ModelProfile:                 # 被评模型
+    model_id: str
+    model_family: str
+    supported_contracts: list[str] = field(default_factory=list)
+    ...
+
+@dataclass(frozen=True)
+class ReferencePolicyProfile:        # 参考 / 遥操 / oracle 策略 —— 不是被评模型
+    source_id: str
+    role: str
+    privileged_state_policy: str = "model_input_excludes_privileged_state"
+    claim_boundary: str = "Reference policy provenance only; not an evaluated model score."
+    is_evaluated_model: bool = False     # 关键：默认就不是被评模型</code></pre></div>
+        <p>类型不同，混淆就难以发生：你想把一个 <span class="term">ReferencePolicyProfile</span> 的结果塞进「模型 leaderboard」，得先显式翻越 <code>is_evaluated_model=False</code> 和那句 claim_boundary，而不是默认就漏过去。<span class="term">DemonstrationSourceProfile</span>（示范数据源）也是同样的处理。<b>把「这不是被评模型」做成默认值和类型边界，而非靠人记得</b>——这就是用类型系统守不变量的精神。</p>
+
+        <h2 id="provenance">护栏四：seed + versions provenance，每条 trace 都带</h2>
+        <p>第四道护栏接回 <a href="../08-eval-systems/8-4-reproducibility.html">8.4</a> 和 <a href="../09-eos-arch/9-5-trace.html">9.5</a>：每条 <span class="term">EpisodeTrace</span> 都必须带 <code>seed</code> 和 <code>versions</code>（repo_commit / task_spec / scene_spec…），<span class="term">reporting-and-claim-boundary.md</span> 更把一长串 profile（backend / physics / renderer / sensor / control / model / asset_manifest / seeds / trace_manifest）列为报告<b>必填元数据</b>。没有这些，三个月后代码一改，旧 trace 就成了无法对照的孤证。provenance 不是为了好看，它是「这个数还能不能被重新检验」的前提——而能被重新检验，正是它区别于「一张漂亮但死掉的结果表」的全部。</p>
+
+        <h2 id="mvp-layering">护栏五：MVP 分层——先稳地基，再盖楼</h2>
+        <p>最后一道护栏是关于<b>顺序</b>的，写在 <span class="term">mvp-roadmap.md</span> 里。EOS 没有一上来就铺五个场景，而是规定了执行顺序：MVP-0 先把 core 的 spec / state / trace 骨架和 smoke + leakage check 稳住，<i>之后</i>才在上面叠 EBench adapter（MVP-1）、scientific_lab pack（MVP-2）、跨后端 profile（MVP-4）、报告（MVP-5）。路线图甚至明令：<b>不要因为「EBench 全量复现」没做完就卡住场景包的开发</b>——地基（core 契约）必须先于上层建筑稳定，否则每个上层改动都会反过来撬动地基。</p>
+        <div class="callout note">
+          <div class="c-h">护栏的共同逻辑：把原则编译成会失败的检查</div>
+          <p>回头看这五道护栏，它们其实是同一招的五个变体：<b>不要相信「大家会记得遵守原则」，而要把原则变成一个不遵守就会失败的东西</b>——CI 会红（leakage check）、schema 过不了（claim_boundary 校验）、类型对不上（ReferencePolicyProfile）、trace 无法复现就不算证据（provenance）、地基没稳就不许盖楼（MVP 分层）。这正是你写代码时让 type checker、断言、不变量替你守住重构安全的同一种纪律——只不过这里守的是一个评测系统的诚实。</p>
+        </div>
+
+        <h2 id="recap">这一节你需要带走的</h2>
+        <p>(1) 分层评测系统的敌人是熵增/退化，护栏的统一思路是「把设计原则编译成会失败的检查」；(2) 五道护栏：<span class="term">check_core_leakage.py</span> PR 时强制 core 边界、<span class="term">claim_boundary</span> 是被校验字段而非注释、<span class="term">ReferencePolicyProfile</span> vs <span class="term">ModelProfile</span>（<code>is_evaluated_model=False</code>）防止参考策略冒充评测得分、每条 trace 带 seed+versions provenance、MVP 分层先稳 core 再盖场景；(3) 这与你用 type check / 断言 / 不变量保住重构安全是同一种工程纪律。下一节是全书最后一节内容章：路线图、诚实的状态表，和一份给你自己造系统用的 checklist。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

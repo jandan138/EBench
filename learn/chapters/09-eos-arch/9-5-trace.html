@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Trace 即唯一证据：EpisodeTrace 与 privileged state · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="9-5">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 9 · EOS 架构精读 · 9-5</div>
+        <h1>Trace 即唯一证据：EpisodeTrace 与 privileged state</h1>
+        <p class="lede">上一节我们把 spec、canonical state、predicted future 都准备好了。但它们都是<i>过程</i>——一次评测真正留下来、能被复查的，只有一样东西：<span class="term">EpisodeTrace</span>。EOS 的设计文档把这件事写得几乎是教条——<i>"<span class="term">EpisodeTrace</span> is the source of truth for every evaluation run."</i> 这一节我们就拆开这个「唯一证据」：它带哪些字段、为什么每个字段都关乎可复现，以及它如何用一条 <span class="term">privileged_state</span> 红线，把「模型偷看了答案」这种作弊从结构上挡住。</p>
+
+        <h2 id="why-trace">为什么是「唯一」证据</h2>
+        <p>回想 <a href="../08-eval-systems/8-4-reproducibility.html">8.4</a> 我们反复强调的那条标准：一个评测结果只有在<b>能被别人原样重跑、逐步审计</b>时才算数。EOS 把这条标准物化成了一个 dataclass。<span class="term">trace-and-state.md</span> 列出 trace 的职责是「保存足够信息，以便跨场景、跨模型、跨 backend profile 去 <i>reproduce / audit / score / compare</i> 一个 episode」——四个动词，对应四种用途，全压在同一个对象上。</p>
+        <p>这意味着 trace 不能只是「一串 observation 和 action」。它得同时是：复现所需的<b>配方</b>（seed、版本、后端组成）、审计所需的<b>逐步明细</b>（每一步的状态、动作、指标）、以及一张写死的<b>免责声明</b>（这串证据到底证明了什么、没证明什么）。我们一层层看。</p>
+
+        <h2 id="tracestep">TraceStep：一步里发生的全部事实</h2>
+        <p>最小单元是 <span class="term">TraceStep</span>——评测循环里走的每一步，都凝结成一个它。字段直接对应 9-4 那三层状态：</p>
+        <div class="code" data-lang="python"><div class="code-h"><span class="fn">core/state/trace.py</span><button class="cp">复制</button></div><pre><code>@dataclass(init=False)
+class TraceStep:
+    step_index: int
+    time_s: float
+    observation: dict[str, Any]
+    action: dict[str, Any] | list[float] | None
+    canonical_physical_state: CanonicalPhysicalState | None = None
+    task_world_state: TaskWorldState | None = None
+    prediction: PredictedFuture | None = None
+    metric_results: dict[str, Any] = field(default_factory=dict)
+    privileged_state_visible_to_model: bool = False
+    metadata: dict[str, Any] = field(default_factory=dict)</code></pre></div>
+        <p>注意这一步同时记下了三种东西：模型<b>看到了什么</b>（<code>observation</code>）、模型<b>做了什么</b>（<code>action</code>）、以及世界<b>真实是什么</b>（<code>canonical_physical_state</code> / <code>task_world_state</code>）。这三者分离是关键——因为「模型看到的」和「世界真实的」往往<b>不一样</b>，而这个差距正是评测想测量的核心。<code>prediction</code> 字段则留给世界模型：如果被评的是个 WAM，它在这一步想象的未来 <span class="term">PredictedFuture</span> 也会被原样存下，留待和真实未来对账（这正是 9-4 PredictedFuture 的落地处）。</p>
+        <p>这里有一个值得留意的工程细节：<span class="term">TraceStep</span> 用了 <code>@dataclass(init=False)</code> 加手写 <code>__init__</code>，就是为了<b>向后兼容</b>。旧代码可能用 <code>world_state=</code> / <code>metrics=</code> 这两个老参数名，新代码用 <code>task_world_state=</code> / <code>metric_results=</code>；构造函数把老名映射到新名，还提供了 <code>world_state</code> / <code>metrics</code> 两个 property 别名。更妙的是，只要你给了 <code>task_world_state</code>，它会自动把 <code>canonical_physical_state</code> 设成 <code>task_world_state.physical</code>——保证「物理态」永远和「任务世界态」对得上，不会出现两者打架的脏 trace。</p>
+
+        <div class="bridge rl">
+          <div class="c-h"><span class="tag">从 RL 看</span> 不只是 transition，是带审计字段的 transition</div>
+          <p>你在 RL 里熟悉的 <span class="term">transition</span> 是 $(s_t, a_t, r_t, s_{t+1})$——够训练用。但<b>评测</b>要的更多：它要分清「agent 观测 $o_t$」与「特权真值 $s_t$」（部分可观下两者不同），还要记下「这一步给了哪些指标」。<span class="term">TraceStep</span> 就是把 RL transition 扩成一个<i>可审计</i>版本：observation / action / 真值 state / metric / 以及一个布尔「模型这步是否看到了特权态」。它不是为了学习，是为了<b>事后没人能赖账</b>。</p>
+        </div>
+
+        <h2 id="episodetrace">EpisodeTrace：一整集 = 一个自包含证据单元</h2>
+        <p>把许多 <span class="term">TraceStep</span> 串起来、再裹上整集级别的元数据，就是 <span class="term">EpisodeTrace</span>。它的头部字段才是「可复现」真正的载体：</p>
+        <div class="code" data-lang="python"><div class="code-h"><span class="fn">core/state/trace.py</span><button class="cp">复制</button></div><pre><code>@dataclass
+class EpisodeTrace:
+    episode_id: str
+    task_id: str
+    scenario_pack: str
+    backend_profile_id: str
+    physics_profile_id: str | None = None
+    renderer_profile_id: str | None = None
+    seed: int | None = None
+    model_profile_id: str | None = None
+    versions: dict[str, Any] = field(default_factory=dict)        # repo_commit / task_spec / scene_spec
+    backend_components: dict[str, Any] = field(default_factory=dict)
+    privileged_state_policy: str = "model_input_excludes_privileged_state"
+    claim_boundary: str = "Trace evidence only; no simulator fidelity or real-world safety claim."
+    steps: list[TraceStep] = field(default_factory=list)
+    episode_metrics: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)</code></pre></div>
+        <p>逐条看这个头部，你会发现它就是一份「重跑这次评测需要的全部坐标」：<code>scenario_pack</code> + <code>task_id</code>（评什么）、<code>backend_profile_id</code> + <code>physics_profile_id</code> + <code>renderer_profile_id</code>（在哪个后端、哪套物理/渲染上跑——对应 9-3 的可组合后端）、<code>seed</code>（随机性的钥匙）、<code>model_profile_id</code>（哪个模型）。而 <code>versions</code> 字典里塞的是 <code>repo_commit</code> / <code>task_spec</code> / <code>scene_spec</code> 三个版本号——没有它们，三个月后代码改了，这串 trace 就成了无法对照的孤证。<span class="term">trace-and-state.md</span> 把话说死：「没有这些元数据，trace 不被视为有效证据。」</p>
+        <p>而 <code>backend_components</code> 是对 9-3 那个六件套（<code>platform / physics / renderer / sensors / control / process_runtime</code>）的快照——它记下「这次评测的后端是由哪些组件拼出来的」，这样换了组件、结果变了，你能立刻定位是哪一件变了。</p>
+
+        <div class="lab">
+          <div class="lab-h"><span class="lab-tag">interactive</span><span class="lab-t">trace-anatomy：把一份 EpisodeTrace 拆开看</span></div>
+          <div class="lab-body" data-widget="trace-anatomy"></div>
+          <div class="lab-cap">点开头部元数据与逐步明细。注意「复现配方」（versions / seed / backend_components）、「逐步审计」（每个 TraceStep）、「免责声明」（claim_boundary / privileged_state_policy）三组字段，如何分别服务 reproduce / audit / claim 三种用途。</div>
+        </div>
+
+        <h2 id="privileged">两条写进字段的红线：privileged state 与 claim boundary</h2>
+        <p>这是整个 trace 设计里最体现「评测纪律」的两个字段，它们都是<b>默认值就是安全值</b>。</p>
+        <p>第一条是 <span class="term">privileged_state_policy</span>，默认 <code>"model_input_excludes_privileged_state"</code>。它对应一条具体规则（<span class="term">trace-and-state.md §8</span>）：<code>TaskWorldState</code> / <code>CanonicalPhysicalState</code> 里可能含<b>特权信息</b>（比如真实液体体积、隐藏过程变量）——这些 evaluator 和 recorder 可以读，但<b>默认绝不喂给模型</b>。如果哪个 PR 想把特权字段暴露给 model adapter，必须显式说明理由并把该 benchmark 标成「state-conditioned」模式。每个 <span class="term">TraceStep</span> 上那个 <code>privileged_state_visible_to_model</code> 布尔，就是这条策略落到<b>逐步</b>粒度的见证：它逐步记录「这一步模型有没有被允许看真值」，事后任何人都能核查模型是不是偷看了答案。</p>
+        <p>第二条是 <span class="term">claim_boundary</span>，默认那句话掷地有声：<i>"Trace evidence only; no simulator fidelity or real-world safety claim."</i> 它把这份证据的「证明力边界」直接焊死在数据里——这串 trace 只证明「在这个仿真后端里，这次跑成了这样」，它<b>不</b>证明仿真有多真、<b>不</b>证明能迁移到真机、<b>不</b>证明真实世界安全。EOS 在很多更底层的运行时类型里也复用了同一个 anti-overclaim 思路（我们 9-8 会看到 <span class="term">RuntimeMeasurementSnapshot</span> 甚至用正则去拦截过度宣称的措辞）。</p>
+
+        <div class="bridge g103">
+          <div class="c-h"><span class="tag">从 GAMES103 看</span> 仿真跑通 ≠ 物理为真</div>
+          <p>你写过求解器就懂：一个刚体在你的积分器里稳稳落进槽里，<b>不代表</b>真实世界的摩擦、形变、接触会这么走。仿真只是某套数值假设下的结果。<span class="term">claim_boundary</span> 把这份谦逊变成了一个不可省略的字段——任何拿 trace 去说「我的策略真机安全」的人，都会被这句默认免责声明当场拦下。这正是把 GAMES103 的「数值结果 ≠ 物理真相」上升成了评测系统的硬约束。</p>
+        </div>
+
+        <h2 id="store">序列化：to_dict / from_dict 与 TraceStore</h2>
+        <p>证据要能存、能传、能被别的工具读，所以 trace 全程可 JSON 化。<span class="term">EpisodeTrace.to_dict()</span> 用一个递归的 <code>_to_plain</code> 把所有嵌套 dataclass（canonical state、task world state、prediction）压平成纯字典；<span class="term">from_dict()</span> 再反向重建，并且体贴地接受<b>旧别名</b>——读 step 时 <code>task_world_state</code> 取不到就退回 <code>world_state</code>，<code>metric_results</code> 取不到就退回 <code>metrics</code>。这保证老 smoke trace 仍能被新代码读出来，而新产物一律写规范名。</p>
+        <p>落盘则交给 <span class="term">TraceStore</span>，薄到只有两个方法：</p>
+        <div class="code" data-lang="python"><div class="code-h"><span class="fn">core/recorders/trace_store.py</span><button class="cp">复制</button></div><pre><code>class TraceStore:
+    def __init__(self, root: str | Path) -&gt; None:
+        self.root = Path(root)
+        self.root.mkdir(parents=True, exist_ok=True)
+
+    def save_json(self, trace: EpisodeTrace) -&gt; Path:
+        path = self.root / f"{trace.episode_id}.json"
+        path.write_text(
+            json.dumps(trace.to_dict(), ensure_ascii=False, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+        return path
+
+    def load_json(self, path: str | Path) -&gt; EpisodeTrace:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+        return EpisodeTrace.from_dict(payload)</code></pre></div>
+        <p>注意 <code>sort_keys=True</code> 这个小动作：键有序的 JSON 让两份 trace 可以直接 <code>diff</code>，也让内容哈希稳定——又是「可审计」的细节。设计文档把这一层定位为 <span class="term-i">MVP-0.5</span> 产物：trace 是 JSON 文件，必须能<b>无损往返</b> <code>save_json()</code> / <code>load_json()</code>，不丢 provenance、backend component、privileged-state、claim-boundary、state、action、prediction、metric 任何一项。这块是<b>已实现</b>并被 smoke 测试覆盖的（下一节、以及 9-8 的 <code>run_smoke.py</code> 都会真的写出一份）。</p>
+
+        <div class="callout">
+          <div class="c-h">「EBench 做到了吗？」</div>
+          <p>部分做到，但形态完全不同。<span class="term">EBench</span> 确实会按 <code>task</code> / <code>run_id</code> 把评测结果落盘到 <code>saved/eval_results/&lt;task&gt;/&lt;run_id&gt;/</code>（见 <a href="../04-engine/4-1-client-server.html">4.1</a>），也能 <code>--frame_save_interval</code> 存过程帧——它<b>有</b>结果记录。但它<b>没有</b>一个像 <span class="term">EpisodeTrace</span> 这样、把 <code>versions{repo_commit/task_spec/scene_spec}</code>、<code>backend_components</code>、<code>privileged_state_policy</code>、<code>claim_boundary</code> 全部做成<b>一等字段</b>的类型化证据单元，更没有逐步的 <code>privileged_state_visible_to_model</code> 这种「模型有没有偷看答案」的结构化审计位。EBench 的复现靠的是固定本体 + 固定 Isaac + 固定 split 这套外部约定；EOS 因为要跨后端、跨模型族，<b>必须</b>把复现配方和免责声明刻进 trace 本身，否则换了后端就无从对照。再说一次：单后端 benchmark 用外部约定足矣；通用 OS 才需要让每一份证据自带全部坐标。</p>
+        </div>
+
+        <h2 id="recap">这一节你需要带走的</h2>
+        <p>(1) <span class="term">EpisodeTrace</span> 是每次评测的<b>唯一证据</b>，同时承担 reproduce / audit / score / compare 四种用途；(2) <span class="term">TraceStep</span> 逐步分离「模型观测 / 模型动作 / 世界真值 / 模型预测 / 指标」，是带审计字段的 RL transition；(3) 头部的 <code>seed</code> / <code>versions</code> / <code>backend_components</code> 是复现配方，缺一即「无效证据」；(4) <code>privileged_state_policy</code> 默认排除特权态、逐步用 <code>privileged_state_visible_to_model</code> 见证，<code>claim_boundary</code> 默认把证明力焊死在「仅 trace 证据」；(5) <span class="term">to_dict/from_dict</span> + <span class="term">TraceStore</span> 让证据无损 JSON 往返、键有序可 diff——这一层已实现并被 smoke 覆盖。下一节进入 <span class="term">Primitive 层</span>：scenario pack 究竟<b>怎么</b>把归一化的物理态，翻译成 9-4 里那三个 schema-free 的任务语义通道。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/trace-anatomy.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

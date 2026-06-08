@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>泛化怎么评：train/test isolation 与 leakage · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="8-6">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 8 · 评测系统通论 · 8-6</div>
+        <h1>泛化怎么评：train/test isolation 与 leakage</h1>
+        <p class="lede">8.4 的过度宣称清单里有一条：「在测试分布上高分 ≠ 泛化」。这一节把它正面回答清楚——泛化<i>到底</i>怎么测才算数。核心只有一句话：<b>要测泛化，被测的东西就必须是模型真正没见过的</b>。听起来理所当然，但「没见过」这件事，比绝大多数人以为的更难保证——一道细微的裂缝，就能让一个其实只会背书的模型，在你的榜上拿到泛化高分。</p>
+
+        <h2 id="what-is-generalization">泛化是「对没见过的东西」的能力</h2>
+        <p>先把概念钉死。<b>泛化（generalization）</b>不是「在训练分布上做得好」——那叫拟合。泛化是「面对训练时<i>没</i>出现过的情况，依然做得好」。所以测泛化的逻辑前提，是存在一批模型在训练中<b>从未接触</b>的样本，我们专门拿它们来考。这批样本一旦在训练里露过脸，它测出来的就只是记忆，不是泛化。整个泛化评测的可信度，都压在「考题确实是新的」这一个支点上。</p>
+        <div class="bridge rl">
+          <div class="c-h"><span class="tag">从 RL 看</span> 对评测分布的过拟合</div>
+          <p>你在 RL 里反复警惕的 <span class="term">overfitting</span>，搬到这里就是「过拟合到评测分布」。一个 agent 可以把某个固定关卡的每一帧背得滚瓜烂熟、刷出惊人回报，换一张新地图却原地撞墙——它学到的是这张图的<i>查找表</i>，不是可迁移的策略。评测泛化要做的，正是不让模型靠查找表蒙混过关：把考场换成它没背过的地图。你对「在训练环境上 reward 高不代表学到了策略」的警惕，原封不动就是这一节的全部动机。</p>
+        </div>
+
+        <h2 id="held-out">held-out split 与 train/test isolation</h2>
+        <p>实现「考题是新的」的标准做法，是 <span class="term">held-out split</span>：把数据切成<b>互不重叠</b>的几份——可调的训练/验证集，和一个被<i>锁起来</i>、只用于最终评测的留出测试集。这就是 <span class="term">train/test isolation</span>（训练/测试隔离）。</p>
+        <p><span class="term">EBench</span> 的做法（细节见 <a href="../03-methodology/3-2-tracks-splits.html">3.2</a>）是三个 split：<span class="term">val_train</span> 与 <span class="term">val_unseen</span> 是开放的、可以随便调参看反馈的；而 <span class="term">test</span> 被留出来驱动 leaderboard。隔离的关键纪律是：<b>test 上的信息绝不能回流到训练或调参里</b>。一旦你开始「在 test 上看一眼、回去改改、再看一眼」，你就在用 test 的梯度悄悄训练，test 也就不再是 held-out 的了——它退化成了又一个训练集，只是退化得很隐蔽。</p>
+        <div class="callout note"><div class="c-h">隔离不是「分开存两个文件夹」</div>
+          <p>真正的隔离是<b>信息流</b>上的隔离，不只是文件上的分开。常见的隐蔽泄漏：反复用 test 结果做模型选择（早停、调超参、挑 checkpoint）——每做一次，test 的信息就漏进了你的决策一次。所以 leaderboard 才要把 test 锁在服务器端、限制提交频次：它防的不是你看不到答案，而是防你<i>用</i>答案来反向优化。</p>
+        </div>
+
+        <h2 id="ood-axes">沿不同的轴去考泛化：OOD axes</h2>
+        <p>「没见过」其实有<b>很多种</b>没见过，而模型可能在某些轴上泛化、在另一些轴上彻底失灵。所以好的泛化评测会把它<b>分轴</b>来考，而不是笼统问一句「泛化吗」。EBench 设想的几条 <span class="term">OOD</span>（out-of-distribution，分布外）轴（详见 <a href="../03-methodology/3-4-generalization.html">3.4</a>）很有代表性：</p>
+        <ul>
+          <li><b>object</b>：换没见过的<i>物体</i>（同任务，新道具）。</li>
+          <li><b>background</b>：换没见过的<i>背景 / 场景</i>布置。</li>
+          <li><b>instruction</b>：换没见过的<i>指令措辞</i>（同任务，新说法）。</li>
+          <li><b>mixed</b>：以上几种<i>同时</i>变——最接近真实开放世界的考法。</li>
+        </ul>
+        <p>分轴的价值和 <a href="8-5-metrics-aggregation.html">8.5</a> 是一脉相承的：一个笼统的「泛化分」会把这几种能力压扁；分轴诊断才能告诉你「它认得新物体但听不懂新说法」这种<b>可操作</b>的结论。注意，按 <a href="8-1-what-we-measure.html">8.1</a> 提过的口径区分：这套多轴 OOD 是 README/paper 的<b>愿景</b>语言，当前线上 docs 的可验证机制是三 split 的隔离；本书把愿景和地面真相分开标注。</p>
+
+        <h2 id="leakage">data leakage：泄漏怎样悄悄毁掉一切</h2>
+        <p>train/test isolation 听起来简单，但 <span class="term">data leakage</span>（数据泄漏）是出了名地难根除——它指任何让「测试信息」偷偷进入训练的途径，而它往往藏在你没注意的地方。几种典型的失效模式：</p>
+        <ul>
+          <li><b>近重复泄漏</b>：test 里的物体/场景，是 train 里同一个的<i>换皮版本</i>（同一 3D 资产、只改了贴图或角度）。看着是新的，实质模型早就见过。</li>
+          <li><b>共享底层资产</b>：train 和 test「任务名不同」，但底层用的是同一批 3D 物体库——模型在物体层面其实没遇到新东西。</li>
+          <li><b>调参泄漏</b>：上面说过的，反复用 test 反馈做模型选择，test 信息经由你的<i>决策</i>回流。</li>
+          <li><b>统计量泄漏</b>：用<i>全量</i>数据（含 test）算归一化统计、词表、数据增强参数，test 的分布信息混进了训练管线。</li>
+        </ul>
+        <div class="callout warn"><div class="c-h">泄漏的危险在于它<b>抬高的是你最想信的那个数</b></div>
+          <p>data leakage 不会让结果看起来出错——恰恰相反，它让泛化分变得<b>漂亮</b>。一个有泄漏的榜单，会奖励那些「最善于（无意中）利用泄漏」的模型，而不是真正泛化最强的模型，于是整个领域被往错误方向牵引。更糟的是它常常无声无息：除非你<b>主动</b>去审计 train/test 之间的资产重叠、措辞重叠、统计量来源，否则你不会发现自己报的「泛化能力」其实是「记忆能力」。可信的泛化评测，必须把「我们如何保证没有泄漏」当成结果的一部分写出来——这又回到了 <a href="8-4-reproducibility.html">8.4</a> 的 claim boundary：说清你的隔离<i>覆盖到了哪一层</i>。</p>
+        </div>
+
+        <h2 id="recap">Part 8 收尾，与 Part 9 的桥</h2>
+        <p>这一节，也是这一部分的收束：(1) 泛化 = 对<b>没见过</b>的东西的能力，整套评测压在「考题确实是新的」这一个支点上；(2) 用 <span class="term">held-out split</span> 实现 <span class="term">train/test isolation</span>，隔离的是<b>信息流</b>而不只是文件夹；(3) 分轴考 <span class="term">OOD</span>（object / background / instruction / mixed），别压成一个笼统的泛化分；(4) 警惕 <span class="term">data leakage</span> 的各种隐蔽形态——它专门抬高你最想信的那个数。</p>
+        <p>到这里，Part 8 的「评测系统通论」就讲完了：从「分数是什么主张」（construct validity），到五层解剖，到契约即架构，到可复现与 claim boundary，到聚合陷阱，再到泛化与泄漏。这些都是<b>第一性原理</b>——不依赖任何具体框架。</p>
+        <p>理论讲完，接下来该看一个把这些原则<i>当第一性原理来建</i>的真实系统了。<b>下面进入 Part 9：EmbodiedEval OS（EOS）</b>——一个 domain-agnostic 的评测「操作系统」，看它如何把这一部分的每一条原则，落成显式的 Spec、State、Trace、MetricFamily 与强制的 claim_boundary。我们从它的<a href="../09-eos-arch/9-1-design-stance.html">设计立场（9.1）</a>开始。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

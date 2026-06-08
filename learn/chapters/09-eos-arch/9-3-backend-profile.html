@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BackendProfile：把『Isaac vs MuJoCo』拆成可组合组件 · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="9-3">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 9 · EOS 架构精读 · 9-3</div>
+        <h1>BackendProfile：把『Isaac vs MuJoCo』拆成可组合组件</h1>
+        <p class="lede">上一节 <span class="term">TaskSpec</span> 里有个字段叫 <code>allowed_backend_profiles</code>。这一节就揭开它指向的东西：<span class="term">BackendProfile</span>。它要解决一个看似简单、实则要命的问题——当你说「我在 Isaac 上跑的」「他在 MuJoCo 上跑的」，你到底说了什么？EOS 的回答是：<b>「Isaac」「MuJoCo」是太粗的标签，一个 backend 必须拆成可组合的组件，否则跨后端比较根本无效。</b></p>
+
+        <h2 id="why-vague">「Isaac vs MuJoCo」是一句没信息的话</h2>
+        <p>设想两篇论文都报告「我们的模型在 Isaac 上 0.7，在 MuJoCo 上 0.5」。这 0.2 的差距是物理引擎不同造成的？还是渲染器不同（RTX 光追 vs 简易 rasterizer，导致视觉输入分布漂移）？还是接触模型、传感器噪声、控制接口的差异？你<b>无从判断</b>，因为「Isaac」这个名字同时打包了平台、物理、渲染、传感、控制、过程运行时<i>六样东西</i>。把六个变量焊死成一个名字再去比，得到的差值无法归因。</p>
+        <div class="bridge g103">
+          <div class="c-h"><span class="tag">从 GAMES103 看</span> integrator ≠ renderer ≠ contact model</div>
+          <p>你在 GAMES103 里早就把这些当成<b>正交的轴</b>：时间积分器（显式/隐式 Euler、symplectic）是一回事，碰撞/接触求解（penalty、impulse、LCP）是另一回事，而把场景画成像素的 renderer 跟物理八竿子打不着。换 renderer 不改变刚体怎么运动；换 integrator 不改变画面长相。EOS 只是把你脑子里这套「可分离的轴」<b>写进了数据结构</b>——一个 backend 不是一个名字，是这些轴的一次<i>组合</i>。</p>
+        </div>
+
+        <h2 id="component-profile">ComponentProfile + CapabilityTier</h2>
+        <p><span class="term">BackendProfile</span> 把一个后端拆成<b>六个 <span class="term">ComponentProfile</span></b>：platform、physics、renderer、sensors[]、control、process_runtime。每个组件自带一组 <code>capabilities</code>，而每项能力的<b>保真度</b>用一个枚举 <span class="term">CapabilityTier</span> 标注——这是整套设计的灵魂：</p>
+        <div class="code" data-lang="python"><div class="code-h"><span class="fn">core/specs/backend_profile.py</span><button class="cp">复制</button></div><pre><code>class CapabilityTier(str, Enum):
+    """Capability fidelity declaration for a backend component."""
+    NATIVE = "native"                  # 原生、真实实现
+    REDUCED = "reduced"                # 降级近似
+    SEMANTIC_PROXY = "semantic_proxy"  # 语义代理（不是真物理）
+    EMULATED = "emulated"              # 仿造
+    UNSUPPORTED = "unsupported"        # 不支持
+
+
+@dataclass(frozen=True)
+class ComponentProfile:
+    name: str
+    component_type: str          # "physics" / "renderer" / "control" ...
+    version: str | None = None
+    capabilities: dict[str, CapabilityTier | str] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class BackendProfile:
+    profile_id: str
+    platform: ComponentProfile
+    physics: ComponentProfile | None = None
+    renderer: ComponentProfile | None = None
+    sensors: list[ComponentProfile] = field(default_factory=list)
+    control: ComponentProfile | None = None
+    process_runtime: ComponentProfile | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def component_summary(self) -&gt; dict[str, str | None]:
+        return {
+            "platform": self.platform.name,
+            "physics": self.physics.name if self.physics else None,
+            "renderer": self.renderer.name if self.renderer else None,
+            "control": self.control.name if self.control else None,
+            "process_runtime":
+                self.process_runtime.name if self.process_runtime else None,
+        }</code></pre></div>
+        <p><span class="term">CapabilityTier</span> 是把「Claim boundary」编码进类型的关键。一个后端可以诚实地说「我的刚体是 <code>native</code>，但液体只是 <code>semantic_proxy</code>」——这正是 <span class="term">CLAUDE.md</span> 那条「<i>semantic proxy is not real CFD</i>」禁令的落地：不许把语义代理冒充真物理。<span class="term">component_summary()</span> 是这个 dataclass 上唯一的方法，而且它只做<b>聚合展示</b>，不做任何执行——再次印证 spec 层零逻辑。</p>
+
+        <h2 id="real-yaml">一份真实的 profile：物理用 MuJoCo，渲染用 Blender</h2>
+        <p>profile 以 YAML 存在 <code>configs/backend_profiles/</code>。下面这份 <code>mujoco_blender.yaml</code> 把「可组合」体现得最直白——它<b>故意</b>把物理和渲染拆给两个不同的引擎：MuJoCo 算物理，Blender Cycles 离线渲高质量图。</p>
+        <div class="code" data-lang="text"><div class="code-h"><span class="fn">configs/backend_profiles/mujoco_blender.yaml</span><button class="cp">复制</button></div><pre><code>profile_id: mujoco_physics_blender_render
+platform:
+  name: split_backend           # 平台本身就声明：这是一个拼装后端
+  component_type: platform
+physics:
+  name: mujoco
+  component_type: physics
+  capabilities:
+    rigid_body: native
+    articulation: native
+    contact: native
+renderer:
+  name: blender_cycles
+  component_type: renderer
+  capabilities:
+    rgb: offline_high_quality
+    depth: emulated
+    segmentation: emulated
+metadata:
+  role: split_physics_rendering_profile</code></pre></div>
+        <p>注意 <code>platform.name</code> 直接写 <span class="term">split_backend</span>——平台层坦白「我不是某个一体化 simulator，我是把物理和渲染拼起来的」。对比一下 <code>isaac_physx_rtx.yaml</code>：它的 physics 是 <code>physx</code>（liquid 标 <code>semantic_proxy</code>、deformable 标 <code>reduced</code>），renderer 是 <code>isaac_rtx</code>（rgb/depth/segmentation 全 <code>native</code>）。两份 profile 一摆，差异不再是「Isaac vs 拼装」这种模糊话，而是<b>逐组件、逐能力、带 tier</b>的精确对照。</p>
+
+        <div class="lab">
+          <div class="lab-h"><span class="lab-tag">interactive</span><span class="lab-t">backend-composer：自己拼一个 BackendProfile</span></div>
+          <div class="lab-body" data-widget="backend-composer"></div>
+          <div class="lab-cap">分别给 physics / renderer / sensors / control 选不同引擎，看 <code>component_summary()</code> 怎么变。试试「固定 physics、只换 renderer」——这正是下面说的<b>唯一有效</b>的跨后端对照方式。</div>
+        </div>
+
+        <h2 id="valid-comparison">回报：跨后端比较只能逐组件做</h2>
+        <p>把 backend 拆开之后，一条强约束自然浮现，<span class="term">backend-composability.md</span> 写成了 Bad / Better 对照：</p>
+        <div class="code" data-lang="text"><div class="code-h"><span class="fn">docs/design/backend-composability.md · §5</span><button class="cp">复制</button></div><pre><code>Bad:
+  Compare Isaac vs MuJoCo.
+
+Better:
+  Compare PhysX vs MuJoCo physics while keeping
+  task spec and metric spec fixed.
+Or:
+  Compare Isaac RTX vs Blender Cycles rendering while
+  keeping physics rollout fixed.</code></pre></div>
+        <p>这就是为什么文档反复强调「<i>same physical rollout + different renderer</i>」「<i>same task + different physics engine</i>」这些组合——只有<b>固定其余组件、只动一个组件</b>，差值才可归因。它让你能把<b>视觉泛化</b>和<b>动力学泛化</b>分开测，把「渲染器导致的失败」和「物理导致的失败」分开诊断。文档还特意泼了盆冷水：这种逐轴的 readiness matrix <b>不是</b> benchmark score——它回答的是「哪个组件有终态证据、哪个被什么 blocker 卡住、相对 baseline 改了哪个组件」，<b>不</b>回答「模型成功了吗、两个引擎物理等价吗、像素等价吗」。把组件级证据误读成成绩单，是这层最大的诱惑，也是被明令禁止的。</p>
+
+        <div class="callout">
+          <div class="c-h">「EBench 做到了吗？」</div>
+          <p>没有可组合的 backend 抽象——它<b>固定一个后端</b>。<span class="term">EBench</span> 锁死 <span class="term">Isaac Sim 4.1.0</span>（PhysX 物理 + RTX 渲染 + GenManip runtime，见 <a href="../02-sim/2-1-isaac-sim.html">2.1</a>），server 端把整个 Isaac 当黑盒。这对一个聚焦 benchmark 是合理的：固定后端才能保证 leaderboard 公平可比。但代价是你<b>无法</b>在 EBench 内部问「换个 renderer 模型还行不行」「物理引擎对这个失败贡献多少」——这些变量被焊死了。在 EOS 里，这套老栈被<i>降级</i>成一份带标签的兼容 profile <code>ebench_genmanip_legacy.yaml</code>，<code>metadata.role: ebench_compatibility_only</code>、<code>must_not_drive_core_design: true</code>，并明写 <code>anti_corruption_layer: adapters/ebench</code>——它能被复现，但绝不许反过来定义 core 的设计。</p>
+        </div>
+
+        <h2 id="recap">这一节你需要带走的</h2>
+        <p>(1)「Isaac vs MuJoCo」是粗到无法归因的标签；EOS 用 <span class="term">BackendProfile</span> 把后端拆成 platform/physics/renderer/sensors/control/process_runtime 六个 <span class="term">ComponentProfile</span>；(2) 每项能力用 <span class="term">CapabilityTier</span>（native→reduced→semantic_proxy→emulated→unsupported）诚实标注保真度，禁止用 proxy 冒充真物理；(3) <code>mujoco_blender.yaml</code> 这种「物理 MuJoCo + 渲染 Blender」的拼装 profile 说明组件真的可换；(4) 跨后端比较<b>只能逐组件做</b>——固定其余、只动一个，差值才可归因，而这是 readiness 证据、不是 score。下一节进入 <span class="term">State 层</span>：这些不同后端吐出的物理量，怎么被归一成同一套世界态，让同一个 evaluator 通吃 MuJoCo 的 qpos 和 Isaac 的 joint state。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/backend-composer.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

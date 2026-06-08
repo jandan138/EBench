@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>路线图与行动清单 · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="10-6">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 10 · 造一个更好的评测系统 · 10-6</div>
+        <h1>路线图与行动清单</h1>
+        <p class="lede">这是全书最后一节正文。我们花了五节描述一个更大的评测系统该长什么样，现在该结账了——用一张<b>诚实的状态表</b>分清 EOS 到底实现了什么、什么还在 WIP / blocked，绝不把愿景说成现实；然后留给你一份<b>行动清单</b>：如果你要造自己的具身评测系统，把这几条照着做。最后，我们一起合上这本书。</p>
+
+        <h2 id="status-table">诚实的状态表：实现了什么 vs 还没有</h2>
+        <p>先把丑话说在前面：EOS 是一个<b>架构已经立住、但大部分还停在契约 + smoke 级实现</b>的早期系统。它最强的地方是 core 的骨架和纪律；最弱的地方是「真正大规模跑起来」。逐项摊开：</p>
+        <table>
+          <thead><tr><th>能力</th><th>状态</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td>core spec 层（TaskSpec / SceneSpec / MetricSpec / ModelProfile…）</td><td>✅ 已实现</td><td>声明式 dataclass，<a href="../09-eos-arch/9-2-spec-layer.html">9.2</a></td></tr>
+            <tr><td>state 层（CanonicalPhysicalState / TaskWorldState / PredictedFuture）</td><td>✅ 已实现</td><td><code>core/state/</code>，<a href="../09-eos-arch/9-4-state-layer.html">9.4</a></td></tr>
+            <tr><td>EpisodeTrace + TraceStore</td><td>✅ 已实现</td><td><code>core/state/trace.py</code> + <code>core/recorders/trace_store.py</code>，<a href="../09-eos-arch/9-5-trace.html">9.5</a></td></tr>
+            <tr><td>BackendAdapter / ModelAdapter ABC</td><td>✅ 已实现</td><td>抽象基类与可选能力方法，<a href="../09-eos-arch/9-7-adapters.html">9.7</a></td></tr>
+            <tr><td>EpisodeRunner</td><td>✅ 已实现</td><td><code>core/runtime/episode_runner.py</code></td></tr>
+            <tr><td>core evaluators（task_outcome / hazard / prediction）</td><td>✅ 已实现</td><td><code>core/evaluators/</code>，<a href="../09-eos-arch/9-8-evaluator-runtime.html">9.8</a></td></tr>
+            <tr><td>DummyBackend（无外部仿真器的 smoke 后端）</td><td>✅ 已实现</td><td><code>backends/dummy.py</code>，MVP-0</td></tr>
+            <tr><td>L3 RuntimeMeasurementSnapshot</td><td>✅ 已实现</td><td>packet 化测量证据，<code>runtime/runtime_measurement.py</code></td></tr>
+            <tr><td>L2 WorldSession 运行时外壳</td><td>✅ 契约就绪</td><td>WR-1 L2 envelope 已定，provider 适配为后续工作</td></tr>
+            <tr><td>scenario pack（scientific_lab 之外）</td><td>⚠️ WIP</td><td>仅 scientific_lab 重度开发；home 为 adapter smoke；wetlab 为 schema 草案；factory / field 基本只有 README（<a href="10-2-multi-scenario.html">10.2</a>）</td></tr>
+            <tr><td>EBench / AutoBio 全量复现</td><td>⚠️ smoke / partial</td><td>只跑通 adapter smoke 与子集证据；<b>不是</b>全量复现，CLAUDE.md 明令禁止此 claim</td></tr>
+            <tr><td>cross-backend parity</td><td>⚠️ 受限</td><td>仅一个 pickup 任务、一对后端、reset_topology 一个轴做到 matched；动态对比收在 <code>gate_status=failed</code>（<a href="10-4-cross-backend-evidence.html">10.4</a>）</td></tr>
+            <tr><td>distributed / 大规模并行 eval</td><td>❌ 未做</td><td>EBench 已有的 8-GPU full pass 能力，EOS 尚无对应物</td></tr>
+            <tr><td>real-world claims</td><td>❌ 禁止</td><td>仿真-only hazard ≠ 真实安全认证，是硬规则红线</td></tr>
+          </tbody>
+        </table>
+
+        <div class="callout warn">
+          <div class="c-h">把这张表和 EBench 的记分卡并排看</div>
+          <p>对照 <a href="10-1-ebench-scorecard.html">10.1</a>：EBench 在「可复现全量 full pass、依赖隔离、强 baseline」这些<b>已落地的工程能力</b>上，现在仍然<b>实打实强于</b> EOS——它是个发布了的、跑得动的 benchmark。EOS 强的是<b>架构与边界纪律</b>，但它的多场景 / 多后端 / 多轴能力，大部分还是「契约就绪」而非「跑通」。诚实的结论是：<b>EBench 是当下的可用工具，EOS 是更大目标下的早期地基。</b> 别把地基当成楼。</p>
+        </div>
+
+        <h2 id="checklist">行动清单：如果你要造自己的具身评测系统</h2>
+        <p>这是这本书最实用的一页。无论你最后用不用 EOS，下面这七条是从 EBench 的工程 win 和 EOS 的设计动作里提炼出的、可以直接照做的原则：</p>
+        <ul>
+          <li><b>1. 把五层显式分开。</b> spec（评什么）/ state（世界长什么样）/ trace（留下什么证据）/ adapter（怎么接外部）/ evaluator（怎么打分）各占一层，别让它们互相渗透。一开始就分清，比事后拆开便宜一百倍（<a href="../09-eos-arch/9-1-design-stance.html">9.1</a>）。</li>
+          <li><b>2. 定义窄契约。</b> 每层之间只暴露最小接口：actor 就一个 <code>act</code>，世界模型多一个可选 <code>predict_future</code>。契约越窄，能换的实现越多，耦合越少（<a href="../09-eos-arch/9-7-adapters.html">9.7</a>）。</li>
+          <li><b>3. core 保持 domain-agnostic，并加一个 leakage check。</b> core 里不许出现任何具体 benchmark / 仿真器 / 场景的私有名，并写一个 PR 时会失败的脚本来强制它。原则不被编译成检查，就一定会被慢慢违反（<a href="10-5-engineering-discipline.html">10.5</a>）。</li>
+          <li><b>4. 每条 trace 都记 seed + versions + claim_boundary。</b> 没有 provenance 的结果不是证据，是孤证；没有 claim_boundary 的结果迟早被人当成它没声明过的东西（<a href="../09-eos-arch/9-5-trace.html">9.5</a>、<a href="../08-eval-systems/8-4-reproducibility.html">8.4</a>）。</li>
+          <li><b>5. 用 capability profile，别用单标量。</b> 把能力摊成一组轴（task / precision / prediction / hazard / planning / generalization / resource…），让两个总分相近的模型也能看出强弱互补。这是全书第一节（<a href="../00-orientation/0-1-why-ebench.html">0.1</a>）就埋下的主张。</li>
+          <li><b>6. 硬问题用 evidence tier，别用二元 success/fail。</b> 跨后端、往真机靠的时候，报「我站在证据阶梯哪一级 + 这级不能 claim 什么」，而不是一个会误导人的 0/1。宁可报 blocked_with_evidence（<a href="10-4-cross-backend-evidence.html">10.4</a>）。</li>
+          <li><b>7. 把 scenario pack 当 anti-corruption layer。</b> 每个领域（家庭 / 实验室 / 工厂…）都是平级插件，定义自己的语义，但绝不反过来改写 core 契约。这样加场景不动引擎，且场景之间天然可比（<a href="10-2-multi-scenario.html">10.2</a>）。</li>
+        </ul>
+
+        <div class="bridge g103">
+          <div class="c-h"><span class="tag">从 GAMES103 看</span> 评测系统也是一种「数值方法」</div>
+          <p>GAMES103 教会你一件事：一个数值方法好不好，不只看它在一个 case 上跑出的数，而看它<b>稳定、可复现、误差可界定</b>。评测系统是一模一样的道理——一个好的 benchmark 不是「给出一个排名」，而是「给出一个<b>误差可界定、来源可追溯、不过度声明</b>的能力测量」。你在这本书里学到的每一条护栏，本质上都是在给「能力测量」这个数值过程加上稳定性与误差界。</p>
+        </div>
+
+        <h2 id="book-close">合上这本书</h2>
+        <p>你是从 <a href="../00-orientation/0-1-why-ebench.html">0.1</a> 的一个朴素问题出发的：当你说一个机器人策略「做得好」，你到底在测量什么？十个 Part 之后，你已经能从两个层面回答它。</p>
+        <p>一个层面是<b>深</b>：你彻底读懂了 EBench——它的 client–server 架构、lift2 本体、Isaac Sim 后端、26 个任务的打分、π0 / π0.5 / X-VLA / InternVLA-A1 四条 baseline 背后的 flow matching 与 action chunking、它怎么用 val/test 隔离守住可信度。这些不是道听途说，是你跟着真实代码一行行拆出来的。</p>
+        <p>另一个层面是<b>广</b>：你现在有了一整套<b>设计词汇</b>，能去评价、乃至去<i>建造</i>一个评测系统。domain-agnostic core、anti-corruption layer、可组合 BackendProfile、capability profile、evidence tier、claim boundary、provenance——这些词不再是名词，而是你手里能用的工具。你知道一个聚焦的 benchmark（EBench）强在哪、一个通用 OS（EOS）想往哪走、以及两者之间那些诚实的、还没填满的空格。</p>
+        <p>所以这本书真正想留给你的，不是「EBench 是最好的」或「EOS 是未来」这种结论——这两句都太满了。它想留给你的是一种<b>判断力</b>：面对任何一个具身评测系统，你都能问出对的问题——它在测什么？这个数对应什么能力？它声明了什么、又悄悄没声明什么？换个后端还成立吗？三个月后还能复现吗？能问出这些问题，你就已经站在了「造一个更好的评测系统」的起点上。</p>
+        <p>接下来是附录——参考文献、术语表、各仓库链接，留着随时回查。但正文到这里就完整了。谢谢你读到最后。去测点真东西吧。🔭</p>
+
+        <h2 id="recap">这一节你需要带走的</h2>
+        <p>(1) EOS 已实现的是 core 骨架（spec / state / trace / adapter ABC / EpisodeRunner / 核心 evaluator / dummy backend / L3 测量 / L2 envelope），WIP / blocked 的是 scientific_lab 之外的场景、全量复现、跨后端 parity、分布式、真实世界 claim；(2) 当下 EBench 在「可复现全量、依赖隔离、强 baseline」上仍强于 EOS，EOS 强在架构与纪律——别把地基当楼；(3) 造系统的 7 条 checklist：分五层 / 窄契约 / domain-agnostic core + leakage check / 每条 trace 记 seed+versions+claim_boundary / 用 capability profile / 硬问题用 evidence tier / scenario pack 当防腐层；(4) 你现在既深读懂了 EBench，也有了建造更好系统的设计词汇。全书完。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

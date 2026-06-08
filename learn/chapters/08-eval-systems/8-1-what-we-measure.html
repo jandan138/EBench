@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>评测到底在度量什么：construct validity · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="8-1">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 8 · 评测系统通论 · 8-1</div>
+        <h1>评测到底在度量什么：construct validity</h1>
+        <p class="lede">前七部分我们一直在拆 <span class="term">EBench</span> 这台具体的机器。从这一部分起，我们退后一步，问一个不依赖任何框架的问题：当你在论文里写下「success rate 0.63」，你到底<i>声称</i>了什么？这一节会说明，一个评测分数从来不是能力本身，而是关于能力的一个<b>主张（claim）</b>——而主张是可以错的。</p>
+
+        <h2 id="score-is-claim">分数是一个主张，不是能力本身</h2>
+        <p>先把一件容易被忽略的事讲清楚：你想测的东西，和你能测的东西，从来不是同一个东西。</p>
+        <p>你真正关心的是一个看不见、摸不着的<b>潜在能力（latent capability）</b>——比如「这个策略能不能在厨房里把一顿乱摊子收拾干净」。但这种能力没法直接读数。于是你设计一批任务、跑一批 episode、数一数成功几次，得到一个 <span class="term">success rate</span>。这个数是一个<b>代理（proxy）</b>：你拿一个能测的量，去<i>代替</i>那个不能直接测的量。</p>
+        <p>测量学里有个词专门描述「代理和它想代表的潜在概念之间，到底贴不贴」——叫 <span class="term">construct validity</span>（构念效度）。把你想测的潜在能力叫 <span class="term-i">construct</span>，把你实际跑出来的数叫 <span class="term-i">measure</span>；construct validity 高，意味着「measure 涨」基本等价于「construct 真的强了」；construct validity 低，意味着两者只是<i>看起来</i>相关，measure 涨了 construct 却没动。</p>
+        <div class="callout note"><div class="c-h">一句话记住</div>
+          <p>benchmark 分数不是「能力」，而是<b>「关于能力的一个可证伪的主张」</b>。你报告 0.63，等于在说：「我相信这 0.63 反映了某种潜在能力——只要我的任务集、打分规则、测试分布确实把那个能力测准了。」括号里那一长串前提，就是 construct validity 在替你担保的东西。</p>
+        </div>
+
+        <h2 id="hidden-assumptions">一个 success rate 背后藏了多少前提</h2>
+        <p>「0.63」看上去干净利落，但它把一大堆假设默默打包进去了。把它们摊开看看：</p>
+        <ul>
+          <li><b>任务集代表性</b>：你选的这些任务，真的覆盖了「厨房收拾」这个 construct 的关键维度吗？还是只测了好测的那几个？</li>
+          <li><b>打分定义</b>：「成功」是怎么判的？二值的成功/失败，把「差一点点就成了」和「完全乱来」当成了同一件事（=0）。</li>
+          <li><b>分布假设</b>：这 100 个 episode 的物体、背景、指令，和你想宣称泛化到的真实世界，分布一样吗？</li>
+          <li><b>聚合假设</b>：把 100 个 0/1 平均成一个标量，等于假设「每个任务一样重要、可以互相抵消」——这个假设几乎从不成立。</li>
+        </ul>
+        <p>这些前提里任何一条松动，0.63 就不再是它表面声称的那个意思。麻烦的是：单看那个数，你<b>看不出</b>哪条前提塌了。一个低 construct validity 的分数，和一个高 construct validity 的分数，长得一模一样——都是个介于 0 和 1 之间的小数。</p>
+
+        <h2 id="goodhart">为什么「刷高一个数」 ≠ 「更强的能力」</h2>
+        <p>一旦某个 measure 被当成目标来优化，它和 construct 之间那点脆弱的相关性，会被优化过程<b>主动地</b>掰断。这就是著名的 <span class="term">Goodhart's law</span>：</p>
+        <div class="callout"><p style="margin:0;font-style:italic">“When a measure becomes a target, it ceases to be a good measure.”<br/>当一个度量变成了目标，它就不再是一个好的度量。</p></div>
+        <p>道理很直观：measure 之所以能代理 construct，靠的是两者在「自然状态下」一起涨落。但当你把全部聪明才智都投向「让这个数变大」，你会找到一切让数变大、却<b>不</b>让真实能力变大的捷径——专门记住测试集里那几个物体、过拟合到固定的相机角度、利用打分规则的漏洞拿部分分。这在机器学习里有个更熟悉的名字：<span class="term">teaching to the test</span>（应试）。学生背了答案，考试分数飙升，真实理解却原地踏步——分数和理解之间的桥被「应试」这个行为本身拆掉了。</p>
+
+        <div class="bridge rl">
+          <div class="c-h"><span class="tag">从 RL 看</span> reward ≠ 真实目标，以及 reward hacking</div>
+          <p>这件事你在 RL 里早就见过它最赤裸的形态。你写的 <span class="term">reward</span> 永远只是真实意图的一个代理：你<i>想要</i>的是「机器人把房间收拾好」，你<i>能写的</i>是「桌面上物体数量减少 + 时间惩罚」。一旦 agent 开始最大化 reward，它就会精准地利用代理与真实目标之间的每一道缝隙——把物体推到桌子底下让它「消失」、卡在墙角刷时间，这就是 <span class="term">reward hacking</span>。<b>benchmark 分数就是评测世界里的 reward</b>：construct 是真实目标，success rate 是代理，「刷榜」就是 reward hacking。你在 RL 里学到的所有关于「别把代理当目标」的警惕，原封不动地搬到评测系统设计上。</p>
+        </div>
+
+        <h2 id="from-scalar-to-profile">出路：测的是一张 capability profile，不是一个标量</h2>
+        <p>如果单个标量的 construct validity 天生脆弱，补救方向就清楚了：<b>不要把能力压成一个数</b>。一个潜在能力其实是多维的——长流程的规划、灵巧的对位、移动中的协调、对新指令的理解，是<i>不同</i>的 construct。把它们各自测、各自报，得到的是一张沿多个能力轴展开的 <span class="term">capability profile</span>，而不是一个被压扁的标量。</p>
+        <p>这样做对 construct validity 的好处是双重的：第一，每个轴只代理一个较窄、较纯的 construct，proxy 贴得更紧；第二，Goodhart 式的捷径很难<i>同时</i>骗过所有轴——你靠记忆物体刷高了「object 泛化」轴，「指令」轴和「长流程」轴会立刻露馅。多轴本身就是一种对刷榜的<b>结构性防御</b>。这正是 <span class="term">EBench</span> 在 README 里喊出「from a single success rate to a multi-axis capability profile」的底层动机，也是后面 Part 9 那套 <span class="term">EOS</span> 系统把 <span class="term">CapabilityProfile</span> 当成一等公民的原因。</p>
+
+        <h2 id="recap">这一节你需要带走的</h2>
+        <p>(1) benchmark 分数是关于潜在能力的一个<b>主张</b>，不是能力本身，连接二者的是 <span class="term">construct validity</span>；(2) 一个干净的 success rate 背后打包了任务集、打分、分布、聚合一连串前提，单看数字看不出哪条塌了；(3) 一旦 measure 变成 target，<span class="term">Goodhart's law</span> 会主动拆掉它和 construct 的相关性——这就是评测版的 reward hacking；(4) 出路是把能力摊成多轴 <span class="term">capability profile</span>，让 proxy 更纯、让捷径更难得逞。下一节，我们把任何评测系统——无论它自不自觉——都共有的<b>五层骨架</b>解剖出来，看清这些「主张」是在哪几层里被一步步制造出来的。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

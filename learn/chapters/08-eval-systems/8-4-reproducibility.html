@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>可复现与可信：seed / versioning / claim boundary · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="8-4">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 8 · 评测系统通论 · 8-4</div>
+        <h1>可复现与可信：seed / versioning / claim boundary</h1>
+        <p class="lede">假设契约划得很干净，分数也跑出来了。现在有人问你：「这个 0.63，明年别人能不能跑出同样的数？它到底证明了什么？」如果你答不上来，这个数就不是科学结论，只是一次<i>逸事</i>。这一节讲让一个数字<b>可信</b>所需的三件事——固定的 seed、记录在案的版本、说清边界的 claim——以及一种比技术更难的纪律：<b>不要过度宣称</b>。</p>
+
+        <h2 id="why-trust">一个数字凭什么可信</h2>
+        <p>「可信」可以拆成两个更具体的问题。第一个是<b>可复现（reproducibility）</b>：换个人、换台机器、换个时间，能不能再跑出同一个（或统计上等价的）数？第二个是<b>可解释边界（claim boundary）</b>：这个数<i>支持</i>什么结论，又<i>不</i>支持什么结论？一个数同时答清这两个问题，它才从「我们这次跑出来是这样」升格为「这是一个可被他人检验的主张」。这正接上 <a href="8-1-what-we-measure.html">8.1</a> 说的 construct validity——可复现保证「同样的测量重复得到同样的数」，claim boundary 保证「我们没把这个数往它够不着的 construct 上硬安」。</p>
+
+        <h2 id="seed">固定 seed：让随机性变成可控变量</h2>
+        <p>评测里到处是随机性：物体的初始摆放、噪声扰动、有时连模型采样（比如 flow matching 的起点噪声）都是随机的。随机本身不是问题——问题是<b>不受控</b>的随机。如果每次跑物体摆放都不一样，那两个模型的分差里，有多少是真实差距、多少只是「这次它运气好」，你永远分不清。</p>
+        <p>解法是固定 <span class="term">seed</span>：把所有随机数发生器锚定到一个记录在案的种子上，让「这次跑了哪 100 个具体场景」变成<b>确定且可重放</b>的。这样做有两重好处：其一，别人用同一个 seed 能复现你的 episode 集；其二，比较两个模型时，让它们面对<i>逐场景一一对应</i>的同一批考题，分差才是干净的能力差，而不是运气差。</p>
+        <div class="callout note"><div class="c-h">固定 seed ≠ 只跑一个 seed</div>
+          <p>固定 seed 是为了「可重放」，不是为了「假装方差不存在」。一个负责的结果，应当在<b>若干个</b>记录在案的 seed 上各跑一遍，报告均值<i>和</i>波动。否则你只是把「一次幸运的运行」钉死成了「一个可复现的幸运运行」——可复现，但仍然不可信。seed 控制的是<i>随机性</i>，统计意义还得靠多次重复。</p>
+        </div>
+        <div class="bridge g103">
+          <div class="c-h"><span class="tag">从 GAMES103 看</span> 确定性时间步进</div>
+          <p>你在 GAMES103 里就吃过「不确定性」的苦：同一个布料仿真，换台机器、换个浮点累加顺序，几千步之后状态可能肉眼可见地分叉——这是数值积分对初始条件和运算顺序的敏感性。评测里固定 seed，本质上是在追求和「确定性时间步进」一样的东西：<b>给定相同的初始状态与相同的更新规则，得到逐位相同的轨迹</b>。你知道一个仿真要可复现，必须把初值、步长、求解器全钉死；一个评测要可复现，同样必须把 seed、场景、模型版本全钉死。是同一种工程纪律。</p>
+        </div>
+
+        <h2 id="versioning">版本与出处：让结果可追溯</h2>
+        <p>seed 锚定了「跑了哪些场景」，但分数还依赖一长串别的东西：评测代码本身、仿真器版本、模型权重、还有那些场景/物体<b>资产（assets）</b>。任何一个悄悄变了，同一个 seed 也会跑出不同的数。所以一个可信的结果必须带上它的<b>出处（provenance）</b>——把这些东西的版本或哈希记录在案：</p>
+        <ul>
+          <li><b>代码版本</b>：评测框架与打分逻辑的 git commit。</li>
+          <li><b>仿真器版本</b>：例如 Isaac Sim 4.1.0、对应的 CUDA / torch 版本。</li>
+          <li><b>资产哈希</b>：场景、物体、任务配置的内容哈希——资产变了，「同一个任务」可能已经不是同一个任务。</li>
+          <li><b>模型出处</b>：被测权重的标识与配置。</li>
+        </ul>
+        <p>把这些和分数<b>钉在一起存</b>，结果才可追溯：半年后有人复现不出来，你能逐项对版本，定位是哪一环变了，而不是面对一个无从下手的「数字对不上」。这也是为什么成熟系统会把出处直接焊进它的证据对象里——Part 9 的 <a href="../09-eos-arch/9-5-trace.html">9.5</a> 会讲 EOS 的 <span class="term">EpisodeTrace</span> 如何把版本信息和 <span class="term">claim_boundary</span> 当作 trace 的固有字段，让「这个数怎么来的、能说明什么」永远跟着数本身走。</p>
+
+        <h2 id="claim-boundary">claim boundary：说清这个数不能证明什么</h2>
+        <p>技术做到位了，还剩最难的一件事，而它不是技术，是<b>纪律</b>：诚实地划出 <span class="term">claim boundary</span>——明确写下这个结果<i>不</i>能证明什么。</p>
+        <p>一个仿真里的 success rate，严格说只支持一个很窄的主张：「在<b>这个仿真器、这套资产、这个分布、这些 seed</b>下，该策略达到了这个分。」它<b>不</b>自动支持「这个策略在真实机器人上也这么强」「它在没见过的厨房里也行」「它是安全的」。每跨出仿真边界一步，都需要<i>额外</i>的证据，而不能靠那个数自己外推。把这条边界白纸黑字写进报告，读者才不会替你脑补出一个你没证明的结论。</p>
+        <div class="callout warn"><div class="c-h">几种最常见的过度宣称（overclaim）</div>
+          <p>· <b>sim success ⇒ real-world safe</b>：仿真成功率高，<i>不</i>等于真机安全。仿真通常不建模接触力的细节、传感噪声、机械磨损——仿真里「轻轻一碰就成功」，真机上可能是「夹碎了杯子」。<br/>
+          · <b>高分 ⇒ 泛化</b>：在测试分布上高分，<i>不</i>等于在分布外（OOD）也行。除非你的测试集本身就是 held-out 的 OOD（见 <a href="8-6-generalization.html">8.6</a>），否则它只证明了「拟合得好」。<br/>
+          · <b>A &gt; B ⇒ A 全面更强</b>：总分领先，<i>不</i>等于每个能力轴都领先——这恰是 <a href="8-5-metrics-aggregation.html">8.5</a> 要讲的聚合陷阱。<br/>
+          · <b>这次赢 ⇒ 稳定地强</b>：单 seed 一次领先，<i>不</i>等于统计显著。<br/>
+          每一条的共同病根都一样：<b>把一个窄主张，悄悄当成了一个宽主张来用。</b></p>
+        </div>
+        <p>不过度宣称，听起来像是「少说点好话」，其实它<b>保护的是你自己</b>：一个划清了边界的结果，没人能反驳——因为你没说任何你证不了的话；而一个外推过头的结论，迟早会被一次真机失败、一次 OOD 崩溃当众戳穿。诚实的边界，是一个结果能<i>活得久</i>的前提。</p>
+
+        <h2 id="recap">这一节你需要带走的</h2>
+        <p>(1) 可信 = 可复现 + 边界清楚；(2) 固定并记录 <span class="term">seed</span>，把随机性变成可重放的受控变量，但仍要跑多个 seed 看方差；(3) 记录代码 / 仿真器 / 资产 / 模型的<b>版本与哈希</b>（provenance），让结果可追溯；(4) 显式写下 <span class="term">claim boundary</span>，尤其警惕「sim 成功 ⇒ 真机安全」这类把窄主张当宽主张的过度宣称。下一节，我们盯住报告层最容易出事的地方：当你把这些可信的数<b>聚合成一个标量</b>时，会踩进哪些陷阱——包括会让排名直接翻转的 Simpson's paradox。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

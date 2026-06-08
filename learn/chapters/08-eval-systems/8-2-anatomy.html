@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>评测系统的解剖学：Spec / State / Runtime / Metric / Report · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="8-2">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 8 · 评测系统通论 · 8-2</div>
+        <h1>评测系统的解剖学：Spec / State / Runtime / Metric / Report</h1>
+        <p class="lede">上一节我们说，一个分数是关于能力的主张。这一节回答：这个主张是<i>怎么被造出来的</i>？答案是——任何评测系统，不管它写得多随意，都在做<b>同样的五件事</b>。把这五层认出来，你就有了一把通用的解剖刀，可以拆开你见到的<i>任何</i> benchmark，也包括你自己将要写的那个。</p>
+
+        <h2 id="five-layers">任何评测系统都有的五层骨架</h2>
+        <p>从「声明评什么」到「产出给人看的报告」，中间一定要走过五个环节。它们可以是五个干净的模块，也可以挤在一个 1000 行的脚本里纠缠不清——但<b>逻辑上它们一定都在</b>：</p>
+        <ul>
+          <li><span class="term">Spec</span>（规格层）—— 声明「评什么」：有哪些 task、哪些 scene、action / observation 接口长什么样、跑在什么 embodiment 上、要算哪些 metric。它应当是<b>纯数据、不含逻辑</b>的：一份冻结的声明。</li>
+          <li><span class="term">State</span>（世界状态层）—— 把仿真器吐出来的原始物理量，归一化成一个统一的世界状态表示，再叠上任务语义（流程到了第几步、有没有触发危险、过程量是多少）。评分逻辑读的是<i>它</i>，而不是后端的原始字段。</li>
+          <li><span class="term">Runtime</span>（运行时层）—— 真正驱动一个 episode：reset → 取 obs → 模型出 action → step → 记录。它的产物是一条可复现的<b>证据</b>。</li>
+          <li><span class="term">Metric</span>（指标层）—— 把一条证据翻译成「分」。不只是 success / fail，而是若干<i>家族</i>的诊断量。</li>
+          <li><span class="term">Report</span>（报告层）—— 把指标聚合成给人看的诊断：多轴画像、热力图、迁移曲线，并写清这份结果<b>不</b>能证明什么（claim boundary）。</li>
+        </ul>
+        <p>注意这五层的<b>数据流向是单向的</b>：Spec 定义了世界 → Runtime 在这个世界里跑出 State 的时间序列 → Metric 读 State 打分 → Report 聚合。每一层只依赖它上游产出的<i>抽象</i>，而不该伸手去碰更上游的实现细节。这条单向链，是后面所有「可复现」「可扩展」讨论的地基。</p>
+
+        <div class="lab">
+          <div class="lab-h"><span class="lab-tag">interactive</span><span class="lab-t">五层解剖：每层管什么，EBench 与 EOS 各放在哪</span></div>
+          <div class="lab-body" data-widget="eval-anatomy"></div>
+          <div class="lab-cap">点任意一层，看它的职责、典型产物，以及一个「隐式」系统（EBench）和一个「显式」系统（EOS）分别把这层落在何处。</div>
+        </div>
+
+        <h2 id="implicit-vs-explicit">成熟系统让每一层显式，临时脚本让它们纠缠</h2>
+        <p>这套骨架的关键不在于「有没有这五层」——<b>每个系统都有</b>——而在于<b>这五层是显式还是隐式</b>。</p>
+        <p>一个临时拼起来的评测脚本，往往把五层揉在一起：任务定义硬编码在 if-else 里（Spec 藏进了逻辑），打分时直接 reach 进仿真器的私有字段（Metric 越过 State 抓 Runtime 的实现），最后 print 一个平均数（Report 退化成一行 stdout）。它能跑，但你<i>没法</i>单独替换任何一块：想换个仿真后端，得重写打分；想加个新 metric，得读懂整个 episode 循环；想复现半年前的结果，发现 Spec 根本没被记录下来。层与层之间没有边界，改动的代价就会沿着纠缠四处传染。</p>
+        <p>一个成熟的系统反过来：让每一层成为<b>显式、独立、可命名</b>的东西。Spec 是一组冻结的 dataclass，State 有自己的归一化类型，Runtime 产出一个结构化的 trace，Metric 是一族可注册的 evaluator，Report 是一个多轴容器。代价是前期要多写一些「看起来没用」的抽象；回报是每一层都能被单独替换、单独测试、单独复现。这一部分接下来几节（契约、可复现、聚合、泛化）讲的，本质上都是「<b>怎么把某一层的边界划干净</b>」。</p>
+
+        <div class="bridge g103">
+          <div class="c-h"><span class="tag">从 GAMES103 看</span> 这就是仿真循环的分层版</div>
+          <p>你在 GAMES103 里写物理仿真时，其实已经在做同一件事。<span class="term">Spec</span> 对应「场景与材料参数的声明」（质量、刚度、约束）；<span class="term">State</span> 对应「每一步的位置/速度状态向量」；<span class="term">Runtime</span> 对应「时间积分循环」本身；把它当 benchmark 看，<span class="term">Metric</span> 就是「能量是否守恒、约束误差多大」这类诊断；<span class="term">Report</span> 是你画出来给助教看的收敛曲线。当年你若把这几件事搅在一个 update() 函数里，换一个积分器就得重写一切；分层之后，换 explicit / implicit Euler 只动 Runtime 那一层。评测系统的分层动机，和你写好一个仿真器的动机是<b>同一个</b>。</p>
+        </div>
+
+        <h2 id="spectrum">两个真实坐标：EBench 与 EOS</h2>
+        <p>「显式 vs 隐式」不是非黑即白，而是一条光谱。本书里你已经见过、或即将见到光谱上的两个真实点：</p>
+        <p><span class="term">EBench</span>（Part 4 我们拆过它的引擎）坐在偏「隐式」的一端——这<b>不是缺点</b>，而是工程取舍。它的 Spec 散落在 GenManip 场景配置和 docs 的 26 task 列表里，没有独立的 Spec 类型；它的 State 直接就是 Isaac Sim 吐出的 obs 字典，没有「归一化物理态」这层抽象；它的强项在 Runtime——那套 client-server 把仿真当黑盒、让模型装进自己的 env，是一个划得极漂亮的边界（下一节专门讲）。它优先把<i>能跑通、能并行、能上榜</i>这条主干打通，其余层保持轻量。</p>
+        <p>而 <span class="term">EOS</span>（用户自己的系统，Part 9 全程在讲它，从 <a href="../09-eos-arch/9-1-design-stance.html">9.1 设计立场</a>开始）坐在偏「显式」的一端：它把五层<b>逐一</b>提升为一等公民——独立的 Spec 数据类型、两级 State、结构化 Trace、九个 MetricFamily、强制的 claim_boundary。它用更多的前期抽象，换「任何一层都能换、任何结果都能复现」的可扩展性。两者没有对错，只是站在光谱的不同位置，服务于不同的优先级。</p>
+
+        <h2 id="recap">这一节你需要带走的</h2>
+        <p>(1) 任何评测系统都由 <span class="term">Spec → State → Runtime → Metric → Report</span> 五层组成，数据单向流动；(2) 区别不在「有没有这五层」，而在它们是<b>显式还是隐式</b>——隐式会让改动沿纠缠传染，显式让每层可换、可测、可复现；(3) <span class="term">EBench</span> 与 <span class="term">EOS</span> 是这条光谱上的两个真实坐标，各自的取舍都成立。下一节我们放大其中最关键的东西：层与层之间那条<b>契约（contract）</b>——它才是真正决定一个系统能不能长大的地方。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/eval-anatomy.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

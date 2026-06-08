@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>契约即架构：abstraction boundary 决定可扩展性 · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="8-3">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 8 · 评测系统通论 · 8-3</div>
+        <h1>契约即架构：abstraction boundary 决定可扩展性</h1>
+        <p class="lede">上一节我们把系统切成五层。但真正决定一个系统命运的，不是层<i>本身</i>，而是层与层之间那条缝——它们靠什么<b>契约（contract）</b>对话。这一节的核心主张听起来有点极端，但它是对的：<b>架构不在盒子里，架构在盒子之间的接口里</b>。接口划好了，你能不断往里加新东西；接口划砸了，加一样东西都要重写半个系统。</p>
+
+        <h2 id="contract-is-architecture">为什么接口比模块更重要</h2>
+        <p>设想你要给评测系统加一件新东西——一个新模型、一个新仿真后端、一个新任务。一个健康的系统里，这应该是个<b>局部</b>动作：写一个新实现，塞进既有的插槽，别处纹丝不动。能不能做到这一点，几乎完全取决于<b>插槽（也就是契约）当初是怎么定义的</b>。</p>
+        <p>契约就是一组约定：「我向你保证我会提供 A、B、C 这几个方法，输入输出长这样；至于我内部怎么实现，与你无关。」当 Metric 层只通过「读 State」这个契约和上游对话，它就<i>不知道</i>、也<i>不需要知道</i>底下是 Isaac Sim 还是 MuJoCo。于是换后端这件事，对 Metric 层是<b>透明</b>的。契约把「会变的东西」（具体实现）关在边界内侧，把「稳定的东西」（接口形状）暴露在外侧——这正是 <span class="term">abstraction boundary</span> 这个词的字面意思。</p>
+        <div class="callout note"><div class="c-h">为什么说契约定义了「可扩展性的形状」</div>
+          <p>你的系统能<b>沿哪个轴</b>低成本扩展，等于问：你在<b>哪个边界上</b>定义了干净的契约。在「模型」边界上有契约 → 加新模型便宜；在「后端」边界上有契约 → 换新仿真器便宜；在「任务」边界上有契约 → 加新任务便宜。没有契约的那个轴，扩展成本就是「重写」。所以做架构，本质就是<b>选择在哪几条缝上预先付出抽象的成本</b>。</p>
+        </div>
+
+        <h2 id="coupling">耦合 vs 可组合：两种相反的命运</h2>
+        <p>契约的反面是<b>耦合（coupling）</b>。当 Metric 层为了打分，直接 reach 进仿真器的私有字段——比如读 <span class="term">sim.bodies[3].contact_force</span>——它就和那个具体后端的内部结构焊死了。表面上少写了一层抽象、省事；实际上你埋了一颗雷：换后端、甚至后端升级改了字段名，打分逻辑就崩。耦合的代价不在写的时候，在<b>改的时候</b>，而且它会沿着每一条「偷偷伸进去的手」四处传染。</p>
+        <p>反过来，<b>可组合性（composability）</b>的意思是：每个组件只认契约、不认实现，于是它们能像乐高一样自由拼装。{后端 A, 后端 B} × {模型 X, 模型 Y, 模型 Z} 这 2×3 种组合，你不需要写 6 份代码——你写 2 个后端实现、3 个模型实现，让契约把它们正交地拼起来。<b>组合数随实现数相乘，工作量却只随实现数相加</b>，这就是可组合系统的复利。一个评测系统要服务很多模型 × 很多任务 × 可能多个后端，可组合性几乎是它能不能长大的<i>唯一</i>决定因素。</p>
+        <p>要守住这条线，有个很实用的技巧叫 <span class="term">anti-corruption layer</span>（防腐层）：当你必须接入一个混乱的外部系统（比如某个仿真器古怪的 API），不要让它的混乱<b>渗进</b>你的核心；而是写一层薄薄的适配，把外部世界<i>翻译</i>成你内部干净的契约。外部怎么变，脏只脏在防腐层这一处，核心永远说自己那套干净的语言。这个想法 Part 9 的 <a href="../09-eos-arch/9-1-design-stance.html">9.1</a> 会展开成 EOS 的核心设计立场，这里你先记住这个名字和直觉。</p>
+
+        <h2 id="evalclient">一个范本：EBench 的 EvalClient 契约</h2>
+        <p>抽象讲完，看一个真实的、划得极漂亮的窄契约——<span class="term">EBench</span> 的 <span class="term">EvalClient</span>（我们在 <a href="../04-engine/4-2-evalclient.html">4.2</a> 拆过它的内部）。它要解决的难题很现实：仿真器（Isaac Sim）有一套沉重、挑剔的依赖；各家 VLA 模型又有<i>各自</i>一套同样挑剔、还互相冲突的依赖。把它们装进同一个 Python 环境，是一场依赖地狱。</p>
+        <p>EBench 的答案是在二者之间划一条窄到不能再窄的契约，只有三个动作：</p>
+        <div class="code" data-lang="python"><div class="code-h"><span class="fn">genmanip_client/eval_client.py（契约用法）</span><button class="cp">复制</button></div><pre><code>from genmanip_client.eval_client import EvalClient
+
+client = EvalClient(base_url="http://127.0.0.1:8087",
+                    worker_ids=["0"], run_id="my_eval")
+
+obs = client.reset()            # ① reset：开一个新 episode，回首帧观测
+eval_finished = False
+while not eval_finished:
+    action = model.get_action(obs)
+    obs, eval_finished = client.step(action)   # ② step：喂 action，回下一帧观测
+client.close()                  # ③ close：收尾</code></pre></div>
+        <p>就这三件事：<span class="term">reset</span> / <span class="term">step</span> / <span class="term">close</span>。契约的两侧因此被彻底<b>解耦</b>：仿真这一侧（server）跑在它自己的重环境里，把 Isaac Sim 当黑盒；模型这一侧只需要在<i>自己</i>的环境里 <span class="term">pip install</span> 一个极薄的 <span class="term">genmanip-client</span> 包，就能通过这三个方法对话。模型作者完全<b>不需要</b>知道 Isaac Sim 的存在，更不必和它的依赖共处一室——依赖冲突在契约这条缝上被一刀切断。</p>
+        <p>这就是「窄契约」的威力：接口越窄，两侧能各自变化的自由度越大。任何能实现 <span class="term">get_action(obs)</span> 的模型都能接入，任何能在 server 端跑起来的仿真都能被换掉——而这条 reset/step/close 的缝一动不动。它是「契约即架构」最干净的一个实证。</p>
+
+        <div class="bridge rl">
+          <div class="c-h"><span class="tag">从 RL 看</span> 这就是 gym 的 env API</div>
+          <p>你对这个契约其实早就熟得不能再熟了。<span class="term">Gymnasium</span>（旧称 gym）整个生态能繁荣，靠的就是一条窄契约：<span class="term">env.reset()</span> → <span class="term">obs, reward, done, info = env.step(action)</span>。正因为每个 env 都遵守这条缝，你写的任何 agent 都能跑在任何 env 上，CartPole 和 Atari 共用同一份训练循环。<span class="term">EvalClient</span> 的 reset/step/close 就是<b>同一个设计哲学</b>搬到评测里：把「环境」和「策略」用一条标准接口隔开，两边各自爆炸式生长而互不打扰。你在 RL 里享受过的那种「随便换 env、随便换 agent」的自由，正是一条好契约给的礼物。</p>
+        </div>
+
+        <h2 id="recap">这一节你需要带走的</h2>
+        <p>(1) 架构的本质在<b>层与层之间的契约</b>，不在层本身——可扩展性的形状，就是你在哪几条缝上划了干净契约的形状；(2) 耦合（伸手抓别人的实现）让改动沿缝传染，可组合（只认契约）让工作量随实现数相加、组合数相乘；(3) <span class="term">anti-corruption layer</span> 把外部的混乱挡在核心之外；(4) <span class="term">EBench</span> 的 <span class="term">EvalClient</span>（reset/step/close）是一条窄契约的范本，它把模型依赖和仿真依赖一刀切开，正如 gym 的 env API 隔开了 agent 与 environment。下一节，我们追问下一个问题：契约划好了，跑出来的那个数，凭什么<b>可信</b>、凭什么<b>可复现</b>？</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

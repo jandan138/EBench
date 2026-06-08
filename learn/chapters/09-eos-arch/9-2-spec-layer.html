@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Spec 层：声明『评什么』而非『怎么跑』· EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="9-2">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 9 · EOS 架构精读 · 9-2</div>
+        <h1>Spec 层：声明『评什么』而非『怎么跑』</h1>
+        <p class="lede">上一节我们立了规矩：core 只放 scenario-neutral 契约。这一节就看最纯粹的那一类契约——<span class="term">Spec 层</span>。它住在 <code>core/specs/</code>，全是 <span class="term">@dataclass(frozen=True)</span>，<b>没有一行执行逻辑</b>。它的任务只有一个：用结构化、可冻结的数据，把一次评测「<i>评什么</i>」说清楚，而把「<i>怎么跑</i>」整个甩给后面的 runtime 和 backend。这就是「声明式」三个字的全部含义。</p>
+
+        <h2 id="declarative">什么叫「声明式」</h2>
+        <p>翻开 <code>core/specs/</code>，你会看到 9 个文件，没有一个里面有 <code>for</code> 循环、<code>step()</code> 或对 simulator 的调用。它们全部是 <span class="term">frozen dataclass</span>——一旦构造就不可变，<b>本质上是一份契约文档，只是用 Python 类型写的</b>。<span class="term">TaskSpec</span> 不知道怎么 reset 环境，<span class="term">ActionSpec</span> 不知道怎么发关节指令，<span class="term">MetricSpec</span> 不知道怎么算分。它们只是<i>声明</i>这些东西<b>应该</b>是什么样子。</p>
+        <div class="bridge rl">
+          <div class="c-h"><span class="tag">从 RL 看</span> spec ≈ env 的 observation_space / action_space</div>
+          <p>你熟悉 gym 里的 <code>env.observation_space</code> 和 <code>env.action_space</code>：它们是<b>描述</b>，不是<b>实现</b>——一个 <code>Box(shape=(3,))</code> 不会帮你 step，它只告诉你形状和范围。EOS 的 Spec 层就是把这套「空间声明」扩展到了整个评测：不仅声明动作/观测空间，还声明任务流程、成功条件、指标、泛化轴。先声明清楚，再谈执行。</p>
+        </div>
+
+        <h2 id="taskspec">TaskSpec：一次评测的「目录」</h2>
+        <p>核心是 <span class="term">TaskSpec</span>。它不存任何场景几何或物理，只是把一次评测需要的所有<b>引用</b>和<b>条件</b>聚到一起：</p>
+        <div class="code" data-lang="python"><div class="code-h"><span class="fn">core/specs/task_spec.py</span><button class="cp">复制</button></div><pre><code>@dataclass(frozen=True)
+class ProcedureStep:
+    step_id: str
+    instruction: str
+    preconditions: list[str] = field(default_factory=list)
+    success_conditions: list[str] = field(default_factory=list)
+    allowed_actions: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class TaskSpec:
+    task_id: str
+    scenario_pack: str
+    instructions: list[str]
+    scene_id: str
+    embodiment_id: str | None = None
+    procedure: list[ProcedureStep] = field(default_factory=list)
+    success_conditions: list[str] = field(default_factory=list)
+    observation_spec: ObservationSpec | None = None
+    action_spec: ActionSpec | None = None
+    metrics: list[MetricSpec] = field(default_factory=list)
+    generalization_axes: dict[str, Any] = field(default_factory=dict)
+    allowed_backend_profiles: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)</code></pre></div>
+        <p>逐字段读，能读出整个系统的世界观：</p>
+        <ul>
+          <li><span class="term">scenario_pack</span>：一个<b>字符串</b>，指明这个任务属于哪个 pack（如 <code>"scientific_lab"</code>）。注意——core 不 import 那个 pack，只用名字引用它。这正是 9-1 那条单向依赖的体现。</li>
+          <li><span class="term">scene_id</span> / <span class="term">embodiment_id</span>：又是引用，不是内嵌。场景几何在 <span class="term">SceneSpec</span>，本体在 <span class="term">EmbodimentSpec</span>，这里只留 id。</li>
+          <li><span class="term">procedure</span>：一串 <span class="term">ProcedureStep</span>，每步带 <code>preconditions</code> / <code>success_conditions</code>。这就是「前置满足后才评后续」的时序结构——但这里只是<b>声明</b>，判定逻辑在 evaluator。</li>
+          <li><span class="term">generalization_axes</span>：泛化轴是个 <code>dict</code>，open-ended，不写死「object/background/instruction」那套。哪个 pack 要测什么泛化，自己填。</li>
+          <li><span class="term">allowed_backend_profiles</span>：一个任务可以声明它<b>允许在哪些 backend 上跑</b>——这是为下一节的可组合 backend 埋的接口。</li>
+        </ul>
+        <p>整个 <span class="term">TaskSpec</span> 像一本书的<b>目录</b>：它告诉你这次评测涉及哪个 scene、哪个 embodiment、哪些 metric、允许哪些 backend，但每一项的<i>内容</i>都在别处。</p>
+
+        <h2 id="action-obs">ActionSpec / ObservationSpec：声明空间，不声明数值</h2>
+        <p><span class="term">ActionSpec</span> 最值得看的是它的<b>时间粒度</b>枚举 <span class="term">ActionTemporalSpec</span>——EOS 不假设动作就是「每步一个」，而是把粒度做成一等公民：</p>
+        <div class="code" data-lang="python"><div class="code-h"><span class="fn">core/specs/action_spec.py</span><button class="cp">复制</button></div><pre><code>class ActionTemporalSpec(str, Enum):
+    SINGLE_STEP = "single_step"
+    CHUNKED = "chunked"
+    SKILL_LEVEL = "skill_level"
+    PROCEDURE_LEVEL = "procedure_level"
+
+
+@dataclass(frozen=True)
+class ActionSpec:
+    action_space_id: str
+    temporal: ActionTemporalSpec = ActionTemporalSpec.SINGLE_STEP
+    control_mode: str = "unspecified"
+    shape: tuple[int, ...] | None = None
+    schema: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)</code></pre></div>
+        <p>还记得 <a href="../05-theory/5-1-action-chunking.html">5.1</a> 讲的 action chunking 吗？在 EBench 里，chunk 是 client/server 协议里的一个 <code>chunk_size</code> 参数；在 EOS 里，「单步 / chunk / 技能级 / 流程级」被提升为<b>任务声明的一部分</b>——一个任务可以明说「我这一关评的是 procedure-level 决策」。<span class="term">ObservationSpec</span> 同理，用一串 <span class="term">CameraStreamSpec</span> 声明相机，再用一组布尔开关声明是否含 depth / segmentation / force-torque / proprioception。特别留意 <span class="term">include_privileged_state</span> 这个字段——它默认 <code>False</code>，把「会不会偷看特权状态」变成一个<b>显式、可审计</b>的声明，呼应 9-1 里「不许悄悄给模型喂特权状态」的禁令（细节在 <a href="9-5-trace.html">9.5</a>）。</p>
+
+        <h2 id="metric-semantic">MetricSpec 与 SemanticAsset：family 通用，实例下放</h2>
+        <p><span class="term">MetricSpec</span> 把 9-1 的「概念分层」做成了类型。core 只定义<b>指标族</b> <span class="term">MetricFamily</span>（9 个：<code>task_outcome / procedure / state_transition / precision / hazard / prediction / planning / generalization / resource</code>），具体指标由 scenario pack 实例化：</p>
+        <div class="code" data-lang="python"><div class="code-h"><span class="fn">core/specs/metric_spec.py</span><button class="cp">复制</button></div><pre><code>class MetricFamily(str, Enum):
+    TASK_OUTCOME = "task_outcome"
+    PROCEDURE = "procedure"
+    STATE_TRANSITION = "state_transition"
+    PRECISION = "precision"
+    HAZARD = "hazard"
+    PREDICTION = "prediction"
+    PLANNING = "planning"
+    GENERALIZATION = "generalization"
+    RESOURCE = "resource"
+
+
+@dataclass(frozen=True)
+class MetricSpec:
+    name: str
+    family: MetricFamily          # 通用：core 定义
+    scope: str = "episode"
+    target: str | None = None
+    unit: str | None = None
+    parameters: dict[str, Any] = field(default_factory=dict)
+    weight: float = 1.0
+    metadata: dict[str, Any] = field(default_factory=dict)</code></pre></div>
+        <p>于是 <code>core</code> 永远不会出现 <code>contamination_rate</code> 这种字段；湿实验安全 pack 想要它，就实例化一个 <code>MetricSpec(name="contamination_event_detection_rate", family=HAZARD, ...)</code>。<span class="term">core-boundaries.md</span> 把这个例子写成了「Wrong vs Right」对照——<code>family</code> 留在 core，<code>event_type="contamination"</code> 落到 pack。</p>
+        <p>最后一块是 <span class="term">SemanticAsset</span>，它体现了一条精妙的切分：<b>语义归 core，几何归 backend</b>。</p>
+        <div class="code" data-lang="python"><div class="code-h"><span class="fn">core/specs/asset_spec.py</span><button class="cp">复制</button></div><pre><code>@dataclass(frozen=True)
+class SemanticAsset:
+    """Geometry lives in backend-specific files. Core only stores semantic
+    sites, joints, affordances and provenance."""
+    asset_id: str
+    category: str
+    source_uri: str | None = None
+    backend_uris: dict[str, str] = field(default_factory=dict)   # 各后端的几何文件
+    sites: dict[str, Any] = field(default_factory=dict)          # 语义位点
+    joints: dict[str, Any] = field(default_factory=dict)
+    affordances: dict[str, Any] = field(default_factory=dict)
+    provenance: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)</code></pre></div>
+        <p>core 不存网格、不存 USD、不存 MJCF——那些 backend 私有几何文件的路径全塞进 <code>backend_uris</code> 这个字典（key 是 backend 名，value 是路径）。core 只保留<b>跨后端都成立</b>的语义：这个物体有哪些 <code>sites</code>（如「瓶口」「把手」）、哪些 <code>joints</code>、哪些 <code>affordances</code>，以及它从哪来（<code>provenance</code>）。这样同一个 <span class="term">SemanticAsset</span> 可以在 Isaac 用 USD、在 MuJoCo 用 MJCF，而 evaluator 看到的「瓶口」始终是同一个语义位点。</p>
+
+        <div class="callout">
+          <div class="c-h">「EBench 做到了吗？」</div>
+          <p>没有独立的、带类型的 Spec 层。<span class="term">EBench</span> 的任务定义是<b>隐式</b>的：它散落在 GenManip 的场景配置文件里，加上 docs 上那份 26-task 的清单（见 <a href="../03-methodology/3-3-tasks-scoring.html">3.3</a> 任务与打分）。没有一个像 <span class="term">TaskSpec</span> 这样的 frozen dataclass 把 <code>instructions / scene_id / procedure / metrics / allowed_backend_profiles</code> 聚成一份可校验的声明，也没有把动作时间粒度（single_step / chunked / skill / procedure）或「是否含特权状态」显式声明出来——这些在 EBench 里要么写死在 server 端，要么靠协议约定。再次强调：EBench 是一个聚焦的 benchmark，把任务硬编码进场景配置完全够用；EOS 要让<i>很多种</i>场景共享同一套评测引擎，才需要把「评什么」抽成显式、可冻结、可比对的 Spec。</p>
+        </div>
+
+        <h2 id="recap">这一节你需要带走的</h2>
+        <p>(1) Spec 层是一组 <span class="term">frozen dataclass</span>，<b>纯声明、零逻辑</b>——它说「评什么」，不说「怎么跑」；(2) <span class="term">TaskSpec</span> 是评测目录，用 id 引用 scene/embodiment/pack，把 procedure、metrics、泛化轴、允许的 backend 聚到一起；(3) <span class="term">ActionTemporalSpec</span> 把动作粒度、<span class="term">include_privileged_state</span> 把特权状态都做成<b>显式声明</b>；(4) <span class="term">MetricFamily</span> 在 core、具体指标在 pack，<span class="term">SemanticAsset</span> 让语义留 core、几何下放 backend。下一节我们追问那个反复出现的 <code>allowed_backend_profiles</code>：EOS 怎么把「Isaac vs MuJoCo」拆成可组合的组件？</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>
