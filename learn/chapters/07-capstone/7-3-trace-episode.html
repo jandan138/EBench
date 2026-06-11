@@ -25,14 +25,14 @@
       <article class="article">
         <div class="eyebrow">Part 7 · Capstone · 7-3</div>
         <h1>追踪一个 episode 的全程</h1>
-        <p class="lede">全书到这里，每个零件你都见过了。最后一节，我们不引入任何新概念——只做一件事：牵着<i>一个</i> episode，从它睁眼（reset）走到闭眼（打分），看七个 Part 如何咬合成一台完整运转的机器。每经过一个环节，我们就回链到讲它的那一章。这是这本书的收束。</p>
+        <p class="lede">到这里，EBench 这台具体机器的每个零件你都见过了。本节不引入新概念——只做一件事：牵着<i>一个</i> episode，从它睁眼（reset）走到闭眼（打分），看前七个 Part 如何咬合成一台完整运转的机器。每经过一个环节，我们就回链到讲它的那一章。这是 Capstone 的收束。</p>
 
         <h2 id="cast">出场角色</h2>
         <p>先点名。一个 episode 里同时在跑的，是三方：</p>
         <ul>
           <li><b>server</b>——云端/本机的 <span class="term">ray_eval_server.py</span>，里面是 Isaac Sim 物理世界（<a href="../02-sim/2-1-isaac-sim.html">2.1</a>）和 GenManip 任务（<a href="../02-sim/2-3-genmanip.html">2.3</a>）。它是黑盒（<a href="../04-engine/4-1-client-server.html">4.1</a>）。</li>
           <li><b>client</b>——<span class="term">EvalClient</span>，装在你模型的 env 里，负责通信与契约（<a href="../04-engine/4-2-evalclient.html">4.2</a>）。</li>
-          <li><b>model</b>——你在 <a href="07-1-custom-model.html">7.1</a> 写的 <span class="term">ModelClient</span>，里面是一个 flow-matching VLA（<a href="../05-theory/5-5-flow-matching.html">5.5</a>）。</li>
+          <li><b>model</b>——你在 <a href="7-1-custom-model.html">7.1</a> 写的 <span class="term">ModelClient</span>，里面是一个 flow-matching VLA（<a href="../05-theory/5-5-flow-matching.html">5.5</a>）。</li>
         </ul>
         <p>下面这段循环就是它们的全部对话，我们将逐行展开它代表的物理与计算：</p>
 
@@ -55,10 +55,10 @@ client.close()
         </div>
 
         <h2 id="s2-modelreset">② model.reset：清掉上一局的残留</h2>
-        <p>client 看到 <span class="term">obs["0"]["obs"]["reset"] == True</span>，调你的 <span class="term">model.reset()</span>。如果你的策略带 recurrent state、action 队列或历史帧缓存（InternVLA-A1 的 action deque + temporal image pair 就是，<a href="../06-baselines/6-3-internvla-a1.html">6.3</a>），全在这里清空。<a href="07-1-custom-model.html">7.1</a> 把这列为三大坑之一——不清，新 episode 开头会被旧状态污染。</p>
+        <p>client 看到 <span class="term">obs["0"]["obs"]["reset"] == True</span>，调你的 <span class="term">model.reset()</span>。如果你的策略带 recurrent state、action 队列或历史帧缓存（InternVLA-A1 的 action deque + temporal image pair 就是，<a href="../06-baselines/6-3-internvla-a1.html">6.3</a>），全在这里清空。<a href="7-1-custom-model.html">7.1</a> 把这列为三大坑之一——不清，新 episode 开头会被旧状态污染。</p>
 
         <h2 id="s3-unpack">③ 解包 obs：从字典到张量</h2>
-        <p>进入 <span class="term">get_action(obs)</span>，第一步是解包。按 <span class="term">worker_id</span> 取出 <span class="term">obs["0"]["obs"]</span>，里面是 <span class="term">instruction</span>(str)、<span class="term">state.joints</span>(12)、<span class="term">state.gripper</span>(4)、<span class="term">state.base</span>(3)、<span class="term">state.ee_pose</span>、四路 <span class="term">video.{cam}_view</span>(480,640,3 uint8)、<span class="term">timestep</span>、<span class="term">reset</span>（schema 全貌见 <a href="../04-engine/4-2-evalclient.html">4.2</a>）。图像是 <b>uint8 HWC</b>，你得按训练时的口径归一化、相机命名对齐（<a href="07-1-custom-model.html">7.1</a> 第一坑）。低维 state 也要用训练统计量做归一化。</p>
+        <p>进入 <span class="term">get_action(obs)</span>，第一步是解包。按 <span class="term">worker_id</span> 取出 <span class="term">obs["0"]["obs"]</span>，里面是 <span class="term">instruction</span>(str)、<span class="term">state.joints</span>(12)、<span class="term">state.gripper</span>(4)、<span class="term">state.base</span>(3)、<span class="term">state.ee_pose</span>、四路 <span class="term">video.{cam}_view</span>(480,640,3 uint8)、<span class="term">timestep</span>、<span class="term">reset</span>（schema 全貌见 <a href="../04-engine/4-2-evalclient.html">4.2</a>）。图像是 <b>uint8 HWC</b>，你得按训练时的口径归一化、相机命名对齐（<a href="7-1-custom-model.html">7.1</a> 第一坑）。低维 state 也要用训练统计量做归一化。</p>
 
         <h2 id="s4-sample">④ flow matching 采样：一团噪声变成一段动作</h2>
         <p>这是 episode 里最"聪明"的一步，也是 Part 5 的核心。模型不是回归出一个动作均值，而是从分布 $p(A_t\mid o_t)$ 里<b>采样</b>一整段 action chunk $A_t=[a_t,\dots,a_{t+H-1}]$，让它能表达"多种正确做法"的多模态性（<a href="../05-theory/5-5-flow-matching.html">5.5</a>）。</p>
@@ -95,9 +95,9 @@ client.close()
           <p>reset → 清状态 → 解包 obs → flow-matching 采样 chunk → 重排成契约 → step → 物理步进 → 新 obs/done → 子目标打分 → 聚合成 profile。九个环，每一个都对应这本书的某一章。你现在能从任意一环往两头追到底——这就是读完这本书的意义。</p>
         </div>
 
-        <h2 id="takeaway">全书收束</h2>
-        <p>从 <a href="../00-orientation/0-1-why-ebench.html">0.1</a> 的测量哲学，到仿真地基（Part 2）、方法论（Part 3）、client–server 契约（Part 4）、flow-matching 引擎（Part 5）、三个 baseline 的全链路（Part 6），再到你亲手接入自己的模型（Part 7）——它们不是七堆并列的知识，而是<b>同一个 episode 流过的七段河道</b>。当你下次启动一次评测，看着 worker 一帧帧往前推，你脑子里跑的，应该正是这条从 reset 到 capability profile 的完整线路。</p>
-        <p>这本书到此结束。要查具体的术语、链接、obs/action schema、或参考文献，去翻附录——它就是为你随手回查准备的。</p>
+        <h2 id="takeaway">Capstone 收束</h2>
+        <p>从 <a href="../00-orientation/0-1-why-ebench.html">0.1</a> 的测量哲学，到仿真地基（Part 2）、方法论（Part 3）、client–server 契约（Part 4）、flow-matching 引擎（Part 5）、三个 baseline 的全链路（Part 6），再到你亲手接入自己的模型（Part 7）——它们不是七堆并列的知识，而是<b>同一个 episode 流过的七段路径</b>。当你下次启动一次评测，看着 worker 一帧帧往前推，你脑子里跑的，应该正是这条从 reset 到 capability profile 的完整线路。</p>
+        <p>下一部分我们退后一步，不再只问 EBench 怎么跑，而是问任何 benchmark 的分数到底在声称什么、怎样才可信、怎样避免聚合和泛化陷阱。要查具体的术语、链接、obs/action schema、或参考文献，可以随时翻附录。</p>
       </article>
     </main>
     <aside class="rail" id="rail"></aside>

@@ -39,9 +39,9 @@
         <p>注意这五层的<b>数据流向是单向的</b>：Spec 定义了世界 → Runtime 在这个世界里跑出 State 的时间序列 → Metric 读 State 打分 → Report 聚合。每一层只依赖它上游产出的<i>抽象</i>，而不该伸手去碰更上游的实现细节。这条单向链，是后面所有「可复现」「可扩展」讨论的地基。</p>
 
         <div class="lab">
-          <div class="lab-h"><span class="lab-tag">interactive</span><span class="lab-t">五层解剖：每层管什么，EBench 与 EOS 各放在哪</span></div>
+          <div class="lab-h"><span class="lab-tag">interactive</span><span class="lab-t">五层解剖：每层管什么，隐式与显式实现差在哪</span></div>
           <div class="lab-body" data-widget="eval-anatomy"></div>
-          <div class="lab-cap">点任意一层，看它的职责、典型产物，以及一个「隐式」系统（EBench）和一个「显式」系统（EOS）分别把这层落在何处。</div>
+          <div class="lab-cap">点任意一层，看它的职责、典型产物，以及轻量 benchmark 与更显式的评测框架通常会如何落这层。</div>
         </div>
 
         <h2 id="implicit-vs-explicit">成熟系统让每一层显式，临时脚本让它们纠缠</h2>
@@ -54,13 +54,13 @@
           <p>你在 GAMES103 里写物理仿真时，其实已经在做同一件事。<span class="term">Spec</span> 对应「场景与材料参数的声明」（质量、刚度、约束）；<span class="term">State</span> 对应「每一步的位置/速度状态向量」；<span class="term">Runtime</span> 对应「时间积分循环」本身；把它当 benchmark 看，<span class="term">Metric</span> 就是「能量是否守恒、约束误差多大」这类诊断；<span class="term">Report</span> 是你画出来给助教看的收敛曲线。当年你若把这几件事搅在一个 update() 函数里，换一个积分器就得重写一切；分层之后，换 explicit / implicit Euler 只动 Runtime 那一层。评测系统的分层动机，和你写好一个仿真器的动机是<b>同一个</b>。</p>
         </div>
 
-        <h2 id="spectrum">两个真实坐标：EBench 与 EOS</h2>
-        <p>「显式 vs 隐式」不是非黑即白，而是一条光谱。本书里你已经见过、或即将见到光谱上的两个真实点：</p>
+        <h2 id="spectrum">一条光谱：从轻量 benchmark 到显式框架</h2>
+        <p>「显式 vs 隐式」不是非黑即白，而是一条光谱。你可以在一个聚焦 benchmark 里把很多层保持轻量，也可以在一个长期演进的评测框架里把每一层都做成独立对象。关键不是哪边天然更高级，而是目标和成本是否匹配。</p>
         <p><span class="term">EBench</span>（Part 4 我们拆过它的引擎）坐在偏「隐式」的一端——这<b>不是缺点</b>，而是工程取舍。它的 Spec 散落在 GenManip 场景配置和 docs 的 26 task 列表里，没有独立的 Spec 类型；它的 State 直接就是 Isaac Sim 吐出的 obs 字典，没有「归一化物理态」这层抽象；它的强项在 Runtime——那套 client-server 把仿真当黑盒、让模型装进自己的 env，是一个划得极漂亮的边界（下一节专门讲）。它优先把<i>能跑通、能并行、能上榜</i>这条主干打通，其余层保持轻量。</p>
-        <p>而 <span class="term">EOS</span>（用户自己的系统，Part 9 全程在讲它，从 <a href="../09-eos-arch/9-1-design-stance.html">9.1 设计立场</a>开始）坐在偏「显式」的一端：它把五层<b>逐一</b>提升为一等公民——独立的 Spec 数据类型、两级 State、结构化 Trace、九个 MetricFamily、强制的 claim_boundary。它用更多的前期抽象，换「任何一层都能换、任何结果都能复现」的可扩展性。两者没有对错，只是站在光谱的不同位置，服务于不同的优先级。</p>
+        <p>光谱另一端的系统会把五层<b>逐一</b>提升为一等公民：独立的 Spec 数据类型、归一化 State、结构化 Trace、多族 Metric、显式 claim boundary。它用更多的前期抽象，换「任何一层都能换、任何结果都能复现」的可扩展性。两端没有对错，只是服务于不同优先级：一个面向发布和复现一个具体 benchmark，一个面向长期承载多任务、多模型、多后端的演进。</p>
 
         <h2 id="recap">这一节你需要带走的</h2>
-        <p>(1) 任何评测系统都由 <span class="term">Spec → State → Runtime → Metric → Report</span> 五层组成，数据单向流动；(2) 区别不在「有没有这五层」，而在它们是<b>显式还是隐式</b>——隐式会让改动沿纠缠传染，显式让每层可换、可测、可复现；(3) <span class="term">EBench</span> 与 <span class="term">EOS</span> 是这条光谱上的两个真实坐标，各自的取舍都成立。下一节我们放大其中最关键的东西：层与层之间那条<b>契约（contract）</b>——它才是真正决定一个系统能不能长大的地方。</p>
+        <p>(1) 任何评测系统都由 <span class="term">Spec → State → Runtime → Metric → Report</span> 五层组成，数据单向流动；(2) 区别不在「有没有这五层」，而在它们是<b>显式还是隐式</b>——隐式会让改动沿纠缠传染，显式让每层可换、可测、可复现；(3) EBench 把重心放在能跑通、能并行、能上榜的主干上，其他系统可以按需求付出更多抽象成本。下一节我们放大其中最关键的东西：层与层之间那条<b>契约（contract）</b>——它才是真正决定一个系统能不能长大的地方。</p>
       </article>
     </main>
     <aside class="rail" id="rail"></aside>

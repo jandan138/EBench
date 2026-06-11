@@ -57,7 +57,7 @@
 
         <h2 id="from-scalar-to-profile">出路：测的是一张 capability profile，不是一个标量</h2>
         <p>如果单个标量的 construct validity 天生脆弱，补救方向就清楚了：<b>不要把能力压成一个数</b>。一个潜在能力其实是多维的——长流程的规划、灵巧的对位、移动中的协调、对新指令的理解，是<i>不同</i>的 construct。把它们各自测、各自报，得到的是一张沿多个能力轴展开的 <span class="term">capability profile</span>，而不是一个被压扁的标量。</p>
-        <p>这样做对 construct validity 的好处是双重的：第一，每个轴只代理一个较窄、较纯的 construct，proxy 贴得更紧；第二，Goodhart 式的捷径很难<i>同时</i>骗过所有轴——你靠记忆物体刷高了「object 泛化」轴，「指令」轴和「长流程」轴会立刻露馅。多轴本身就是一种对刷榜的<b>结构性防御</b>。这正是 <span class="term">EBench</span> 在 README 里喊出「from a single success rate to a multi-axis capability profile」的底层动机，也是后面 Part 9 那套 <span class="term">EOS</span> 系统把 <span class="term">CapabilityProfile</span> 当成一等公民的原因。</p>
+        <p>这样做对 construct validity 的好处是双重的：第一，每个轴只代理一个较窄、较纯的 construct，proxy 贴得更紧；第二，Goodhart 式的捷径很难<i>同时</i>骗过所有轴——你靠记忆物体刷高了「object 泛化」轴，「指令」轴和「长流程」轴会立刻露馅。多轴本身就是一种对刷榜的<b>结构性防御</b>。这正是 <span class="term">EBench</span> 在 README 里喊出「from a single success rate to a multi-axis capability profile」的底层动机：分数应当服务诊断，而不是把所有能力压扁成一个看似权威的排名。</p>
 
         <h2 id="recap">这一节你需要带走的</h2>
         <p>(1) benchmark 分数是关于潜在能力的一个<b>主张</b>，不是能力本身，连接二者的是 <span class="term">construct validity</span>；(2) 一个干净的 success rate 背后打包了任务集、打分、分布、聚合一连串前提，单看数字看不出哪条塌了；(3) 一旦 measure 变成 target，<span class="term">Goodhart's law</span> 会主动拆掉它和 construct 的相关性——这就是评测版的 reward hacking；(4) 出路是把能力摊成多轴 <span class="term">capability profile</span>，让 proxy 更纯、让捷径更难得逞。下一节，我们把任何评测系统——无论它自不自觉——都共有的<b>五层骨架</b>解剖出来，看清这些「主张」是在哪几层里被一步步制造出来的。</p>

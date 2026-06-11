@@ -40,13 +40,16 @@
 </div>
 ```
 可用 `WIDGET_NAME`：
-- `flow-matching-ode` —— noise→action chunk 的 Euler 积分动画；rectified vs diffusion。用于 **5.2**。
+- `flow-matching-ode` —— noise→action chunk 的 Euler 积分动画；rectified vs diffusion。用于 **5.5/5.6**。
+- `mode-averaging` —— 回归动作均值化的多模态陷阱。用于 **5.3**。
 - `action-chunking` —— receding horizon：H / exec / 扰动。用于 **5.1**（或 4.4）。
 - `eval-flow` —— client↔server 时序，chunk vs step。用于 **4.1 或 4.4**。
 - `action-dissector` —— 19-D action 向量解剖 + 各 baseline 映射。用于 **4.3**（6.4 可复用）。
 - `capability-radar` —— 多轴能力画像（示意）。用于 **3.1**（0-1 已用过一次）。
 - `task-taxonomy` —— 26 任务 × 3 family + 打分。用于 **3.3**。
-- `moe-attention` —— action expert 的 token 路由与 attention mask。用于 **5.3**。
+- `moe-attention` —— action expert 的 token 路由与 attention mask。用于 **5.7**。
+- `aggregation-pitfall` —— 指标聚合、加权与 Simpson's paradox。用于 **8.5**。
+- `eval-anatomy` —— 评测系统五层骨架与隐式/显式实现对照。用于 **8.2**。
 每个部件**全书只在最相关的那一节用一次**（capability-radar 在 0-1 已用，3.1 可再用一次但换角度）。不要滥用。
 
 ---

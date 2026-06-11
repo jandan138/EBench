@@ -27,7 +27,7 @@
 
 ## 2. 信息架构（章节）
 
-7 个 Part + Appendix，约 30+ 节。详见 `content.js`（导航单一真相源）。
+9 个 Part + Appendix，共 45 节。详见 `content.js`（导航单一真相源）。
 
 - **Part 0 序章**：why EBench / repo constellation / 怎么读这本书
 - **Part 1 问题域**：RL→behavior cloning（生成式策略）/ 什么是 VLA / `lift2` 本体
@@ -37,6 +37,7 @@
 - **Part 5 VLA 理论**：compounding error→action chunking / flow matching 数学 / action expert / 离散 vs 连续解码、FAST、knowledge insulation
 - **Part 6 baseline 全链路**：π0/π0.5(openpi) / X-VLA(soft prompt+domain_id) / InternVLA-A1(MoT+visual foresight) / 三者对比
 - **Part 7 实战 capstone**：接入自己的模型 / 本地 vs online / 追踪一个 episode 全程
+- **Part 8 评测系统通论**：construct validity / 五层解剖 / contract / reproducibility / aggregation / generalization
 - **Appendix**：术语表 / repo&链接图 / obs&action&gmp 速查 / 参考文献
 
 ## 3. 技术与文件组织
@@ -54,14 +55,17 @@ learn/
 │       └── widgets/           # 交互部件（data-widget 自动发现，避免脆弱的硬编码挂载点）
 │           ├── registry.js
 │           ├── flow-matching-ode.js
+│           ├── mode-averaging.js
 │           ├── action-chunking.js
 │           ├── eval-flow.js
 │           ├── action-dissector.js
 │           ├── capability-radar.js
 │           ├── task-taxonomy.js
-│           └── moe-attention.js
+│           ├── moe-attention.js
+│           ├── aggregation-pitfall.js
+│           └── eval-anatomy.js
 └── chapters/
-    ├── 00-orientation/ … 07-capstone/ , appendix/
+    ├── 00-orientation/ … 08-eval-systems/ , appendix/
 ```
 
 ### 3.1 相对 ConvertAsset/learn 的改进（去其糟粕）
@@ -81,13 +85,15 @@ learn/
 ## 4. 交互部件清单
 
 1. **flow-matching-ode**：noise→action chunk 的 Euler 积分动画；可调步数；展示 rectified flow 近直线路径。
-2. **action-chunking**：预测 H、执行 prefix、replan cadence；展示 compounding error 权衡。
-3. **eval-flow**：`reset→obs→infer→step→…→done` 时序动画；切换 chunk/step 模式。
-4. **action-dissector**：16/19-D action 向量分片悬停；展示每个 baseline 的映射差异。
-5. **capability-radar**：多 baseline 跨轴雷达对比；可切换模型。
-6. **task-taxonomy**：26 tasks×3 families，点开看打分公式。
-7. **moe-attention**：image/text token 与 action token 经不同权重路由、attention mask 可视化。
-8. *(stretch)* `lift2` 本体+相机图 / PhysX-USD step cycle / soft-prompt domain_id 切换。
+2. **mode-averaging**：回归动作均值化的多模态陷阱。
+3. **action-chunking**：预测 H、执行 prefix、replan cadence；展示 compounding error 权衡。
+4. **eval-flow**：`reset→obs→infer→step→…→done` 时序动画；切换 chunk/step 模式。
+5. **action-dissector**：16/19-D action 向量分片悬停；展示每个 baseline 的映射差异。
+6. **capability-radar**：多 baseline 跨轴雷达对比；可切换模型。
+7. **task-taxonomy**：26 tasks×3 families，点开看打分公式。
+8. **moe-attention**：image/text token 与 action token 经不同权重路由、attention mask 可视化。
+9. **aggregation-pitfall**：展示指标聚合、加权与 Simpson's paradox 风险。
+10. **eval-anatomy**：评测系统五层通用骨架与隐式/显式实现对照。
 
 ## 5. 构建顺序
 

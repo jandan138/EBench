@@ -63,10 +63,10 @@
           <p>data leakage 不会让结果看起来出错——恰恰相反，它让泛化分变得<b>漂亮</b>。一个有泄漏的榜单，会奖励那些「最善于（无意中）利用泄漏」的模型，而不是真正泛化最强的模型，于是整个领域被往错误方向牵引。更糟的是它常常无声无息：除非你<b>主动</b>去审计 train/test 之间的资产重叠、措辞重叠、统计量来源，否则你不会发现自己报的「泛化能力」其实是「记忆能力」。可信的泛化评测，必须把「我们如何保证没有泄漏」当成结果的一部分写出来——这又回到了 <a href="8-4-reproducibility.html">8.4</a> 的 claim boundary：说清你的隔离<i>覆盖到了哪一层</i>。</p>
         </div>
 
-        <h2 id="recap">Part 8 收尾，与 Part 9 的桥</h2>
+        <h2 id="recap">Part 8 收尾</h2>
         <p>这一节，也是这一部分的收束：(1) 泛化 = 对<b>没见过</b>的东西的能力，整套评测压在「考题确实是新的」这一个支点上；(2) 用 <span class="term">held-out split</span> 实现 <span class="term">train/test isolation</span>，隔离的是<b>信息流</b>而不只是文件夹；(3) 分轴考 <span class="term">OOD</span>（object / background / instruction / mixed），别压成一个笼统的泛化分；(4) 警惕 <span class="term">data leakage</span> 的各种隐蔽形态——它专门抬高你最想信的那个数。</p>
         <p>到这里，Part 8 的「评测系统通论」就讲完了：从「分数是什么主张」（construct validity），到五层解剖，到契约即架构，到可复现与 claim boundary，到聚合陷阱，再到泛化与泄漏。这些都是<b>第一性原理</b>——不依赖任何具体框架。</p>
-        <p>理论讲完，接下来该看一个把这些原则<i>当第一性原理来建</i>的真实系统了。<b>下面进入 Part 9：EmbodiedEval OS（EOS）</b>——一个 domain-agnostic 的评测「操作系统」，看它如何把这一部分的每一条原则，落成显式的 Spec、State、Trace、MetricFamily 与强制的 claim_boundary。我们从它的<a href="../09-eos-arch/9-1-design-stance.html">设计立场（9.1）</a>开始。</p>
+        <p>从序章到这里，全书已经把 EBench 的问题域、仿真栈、评测方法、client-server 引擎、VLA 理论、baseline 接入与评测系统原则串起来了。后面的附录保留术语、链接、速查表和参考文献，方便你回头查具体接口与资料出处。</p>
       </article>
     </main>
     <aside class="rail" id="rail"></aside>
