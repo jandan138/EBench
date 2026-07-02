@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>多源数据怎么混：有什么监督训什么 · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="5b-4">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 5.5 · VLA 训练系统 · 5b-4</div>
+        <h1>多源数据怎么混：有什么监督训什么</h1>
+        <p class="lede">上一节账本的「输入」栏里挤着一堆名字：Robointer-VQA、DROID、AgiBot、OXE-AugE、LabEmbodied-Data、web 图文……它们<b>不是同一种东西</b>。有的有动作标签，有的只有文字答案；有的教「看懂」，有的教「怎么动」。这一节回答一个朴素但常被想错的问题：格式各异的多源数据，怎么混进同一个模型的训练里？答案是一条原则：<b>有什么监督，就训什么 loss——绝不硬凑。</b></p>
+
+        <h2 id="misconception">又一个要拆的误区</h2>
+        <div class="callout warn">
+          <div class="c-h">误区</div>
+          <p>「VLA 的训练数据都是『成功画面 + 轨迹』。」——不对。<b>大部分</b>预训练数据里根本没有机器人动作。VQA 数据是「图 + 问题 → 答案」，web caption 是「图 → 描述」，它们一个动作标签都没有，却是 VLA 泛化能力的重要来源。</p>
+        </div>
+        <p>把 5b-3 账本里出现过的数据全部摊开，按「样本长什么样 / 训练什么能力 / 走什么 loss」分类：</p>
+        <table>
+          <thead><tr><th>数据类型</th><th>例子</th><th>样本长什么样</th><th>训练什么</th><th>loss</th></tr></thead>
+          <tbody>
+            <tr><td><b>VQA / 语义理解</b></td><td>Robointer-VQA、web VQA</td><td>image + question → answer</td><td>看懂物体、关系、任务阶段</td><td>CE</td></tr>
+            <tr><td><b>高层子任务文本</b></td><td>π0.5 的 subtask 数据</td><td>observation + task → subtask 文本</td><td>先想「接下来做什么」</td><td>CE</td></tr>
+            <tr><td><b>真实机器人轨迹</b></td><td>DROID、AgiBot World Beta、OXE</td><td>image / state / instruction / <b>action</b></td><td>通用抓放操作先验</td><td>FAST CE <b>或</b> flow</td></tr>
+            <tr><td><b>仿真成功 rollout</b></td><td>LabEmbodied-Data（5b-6 讲它怎么造出来）</td><td>多相机 + state + <b>action</b> + 物体状态 + 结构化标注</td><td>领域技能（实验室仪器、protocol）</td><td>FAST CE <b>或</b> flow</td></tr>
+            <tr><td><b>web 多模态</b></td><td>captioning、detection</td><td>image / text / boxes</td><td>世界知识、语言泛化</td><td>CE</td></tr>
+          </tbody>
+        </table>
+        <p>注意最关键的分界线：<b>有没有 action 标签</b>。前两行和最后一行没有——它们只能（也只应该）训练 backbone 的语义能力；中间两行有——只有它们能监督 action token / action expert。同一批轨迹数据还会在不同阶段换 loss：预训练走 FAST 离散 CE（喂 backbone），后训练走连续 flow（喂 expert）——这正是 5b-3 两阶段的数据视角。点下面的图亲自走一遍每条通路：</p>
+
+        <div class="lab">
+          <div class="lab-h"><span class="lab-tag">interactive</span><span class="lab-t">data-to-loss map：每种数据走哪条通路</span></div>
+          <div class="lab-body" data-widget="data-loss-map"></div>
+          <div class="lab-cap">点左列数据源。注意：VQA / web 数据的通路<b>永远到不了 action expert</b>；机器人轨迹有两条通路——离散（预训练）与连续（后训练）。</div>
+        </div>
+
+        <h2 id="the-principle">关键原则：没有监督的字段，不要伪造监督</h2>
+        <p>把异构数据塞进同一个 batch，最自然的错误做法是「格式对齐」：所有样本都凑齐所有字段，VQA 样本没有动作？填全零动作。这是<b>数据投毒</b>——模型会认真学习「看到这类图就输出零动作」。正确做法是三件套：</p>
+        <div class="callout">
+          <div class="c-h">多源混训三件套</div>
+          <p><b>① 统一 batch schema</b>：所有样本共用一个超集结构（image、text、state、action chunk、annotation……）；<b>② mask 标记有效字段</b>：每个样本带一份「哪些字段真实存在」的掩码；<b>③ 有什么监督算什么 loss</b>：action mask 为假的样本，flow / FAST loss 直接跳过，只算它有的 CE loss。</p>
+        </div>
+        <p>用伪代码写出来不过几行，但它是整个多源混训的承重墙：</p>
+        <div class="code" data-lang="python"><div class="code-h"><span class="fn">multi_source_loss（示意伪代码）</span><button class="cp">复制</button></div><pre><code>loss = 0
+if batch.has_text_target:          # VQA / caption / subtask / annotation
+    loss += ce_loss(vlm_logits, batch.text_target)
+if batch.has_action_target:
+    if stage == "pretrain":        # 离散：FAST token 走语言那套
+        loss += ce_loss(vlm_logits, fast_tokenize(batch.action_chunk))
+    else:                          # 连续：flow matching 只喂 expert
+        loss += flow_mse(expert_pred, batch.action_chunk,
+                         dim_mask=batch.active_action_dims)  # 只在活跃维平均！</code></pre></div>
+        <p>最后一行的 <code>dim_mask</code> 呼应 5b-3 结尾那个 LabVLA 踩坑实录：mask 原则不仅作用在「样本有没有动作」的粗粒度上，还要下探到「动作向量的哪些维是真的」——32 维 padding 里只有 8 维活跃时，在错误的分母上平均会把梯度悄悄缩小 4 倍。</p>
+
+        <div class="bridge rl">
+          <div class="c-h"><span class="tag">从 RL 看</span> 这就像 off-policy 数据的重要性修正——只是这里修正的是「监督的存在性」</div>
+          <p>RL 里混不同来源的经验时，你会用 importance weight 修正分布差异；这里混不同来源的<b>监督</b>时，用 mask 修正「标签存在性」差异。共同点是：<b>混合本身不难，难的是别让不该贡献梯度的东西贡献梯度。</b>全零动作之于 VLA，就像把随机策略的轨迹当 on-policy 数据直接做 policy gradient——形式上能算，语义上是毒。</p>
+        </div>
+
+        <h2 id="labvla-example">以 LabVLA 为例走一遍</h2>
+        <p>LabVLA 的数据配置是这套原则的干净样本。<b>预训练</b>（100k steps）四个源：Robointer-VQA 提供语义问答（无动作，只训 CE）；AgiBot World Beta、OXE-AugE（LeRobot 子集 ≈572k trajectories）、DROID 提供真实轨迹（动作过 FAST tokenizer 走 CE，另有 language subtask 标注也走 CE）。<b>后训练</b>（80k steps）换成 OXE-AugE + LabEmbodied-Data：全部是有动作的轨迹，走连续 flow；其中 LabEmbodied-Data 是<b>仿真合成</b>的实验室 rollout，带 subtask、object-state 等结构化标注——标注继续用 CE 喂 backbone（这是 KI 之下 backbone 仍在更新的原因，5b-5 展开）。</p>
+        <p>值得停一秒的对照：EBench-Dataset 也是「rule-based 合成 + 人类 teleop」的混合（<a href="../02-sim/2-4-lerobot-dataset.html">2.4</a>），文档里那句「teleop 抖动会被学进去；要平滑可调高 rule-based 子集权重」——正是<b>混合权重</b>这个旋钮在起作用。多源混训的第二个自由度（除了 mask）就是各源的采样比例，它直接塑造模型的行为风格。</p>
+
+        <h2 id="recap">这一节你需要带走的 · 下一节</h2>
+        <p>(1) 多源数据的分界线是<b>有没有 action 标签</b>：VQA / web / 子任务文本只训 backbone 语义（CE），轨迹类才能训动作（FAST CE 或 flow）；(2) 混训三件套 = <b>统一 schema + mask 有效字段 + 有什么监督训什么 loss</b>，绝不伪造监督（全零动作是毒）；(3) mask 要细到动作向量的活跃维；混合权重是塑造行为风格的旋钮。</p>
+        <p>账本四栏我们已经讲透了三栏（输入、目标、loss）。剩下最后一栏「更新谁」藏着全 recipe 最精妙的一招——下一节拿显微镜看 knowledge insulation 的梯度到底怎么走。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/data-loss-map.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

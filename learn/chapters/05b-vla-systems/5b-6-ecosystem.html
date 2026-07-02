@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>数据引擎 / benchmark / recipe：三层生态位 · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="5b-6">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 5.5 · VLA 训练系统 · 5b-6</div>
+        <h1>数据引擎 / benchmark / recipe：三层生态位</h1>
+        <p class="lede">VLA 领域的名字满天飞：<span class="term">RoboGenesis</span>、<span class="term">LabUtopia</span>、<span class="term">AutoBio</span>、<span class="term">GenManip</span>、<span class="term">EBench</span>……它们经常在一篇论文里同时出现，但<b>不是同一类东西</b>。这一节给你一个三格分类器：任何一个新名字出现，先问它是<b>造数据的</b>、<b>出考题的</b>，还是<b>训模型的方法</b>——归对格子，关系立刻清晰。</p>
+
+        <h2 id="three-boxes">三个格子，不要混</h2>
+        <table>
+          <thead><tr><th>格子</th><th>是什么</th><th>核心产出</th><th>类比</th></tr></thead>
+          <tbody>
+            <tr><td><b>数据引擎</b><br><span class="term">data engine</span></td><td>自动生成训练数据的系统：造场景 → 执行任务 → 过滤成功 rollout → 导出</td><td>训练数据集</td><td>教材印刷厂</td></tr>
+            <tr><td><b>benchmark</b></td><td>考试场 + 评分器：reset 场景、让模型尝试、算成功率与失败原因</td><td>分数与诊断</td><td>考场 + 阅卷组</td></tr>
+            <tr><td><b>model recipe</b></td><td>训练模型的方法学：backbone、action head、loss、阶段、数据混合</td><td>模型 checkpoint</td><td>教学大纲</td></tr>
+          </tbody>
+        </table>
+        <p>三者当然会握手——引擎产的数据喂 recipe，recipe 训出的模型进 benchmark——但<b>职责边界</b>决定了你能对每个系统提什么要求、下什么结论。混淆它们的典型症状：拿数据引擎去和 benchmark 比「任务多少」，或者把「模型在某 benchmark 赢了」错记到 recipe 头上（5b-8 细说这类错账）。</p>
+
+        <h2 id="robogenesis">RoboGenesis：一台实验室数据引擎</h2>
+        <p><span class="term">RoboGenesis</span> 是 LabVLA 论文的核心贡献之一——一台基于 Isaac Sim 的<b>实验室 workflow + 数据引擎</b>。它的流水线值得完整看一遍，因为它是「数据引擎」这个格子的标准解剖：</p>
+        <div class="code" data-lang="text"><div class="code-h"><span class="fn">RoboGenesis pipeline（LabVLA 论文口径）</span><button class="cp">复制</button></div><pre><code>① environment building
+   text-to-image 生成参考图 → TRELLIS 2.0 重建 3D 资产 → LabAssetLibrary
+   + 1,000+ 纹理（LabTextureLibrary）→ 组装场景 → 10 项 validation check
+   + 0-100 质量分过滤 → 已产出 10,000 个验证过的实验室场景
+
+② agentic workflow generation
+   自然语言指令 → 拆成原子技能有序序列
+   例：Pick(beaker1) → Pour(beaker1, beaker2) → Place(hot_plate) → Press
+   → 在 16 个 robot platforms 上跨本体实例化
+   → 六轴 domain randomization（场景/相机/光照/杂物/物体/空间）
+
+③ structured export
+   skill controller 在仿真里真实执行 → 按执行成功过滤 rollout
+   → 附加 subtask / object state / camera / spatial 等标注流
+   → 导出 LabEmbodied-Data（喂给 5b-3 的 KI posttraining）</code></pre></div>
+        <p>关于数据引擎，最常见的问题是：「它需不需要先给它一批人工录好的专家轨迹？」RoboGenesis 的答案揭示了数据引擎的本质：</p>
+        <div class="callout note">
+          <div class="c-h">不需要「预录制专家轨迹」，但需要「可执行专家逻辑」</div>
+          <p>RoboGenesis 不吃现成轨迹——轨迹是它<b>产</b>的，靠 skill controller 在仿真里真执行、真过滤。但天下没有免费午餐，它需要一整套可执行的专家<b>逻辑</b>：可交互资产（哪里能抓、按钮是不是 articulation）、robot profile、原子技能库、workflow 模板、success checker、导出 schema。换句话说：<b>专家知识没有消失，只是从「轨迹」升维成了「程序」</b>——程序可以被 domain randomization 放大成千上万条轨迹，这正是引擎的杠杆所在。</p>
+        </div>
+        <p>反过来说，只有一堆 <code>beaker.usd</code> 资产和一张任务清单是<b>开不动</b>引擎的——系统不知道烧杯哪里能抓、按钮按到什么程度算按下、任务成功怎么判。资产和指令之间缺的正是上面那套「可执行专家逻辑」。</p>
+
+        <h2 id="benchmarks">LabUtopia 与 AutoBio：两个实验室考场</h2>
+        <p>换到 benchmark 格子。<span class="term">LabUtopia</span>（NeurIPS'25 D&amp;B）是一套实验室仿真评测组件：<span class="term">LabSim</span>（Isaac Sim 高保真仿真，支持多物理与化学反应语义）+ <span class="term">LabScene</span>（程序化场景生成，200+ 资产）+ <span class="term">LabBench</span>（5 个复杂度层级、30 个任务，从 atomic 操作到 long-horizon 移动操作）。它的职责是考试：给任务、reset 场景、统计成功率、区分 ID/OOD——LabVLA 就在它上面被评（5b-7 的考卷）。</p>
+        <p><span class="term">AutoBio</span> 是另一个实验室考场，偏<b>生物实验</b>：真实仪器数字化管线、螺纹/棘轮等实验室机构的专用物理插件、透明液体的 PBR 渲染，三个难度层级的任务，然后拿现有 VLA baseline 来微调与评测。它和 LabVLA 的定位差异是一面好镜子：</p>
+        <div class="callout">
+          <div class="c-h">同在实验室，不同生态位</div>
+          <p style="margin-bottom:.4em"><b>AutoBio / LabUtopia</b>：「我造一个更像真实实验室的<b>考场</b>，看现有 VLA 在这里能考多少分。」——benchmark 层。</p>
+          <p style="margin-bottom:0"><b>LabVLA（+ RoboGenesis）</b>：「我造一条实验室 VLA 的<b>训练流水线</b>，用合成数据和多源数据养一个实验室特化模型。」——引擎层 + recipe 层。</p>
+        </div>
+
+        <h2 id="ebench-position">把 EBench 放进这张地图</h2>
+        <p>现在回头看这本书的主角。EBench 的星座（<a href="../00-orientation/0-2-constellation.html">0.2</a>）用三格分类器重新读一遍，会发现它<b>三格都有布局</b>：</p>
+        <table>
+          <thead><tr><th>格子</th><th>EBench 星座里的对应物</th><th>实验室生态的对应物</th></tr></thead>
+          <tbody>
+            <tr><td>数据引擎</td><td>GenManip rule-based 管线 + teleop 采集 → <b>EBench-Dataset</b>（6,600 episodes）</td><td>RoboGenesis → LabEmbodied-Data</td></tr>
+            <tr><td>benchmark</td><td><b>EBench 本体</b>：GenManip server + EvalClient 契约 + 26 任务打分 + leaderboard</td><td>LabUtopia / AutoBio</td></tr>
+            <tr><td>model recipe</td><td>不做 recipe，接入现成 baseline（π0/π0.5、X-VLA、InternVLA-A1）</td><td>LabVLA recipe</td></tr>
+          </tbody>
+        </table>
+        <p>这个对应关系给你一条现成的类比通道：<b>RoboGenesis 之于 LabEmbodied-Data，恰如 GenManip 数据管线之于 EBench-Dataset</b>——都是「可执行专家逻辑 + 成功过滤」的引擎产物（EBench 的 rule-based 子集正是脚本化专家逻辑跑出来的，<a href="../02-sim/2-3-genmanip.html">2.3</a>/<a href="../02-sim/2-4-lerobot-dataset.html">2.4</a>）；<b>LabUtopia 之于 LabVLA，恰如 EBench 之于它的 baselines</b>。学会一套解剖，两个生态都能读。</p>
+
+        <div class="bridge g103">
+          <div class="c-h"><span class="tag">从 GAMES103 看</span> 引擎与考场共享同一副物理底座</div>
+          <p>注意 RoboGenesis、LabUtopia、GenManip/EBench 全都建在 <b>Isaac Sim</b>（USD + PhysX + RTX，<a href="../02-sim/2-1-isaac-sim.html">2.1</a>）上。你学过的那套刚体 + 约束 + 时间步进，同时是「印教材的印刷机」和「考场的桌椅」——数据引擎用它执行 skill 产轨迹，benchmark 用它 reset 场景做评测。区别只在包装在物理循环外面的那层<b>职责</b>：一个接 exporter，一个接 evaluator。</p>
+        </div>
+
+        <h2 id="recap">这一节你需要带走的 · 下一节</h2>
+        <p>(1) 三格分类器：<b>数据引擎</b>（造训练数据）/ <b>benchmark</b>（考试 + 评分）/ <b>model recipe</b>（训练方法学），新名字先归格；(2) RoboGenesis 的关键性质——<b>不需要预录轨迹，但需要可执行专家逻辑</b>（资产 + skill 库 + workflow + success checker），专家知识从轨迹升维成程序；(3) LabUtopia / AutoBio 是实验室考场，与 LabVLA（引擎+recipe）互补；EBench 星座三格皆有——GenManip 管线是引擎，EBench 本体是考场。</p>
+        <p>格子分清了，就能公平地读成绩单了。下一节是压轴 case study：把 π0.5 和 LabVLA 并排放上解剖台——共性、差异、训练数据、以及在 LabUtopia 考场上那张需要小心解读的成绩单。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

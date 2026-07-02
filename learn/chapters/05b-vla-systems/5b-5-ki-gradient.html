@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Knowledge insulation：梯度到底怎么走 · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="5b-5">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 5.5 · VLA 训练系统 · 5b-5</div>
+        <h1>Knowledge insulation：梯度到底怎么走</h1>
+        <p class="lede"><a href="../05-theory/5-8-discrete-continuous.html">5.8</a> 用「乱流冲击稳定系统」讲过 <span class="term">knowledge insulation</span> 的<b>为什么</b>。但只有直觉容易留下两个悬而未决的疑问：「KI 是不是就是冻结 backbone？」「action expert 是不是看不到 VLM 了？」这一节拿显微镜对准<b>计算图</b>——把前向和反向分开画，逐条 loss 追踪梯度落点。看完你能一句话答对所有 KI 相关的面试题。</p>
+
+        <h2 id="pollution">先复述一遍病灶：后训练为什么会「污染」</h2>
+        <p>VLM backbone 在预训练里攒下的资产是一个组织良好的<b>语义空间</b>：物体识别、空间关系、常识、图文对齐。后训练接上的 action expert 却是<b>随机初始化</b>的——它初期的预测是纯噪声，flow matching loss 于是巨大，反向传播的梯度既大又没方向感。如果放任这股梯度一路回传，backbone 的权重会被迫「为了拟合眼前这批机器人动作」而移动，把攒下的语义空间拉歪——这就是<b>后训练污染</b>（KI 论文实测：知识迁移变差、训练变慢）。</p>
+        <p>问题的精确表述是：<b>我们想让 expert 用 backbone 的表示，但不想让 expert 的误差改写 backbone。</b>「用」发生在前向，「改写」发生在反向——所以解法必须区分前向和反向。</p>
+
+        <h2 id="two-graphs">前向一张图，反向另一张图</h2>
+        <p>这是本节的核心心法：<b>计算图有两副面孔</b>。前向传播决定「谁能读到谁」，反向传播决定「谁能改写谁」——两者可以<b>不对称</b>，而 <span class="term">stop-gradient</span> 正是制造这种不对称的工具。KI 的完整规则只有三条：</p>
+        <ul>
+          <li><b>前向</b>：image/text/state → VLM backbone → hidden prefix → action expert → 连续 chunk。expert <b>完整读取</b> backbone 的 hidden states，KI 开不开都一样。</li>
+          <li><b>反向（CE 类）</b>：VQA / language / annotation CE 与 FAST action-token CE 的梯度<b>照常更新 backbone</b>——这是干净、稳定的监督。</li>
+          <li><b>反向（flow）</b>：flow matching loss 的梯度更新 action expert 和 projection，但在流向 backbone 的路口被 <span class="term">stop-gradient</span> 截断。</li>
+        </ul>
+        <p>亲手开关一下这道闸门：</p>
+
+        <div class="lab">
+          <div class="lab-h"><span class="lab-tag">interactive</span><span class="lab-t">KI 计算图：开关 stop-gradient，看梯度各回各家</span></div>
+          <div class="lab-body" data-widget="ki-gradient"></div>
+          <div class="lab-cap">灰实线是前向（恒定不变）；虚线是反向梯度。切到「KI 关」，看 flow 梯度（青色）直捅 backbone——那就是污染路径。注意蓝色 CE 梯度在两种模式下都在更新 backbone。</div>
+        </div>
+
+        <h2 id="not-freezing">KI ≠ 冻结：一张误解对照表</h2>
+        <p>widget 里最该看清的一点：<b>KI 开着时，backbone 依然在被更新</b>——被 CE 类监督温和地更新。「隔离」隔的是<i>某一条</i>梯度通路，不是<i>所有</i>通路。把常见误解排成一张表：</p>
+        <table>
+          <thead><tr><th>误解</th><th>正确说法</th></tr></thead>
+          <tbody>
+            <tr><td>KI = 冻结 backbone</td><td>不对。backbone 仍被 VQA / language / FAST / annotation 的 CE loss 更新；KI 只阻断 <b>flow loss</b> 这一条回流。冻结是「谁都不许改」，KI 是「只许干净监督改」。</td></tr>
+            <tr><td>KI 是推理技巧</td><td>不对。KI 是<b>训练时</b>机制——推理没有梯度，无所谓隔不隔离。</td></tr>
+            <tr><td>action expert 看不到 VLM</td><td>不对。<b>前向</b>完整可读（expert 全靠 hidden prefix 感知世界）；被切断的只是<b>反向</b>。</td></tr>
+            <tr><td>连续动作训练一定比离散强</td><td>不一定。连续适合实时控制，但随机初始化 + 大梯度使它训练不稳——所以才需要 FAST（先离散教会 backbone）与 KI（隔离乱梯度）保驾。</td></tr>
+            <tr><td>后训练必然破坏 backbone</td><td>不必然，但没有隔离、数据又窄时风险显著升高——KI 论文的对照实验正是证据。</td></tr>
+          </tbody>
+        </table>
+
+        <div class="bridge rl">
+          <div class="c-h"><span class="tag">从 RL 看</span> 你早就用过 stop-gradient：semi-gradient TD 与 target network</div>
+          <p>「故意不让某条梯度流回去」在 RL 里是老朋友。算 TD 目标 $r + \gamma V_\phi(s')$ 时，你<b>不对目标项求导</b>（semi-gradient）——否则价值函数会追着自己跑、训练发散；DQN 的 target network 更进一步，把目标参数整个隔离冻结。KI 的结构一模一样：<b>识别出一条会造成不稳定的梯度通路，手术式切断，其余照常。</b>区别只在动机——TD 是防自举发散，KI 是防新模块的噪声梯度污染预训练资产。</p>
+        </div>
+
+        <h2 id="engineering">从 LabVLA 看 KI 的工程落地</h2>
+        <p>LabVLA 的 KI posttraining 阶段（80k steps）给这套抽象一个可核对的实例：flow matching loss 与 VLM hidden states 之间放 stop-gradient，DiT expert 与 projection 接住全部 flow 梯度；与此同时 LabEmbodied-Data 的<b>结构化标注</b>（subtask、object-state 等）继续走 annotation CE 更新 backbone——所以这一阶段 backbone 学到的是「实验室语义」，而不是「实验室动作的噪声」。两条监督在同一个 batch 里并行，各回各家。</p>
+        <div class="callout note">
+          <div class="c-h">对照阅读：openpi 的现状</div>
+          <p>再提醒一次 5.8 末尾那个 caveat：开源 <span class="term">openpi</span> 目前只带 flow matching head，KI 论文里「离散 FAST 监督 backbone + stop-gradient 隔离连续头」的完整双路训练并非开箱即用。读 <a href="../06-baselines/6-1-openpi.html">6.1</a> 的代码时别找错东西。</p>
+        </div>
+
+        <h2 id="recap">这一节你需要带走的 · 下一节</h2>
+        <p>(1) 计算图有两副面孔：<b>前向决定谁读谁，反向决定谁改谁</b>，stop-gradient 让两者不对称；(2) KI 三条规则——expert 前向可读 hidden states；CE 类梯度照常更新 backbone；flow 梯度只更新 expert / projection，回 backbone 的路被截断；(3) <b>KI ≠ 冻结</b>——backbone 仍被干净监督更新；它和 semi-gradient TD / target network 是同一种手术。</p>
+        <p>至此，「一个 VLA 怎么被训练出来」的机制部分全部讲完。接下来两节换到<b>生态视角</b>：训练数据从哪个系统里造出来？benchmark 和数据引擎是什么关系？RoboGenesis、LabUtopia、AutoBio、EBench 这些名字各自站在生态的哪一层？</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/ki-gradient.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

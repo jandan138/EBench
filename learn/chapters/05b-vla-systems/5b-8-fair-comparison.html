@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>公平比较 VLA：训练暴露与 claim boundary · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="5b-8">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 5.5 · VLA 训练系统 · 5b-8</div>
+        <h1>公平比较 VLA：训练暴露与 claim boundary</h1>
+        <p class="lede">上一节我们对一张成绩单反复追问「能证明什么、不能证明什么」。这一节把那套追问<b>系统化</b>：一张评测前必问的 checklist、一套模型状态的分类学、一个报告模板。它是 <a href="../08-eval-systems/8-1-what-we-measure.html">Part 8</a> 评测科学在 VLA 身上的落地——也是你未来读 leaderboard、写评测报告时可以直接抄的作业。</p>
+
+        <h2 id="ten-questions">评测前必问的 10 个问题</h2>
+        <p>任何「模型 A 在 benchmark B 上得了 X 分」的陈述，价值都取决于这 10 个问题的答案。前五问关于<b>训练暴露</b>（training exposure），后五问关于<b>接口与口径</b>：</p>
+        <div class="code" data-lang="text"><div class="code-h"><span class="fn">VLA 评测 checklist</span><button class="cp">复制</button></div><pre><code> 1. 这是 public checkpoint，还是用本 benchmark（同源）数据 fine-tune 过？
+ 2. 它见过同类任务吗？（protocol/任务模板是否与评测重叠）
+ 3. 它见过同类资产吗？（物体/场景/纹理分布）
+ 4. 它见过同一个仿真器吗？（渲染风格本身就是分布）
+ 5. 它用过同一批 expert trajectories 吗？
+ 6. action space 一致吗？（joint / delta_eef / 绝对 vs 相对——回忆 4.3）
+ 7. observation schema 一致吗？（相机数量、视角、分辨率、本体状态字段）
+ 8. 外面接了 planner / retry wrapper / safety critic 吗？
+ 9. ID / OOD 是怎么定义的？扰动了什么？
+10. 成绩是单一 success rate，还是带失败阶段与过程证据？</code></pre></div>
+        <p>问题 1–5 决定「分数里有多少是<b>见过</b>换来的」；6–8 决定「你在测模型还是在测<b>整个系统</b>」；9–10 决定「这个数字支持多宽的结论」。5b-7 的 LabUtopia 案例里，问题 1 的答案（baseline 全部 public checkpoint、LabVLA 特化训练）直接决定了结论只能落在数据层而非架构层。</p>
+
+        <h2 id="model-states">模型状态五档：同一个名字，五种东西</h2>
+        <p>Leaderboard 上并排的两行「π0.5：52.4」「LabVLA：71.1」，看起来是同类对象——其实未必。按训练暴露把「参赛者」分成五档，报告时必须声明档位：</p>
+        <table>
+          <thead><tr><th>状态</th><th>含义</th><th>报告时怎么写</th></tr></thead>
+          <tbody>
+            <tr><td><b>zero-shot public checkpoint</b></td><td>公开权重直接接入，只做 schema 适配</td><td>「未使用本 benchmark（同域）数据后训练」</td></tr>
+            <tr><td><b>same-domain fine-tuned</b></td><td>用同<b>领域</b>（如实验室仿真）数据训过，但非评测同源</td><td>「使用 X 类数据微调，与评测任务不同源」</td></tr>
+            <tr><td><b>same-benchmark fine-tuned</b></td><td>用与评测高度同源的数据（同任务/同资产/同仿真器）训过</td><td><b>必须显式披露</b>——不披露就是误导</td></tr>
+            <tr><td><b>system-enhanced VLA</b></td><td>裸模型外接 planner / recovery wrapper / safety critic</td><td>报「系统成绩」，不得当作裸 VLA 能力</td></tr>
+            <tr><td><b>oracle / scripted expert</b></td><td>脚本化专家（如 RoboGenesis 的 skill controller）</td><td>只作数据生成器或性能<b>上限参考</b>，不进排名</td></tr>
+          </tbody>
+        </table>
+        <div class="bridge rl">
+          <div class="c-h"><span class="tag">从 RL 看</span> 这就是「和 oracle 比什么」的老规矩</div>
+          <p>RL 论文里你早就习惯了这些区分：报告 agent 成绩时要说清有没有 reward shaping、有没有 curriculum、demo 是不是喂过、对照的是 random policy 还是 oracle。VLA 只是把同一套「实验条件披露」的规矩搬到了模仿学习语境——五档状态表就是 VLA 版的 experimental setup 声明。</p>
+        </div>
+
+        <h2 id="fair-designs">想真正归因架构？对照要这么设计</h2>
+        <p>如果你确实想回答「A 架构是不是比 B 架构好」（而不只是「A 系统在这个考场分高」），对照实验要把训练暴露<b>对齐</b>掉。以 π0.5 vs LabVLA 为例，一套干净的设计是两组对照：</p>
+        <ul>
+          <li><b>对照一（都不喂）</b>：π0.5 public checkpoint vs LabVLA base checkpoint——比较两者的<b>先验</b>。</li>
+          <li><b>对照二（都喂同样的）</b>：π0.5 + LabEmbodied-Data 微调 vs LabVLA + LabEmbodied-Data 微调——同数据、同任务、同 held-out 划分、同 action/obs schema、<b>同梯度步数</b>、同评测 harness。此时的差距才可以（谨慎地）记到架构头上。</li>
+        </ul>
+        <p>LabVLA 论文的 X-VLA 迁移实验（5b-7：+15.0/+19.3pp）正是朝这个方向迈的半步——它证明了数据对<b>外部架构</b>也有效，从反面支撑「主要赢在数据」的解读。完整的双向对照（π0.5 也喂 LabEmbodied-Data）论文没有做，这类「缺失的对照」正是你读论文时要习惯性寻找的空位。</p>
+
+        <h2 id="report-template">给 benchmark 报告的模板</h2>
+        <p>把上面所有内容压缩成一份可执行的东西：报告一个 VLA 成绩时应该附带的结构化披露。这是<b>设计建议</b>（不是 EBench 现有代码的字段），但它的每一项都直接对应前面的 checklist：</p>
+        <div class="code" data-lang="json"><div class="code-h"><span class="fn">model_report_card.yaml（设计建议）</span><button class="cp">复制</button></div><pre><code>model_card:
+  model_name: LabVLA
+  checkpoint: public | private | finetuned
+  backbone: Qwen3-VL-4B-Instruct
+  action_head: DiT flow-matching expert
+  action_horizon: 50
+
+training_exposure:            # ← checklist 问题 1-5
+  used_this_benchmark_data: false
+  used_same_domain_sim_data: true
+  used_same_assets: unknown
+  used_same_tasks: unknown
+  used_same_expert_trajectories: false
+
+interface:                    # ← 问题 6-7
+  action_schema: delta_eef | joint | custom
+  observation_schema: { cameras: [front, wrist], proprioception: true }
+
+system_components:            # ← 问题 8
+  planner: none
+  safety_critic: none
+  recovery_wrapper: none
+
+evaluation:                   # ← 问题 9-10
+  setting: ID | OOD
+  episodes_per_task: 120
+metrics:
+  success_rate: ...
+  step_completion: ...        # 失败在哪一步
+  failure_stage: ...
+  collision_rate: ...</code></pre></div>
+        <div class="callout note">
+          <div class="c-h">和 Part 8 的接线</div>
+          <p>这个模板不是新发明，而是 Part 8 三个原则的 VLA 实例化：<b>training_exposure</b> 就是 <a href="../08-eval-systems/8-6-generalization.html">8.6</a> 的 train/test isolation 与 leakage 审计；<b>system_components</b> 与 <b>metrics</b> 的多字段化对应 <a href="../08-eval-systems/8-1-what-we-measure.html">8.1</a> 的 construct validity（你到底在测什么）；整张卡片就是 <a href="../08-eval-systems/8-4-reproducibility.html">8.4</a> 说的 claim boundary——把「这个数字支持什么结论」写成结构化字段。EBench 自己的 val_train / val_unseen / test 隔离（<a href="../03-methodology/3-2-tracks-splits.html">3.2</a>）正是 training_exposure 思想在 benchmark 侧的镜像。</p>
+        </div>
+
+        <h2 id="recap">这一节你需要带走的 · 也是整个 Part 5.5 的收束</h2>
+        <p>四件事：(1) 评测前先过 10 问——<b>训练暴露五问 + 接口口径五问</b>；(2) 「参赛者」有五档状态（zero-shot / same-domain FT / same-benchmark FT / system-enhanced / oracle），报告必须声明档位；(3) 要归因<b>架构</b>，必须做暴露对齐的双向对照（same-data fine-tune）；(4) 把这一切固化成 report card——它就是 claim boundary 的结构化形态。</p>
+        <p>至此，Part 5.5 的七层地图走完了：从一条样本的形状（5b-1）、VLA 的三层定义（5b-2）、训练账本（5b-3）、数据混合（5b-4）、梯度隔离（5b-5），到生态位（5b-6）、双模型解剖（5b-7）与公平比较（本节）。你现在拥有的不只是理论零件（Part 5），还有<b>整条流水线的系统心智模型</b>。<b>下一 Part，我们把这套心智模型带进真实代码</b>——看 π0/π0.5（openpi）、X-VLA、InternVLA-A1 是怎么落成 EBench 上能跑的 baseline 的，账本上的每一栏都会在代码里找到对应物。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

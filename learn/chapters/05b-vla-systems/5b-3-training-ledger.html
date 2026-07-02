@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>训练账本：预训练、后训练、微调 · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="5b-3">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 5.5 · VLA 训练系统 · 5b-3</div>
+        <h1>训练账本：预训练、后训练、微调</h1>
+        <p class="lede">这是全 Part 最重要的一节。<a href="../05-theory/5-8-discrete-continuous.html">5.8</a> 已经告诉你 π0.5「预训练用 FAST 离散、后训练切 flow matching」——但那是<b>为什么</b>层面的故事。工程上真正要紧的问题是四个：每个阶段<b>输入什么数据、监督什么目标、算什么 loss、更新哪些参数</b>。把这四栏对每个阶段记清楚，就是一本<span class="term-i">训练账本</span>（training ledger）。账本在手，任何 VLA 论文的 training 章节你都能秒读。</p>
+
+        <h2 id="why-ledger">为什么需要账本：「使用了某某技术」是句废话</h2>
+        <p>论文里常见这种句子：「我们采用 FAST tokenization 与 flow matching，并使用 knowledge insulation」。名词全对，信息量近零——因为它没告诉你这些东西<b>发生在哪个阶段、作用在哪个模块上</b>。同一个「flow matching」，出现在预训练还是后训练、梯度回不回 backbone，是完全不同的系统。账本格式强迫把这些说清：</p>
+        <div class="callout">
+          <div class="c-h">账本的四栏</div>
+          <p><b>输入</b>（什么数据进来）→ <b>监督目标</b>（拿什么当标准答案）→ <b>loss</b>（怎么衡量差距、CE 还是 flow MSE）→ <b>更新谁</b>（梯度落在哪些参数上）。第四栏最常被论文一笔带过，却是 5b-5 要讲的 knowledge insulation 的全部内容。</p>
+        </div>
+
+        <h2 id="pi05-ledger">π0.5 的账本</h2>
+        <p>先给熟人立账。π0.5 的训练可以粗略拆成两阶段 + 推理（依 π0.5 论文与 KI 论文口径）：</p>
+        <table>
+          <thead><tr><th>阶段</th><th>输入</th><th>监督目标</th><th>loss</th><th>更新谁</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><b>Pretraining</b><br><span style="color:var(--ink-faint);font-size:.8em">co-training</span></td>
+              <td>多本体机器人数据、~400h 真实家庭移动操作、高层子任务标注、物体检测、web 图文</td>
+              <td>text token / 子任务文本 / <b>FAST 离散 action token</b></td>
+              <td>cross-entropy（next-token）</td>
+              <td><b>VLM backbone</b>（PaliGemma 3B）</td>
+            </tr>
+            <tr>
+              <td><b>Posttraining</b><br><span style="color:var(--ink-faint);font-size:.8em">flow matching</span></td>
+              <td>机器人轨迹（obs → 连续 chunk，$H=50$）</td>
+              <td>flow 速度场（<a href="../05-theory/5-5-flow-matching.html">5.5</a> 那个 $A-\varepsilon$）</td>
+              <td>flow matching MSE；KI 方案下另有离散 CE 继续喂 backbone</td>
+              <td><b>action expert</b>（~300M，随机初始化）；backbone 只被离散 CE 温和更新，flow 梯度被 stop-gradient 挡住</td>
+            </tr>
+            <tr>
+              <td><b>Inference</b></td>
+              <td>当前观测 + 指令</td>
+              <td>先离散解码高层 subtask，再 flow 积分出低层 chunk</td>
+              <td>（无——没有梯度）</td>
+              <td>（不更新任何参数）</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>用一句大白话总结这本账：<b>第一阶段教大脑认识「机器人动作」这门外语（用它熟悉的离散 token 方式教）；第二阶段接上小脑学连续控制（但不许小脑的乱梯度打扰大脑）；推理时先想后做。</b></p>
+
+        <h2 id="labvla-ledger">LabVLA 的账本：100k / 80k / 80k</h2>
+        <p>LabVLA（arXiv 2606.13578）把同一套谱系落得更「有账可查」——论文附录直接给了三列超参表。先处理一个口径问题：</p>
+        <div class="callout warn">
+          <div class="c-h">口径提醒：two-stage 还是三阶段？</div>
+          <p>LabVLA 论文<b>正文</b>说 recipe 是 two-stage（FAST 预训练 → flow matching 后训练）；<b>附录超参表</b>却有三列：VLM pretraining <b>100k</b> steps / KI posttraining <b>80k</b> / finetuning <b>80k</b>。两者不矛盾——正文讲的是 recipe 骨架，附录多出的第三列是<b>下游任务微调</b>。本书按三阶段记账，但标注来源。这种「正文与附录口径并存」在论文里很常见，读的时候要习惯对齐它们。</p>
+        </div>
+        <table>
+          <thead><tr><th>阶段</th><th>steps</th><th>输入数据</th><th>监督目标</th><th>更新谁</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><b>VLM pretraining</b></td><td>100k</td>
+              <td><span class="term">Robointer-VQA</span>、<span class="term">AgiBot World Beta</span>、<span class="term">OXE-AugE</span>（LeRobot 子集 ≈572k trajectories）、<span class="term">DROID</span></td>
+              <td>VQA 答案、language subtask、FAST 离散 action token（absolute targets）——全部 CE</td>
+              <td>Qwen3-VL-4B backbone（此阶段 <b>DiT 根本没实例化</b>）</td>
+            </tr>
+            <tr>
+              <td><b>KI posttraining</b></td><td>80k</td>
+              <td>OXE-AugE + <span class="term">LabEmbodied-Data</span>（RoboGenesis 合成的实验室 rollout）</td>
+              <td>连续 action chunk（$K=50$，absolute targets）的 flow 速度场</td>
+              <td>DiT action expert + projection；flow 梯度 <b>stop-gradient 不回 backbone</b>，backbone 仍被 annotation CE 更新</td>
+            </tr>
+            <tr>
+              <td><b>Finetuning</b></td><td>80k</td>
+              <td>下游任务 / 具体机器人 schema 数据</td>
+              <td><b>delta</b> action targets（注意目标表示切换了）</td>
+              <td>整个 VLA policy 向具体任务对齐</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>三个阶段的角色，还是那个比喻：<b>pretraining 教大脑、posttraining 接小脑、finetuning 把整套神经调到具体任务和具体 action schema 上</b>。注意两个账本级细节：(a) absolute → delta 的目标切换发生在微调阶段——回忆 <a href="5b-1-training-sample.html">5b-1</a>，EBench-Dataset 之所以双通道都存，就是为这种切换留余地；(b) LabVLA 论文附录还坦白了一个教训——<b>微调效果最大的单一因素是 warmstart checkpoint 的数据构成</b>（posttraining 数据更多样，下游 TransportBeaker 从 60% 涨到 86%），而不是 DiT 结构或学习率。数据在账本里的权重，往往大过架构。</p>
+        <p>下面这个部件把两本账合在一处，点着读：</p>
+
+        <div class="lab">
+          <div class="lab-h"><span class="lab-tag">interactive</span><span class="lab-t">训练账本：π0.5 / LabVLA 逐阶段对账</span></div>
+          <div class="lab-body" data-widget="training-ledger"></div>
+          <div class="lab-cap">切换模型、点阶段标签。重点看「更新谁」一栏怎么随阶段变化——✅/◑/🚫 的差别正是 5b-5 的主题。</div>
+        </div>
+
+        <h2 id="why-stages">为什么要分阶段：两种 loss 的「脾气」不同</h2>
+        <p>账本立完，回答一个更根本的问题：为什么不把所有数据、所有 loss 一锅炖？因为两类监督的<b>稳定性完全不同</b>：</p>
+        <ul>
+          <li><b>离散 CE</b>（图文问答、FAST token）：和语言模型预训练同构，梯度温和、训练稳定，天然兼容 VLM 已有的机制——适合动 backbone。</li>
+          <li><b>连续 flow matching</b>：更贴近控制本质，但动作头是<b>随机初始化</b>的新模块，早期梯度大而乱（5.8 的「乱流」比喻），直接回传会把 backbone 的语义空间拉歪。</li>
+        </ul>
+        <p>于是现代 VLA 的阶段设计可以浓缩成四句口诀：<b>先离散、后连续；先语义、后控制；先大脑、后小脑；连续 loss 小心回传。</b>前三句是课程安排（curriculum），第四句就是 knowledge insulation——5b-5 专门拆它。</p>
+
+        <div class="bridge g103">
+          <div class="c-h"><span class="tag">从 GAMES103 看</span> 分阶段 = 先松弛再耦合</div>
+          <p>这套「先把子系统各自调稳、再耦合起来精调」的思路，在仿真里你见过：解一个刚柔耦合系统时，直接全耦合迭代常常发散，实践中先让各子系统分别收敛（松弛），再引入耦合项做联合迭代，稳定得多。VLM pretraining 就是把「大脑」先松弛到位；posttraining 引入耦合（expert 读 hidden states）但用 stop-gradient 限制耦合方向；finetuning 才做全系统的精调。</p>
+        </div>
+
+        <div class="callout note">
+          <div class="c-h">一个来自论文附录的工程注脚</div>
+          <p>LabVLA 把 action 向量 pad 到固定 32 维（单臂机器人常只有 8 维是活跃的）。早期实现把 flow loss 在<b>全部 32 维</b>上平均——padded 维贡献 0 误差却计入分母，等于把 expert 的梯度<b>悄悄缩小 4 倍</b>；修正成只在活跃维平均后，等效学习率变了 4 倍，还得重新调参。这个故事有两个教益：账本的「loss」一栏要精确到<b>在哪些维度上平均</b>；而「按 mask 只训有效字段」正是下一节多源混训的核心原则。</p>
+        </div>
+
+        <h2 id="recap">这一节你需要带走的 · 下一节</h2>
+        <p>(1) 读任何 VLA 训练章节，用四栏账本拆它：<b>输入 / 监督目标 / loss / 更新谁</b>；(2) π0.5 与 LabVLA 是同一谱系的两本账——离散 CE 阶段动 backbone，flow 阶段动 expert（stop-gradient 护脑），微调阶段对齐任务与 schema（LabVLA：100k/80k/80k）；(3) 分阶段的根源是两种 loss 稳定性不同：<b>先离散后连续、先大脑后小脑、连续 loss 小心回传</b>。</p>
+        <p>账本里「输入」一栏我们还没细看：VQA 数据、真实轨迹、仿真 rollout、web 图文——格式各异的数据怎么混进同一个 batch？没有动作标签的样本怎么办？下一节讲多源数据混训。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/training-ledger.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>「VLA」的三层定义：接口 / 架构 / recipe · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="5b-2">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 5.5 · VLA 训练系统 · 5b-2</div>
+        <h1>「VLA」的三层定义：接口 / 架构 / recipe</h1>
+        <p class="lede">读论文时你迟早会撞上这类问题：「<span class="term">RDT</span> 是不是 VLA？」「为什么 <span class="term">OpenVLA</span> 和 π0.5 都叫 VLA，内部却完全不同？」这些争论大多不是事实分歧，而是<b>在三个不同层面各说各话</b>。这一节把「VLA」这个词拆成三层——接口、架构、训练 recipe——以后你听到任何「X 算不算 VLA」的讨论，先问一句：<b>你说的是哪一层？</b></p>
+
+        <h2 id="three-lenses">三层定义，一图看清</h2>
+        <p><a href="../01-problem/1-2-what-is-vla.html">1.2</a> 给过一个工作定义：「拿预训练 VLM 骨干，加上输出 robot action 的能力」。那是<b>架构层</b>的说法。现在我们把镜头拉远，一共有三档焦距：</p>
+        <div class="callout">
+          <div class="c-h">三层定义（由宽到窄）</div>
+          <p style="margin-bottom:.4em"><b>① 接口定义</b>（最宽）：只看输入输出——<span class="term">Vision + Language + state → Action</span>。是个黑盒判据。</p>
+          <p style="margin-bottom:.4em"><b>② 架构定义</b>（较窄）：盒子里必须是「<span class="term">pretrained VLM backbone</span> + <span class="term">action expert / head</span>」——先有视觉语言大脑，再接动作小脑。</p>
+          <p style="margin-bottom:0"><b>③ recipe 定义</b>（最细）：连训练流程都要像——多源数据混训、<span class="term">FAST</span> 离散预训练、连续 <span class="term">flow matching</span> 后训练、<span class="term">knowledge insulation</span>、任务微调这一整套谱系。</p>
+        </div>
+
+        <h2 id="interface">第一层：接口——几乎大家都是 VLA</h2>
+        <p>按接口定义，只要一个模型吃图像 + 指令 + 本体状态、吐连续动作（或 action chunk），它就是 VLA。这一层的判据在 EBench 语境里再具体不过：<b>能不能装进 <a href="../04-engine/4-2-evalclient.html">4.2</a> 的 <span class="term">EvalClient</span> 契约</b>——`obs` 进、`action` 出。π0、π0.5、X-VLA、InternVLA-A1、LabVLA、RDT、OpenVLA、RT-2……全部通过。接口定义有用（它定义了评测的公平接入面），但它<b>不区分内部构造</b>——就像「四个轮子会跑」既包括燃油车也包括电车。</p>
+
+        <h2 id="architecture">第二层：架构——大脑 + 小脑，还是条件生成器？</h2>
+        <p>把盒子打开，差异出现了。典型的「窄定义 VLA」是<b>两段式</b>：一个在 web 图文上预训练过的 VLM 负责「理解世界」，一个动作模块负责「生成控制」。π0.5（PaliGemma 3B + ~300M action expert，<a href="../05-theory/5-7-action-expert.html">5.7</a>）和 LabVLA（Qwen3-VL-4B + DiT action expert）都是教科书样本。</p>
+        <p>但 <span class="term">RDT-1B</span>（Robotics Diffusion Transformer，清华 TSAIL，1.2B 参数）走的是另一条路：它的<b>主体就是一个 Diffusion Transformer 策略</b>——在 46 个数据集、100 万+ episodes 上预训练，用 Physically Interpretable Unified Action Space 统一各种本体的动作表示，一次预测 64 步动作。图像和语言在这里是<b>扩散生成的条件</b>，而不是「先由 VLM 大脑读懂、再交给小脑」的两段结构。一句话对比：</p>
+        <div class="callout note">
+          <div class="c-h">两条架构路线</div>
+          <p style="margin-bottom:.4em"><b>π0.5 / LabVLA</b>：先用视觉语言大脑理解世界，再由动作专家生成动作——<span class="term-i">VLM-centric</span>。</p>
+          <p style="margin-bottom:0"><b>RDT</b>：一个条件扩散动作轨迹生成器，图像和语言是生成动作的条件——<span class="term-i">policy-centric</span>。所以说 RDT 是「<span class="term">VLA-style</span> robot policy」比说它是窄义 VLA 更准确。</p>
+        </div>
+        <p>还有第三种老路线：<span class="term">RT-2</span> / <span class="term">OpenVLA</span> 把动作<b>离散成 token、当语言吐</b>——架构上是纯 VLM，动作只是词表里多出来的一些「词」。<a href="../05-theory/5-8-discrete-continuous.html">5.8</a> 讲过 π0 为什么放弃这条路（自回归太慢、分箱损精度，不适合高频灵巧控制）。</p>
+
+        <h2 id="recipe">第三层：recipe——π0.5 和 LabVLA 惊人地像</h2>
+        <p>再把焦距推到最细：<b>怎么训练</b>。有趣的事情发生了——目标场景天差地别的 π0.5（开放世界家庭）和 LabVLA（科学实验室），训练配方几乎同源：</p>
+        <div class="code" data-lang="text"><div class="code-h"><span class="fn">共享的 recipe 谱系</span><button class="cp">复制</button></div><pre><code>VLM backbone
++ 多源机器人 / 图文数据混训
++ FAST action token 离散预训练（让 backbone 先「懂动作」）
++ 连续 action expert（flow matching 后训练）
++ knowledge insulation（stop-gradient 护住 backbone）
++ 任务微调</code></pre></div>
+        <p>这说明「recipe」已经开始<b>标准化、可迁移</b>——就像 CV 里的「ImageNet 预训练 + 下游微调」范式。把三层放进一张表：</p>
+        <table>
+          <thead><tr><th>模型</th><th>① 接口是 VLA？</th><th>② 架构路线</th><th>③ 训练 recipe</th></tr></thead>
+          <tbody>
+            <tr><td><b>π0.5</b></td><td>是</td><td>VLM（PaliGemma 3B）+ action expert</td><td>FAST 预训练 + flow matching 后训练 + KI</td></tr>
+            <tr><td><b>LabVLA</b></td><td>是</td><td>VLM（Qwen3-VL-4B）+ DiT action expert</td><td>π0.5 同谱系 recipe + 实验室合成数据</td></tr>
+            <tr><td><b>RDT</b></td><td>是（VLA-style）</td><td>Diffusion Transformer 策略本体，图文为条件</td><td>扩散式动作轨迹生成，统一动作空间预训练</td></tr>
+            <tr><td><b>OpenVLA / RT-2 系</b></td><td>是</td><td>纯 VLM，动作离散成词表 token</td><td>action-as-token 自回归（language-style）</td></tr>
+          </tbody>
+        </table>
+
+        <div class="bridge rl">
+          <div class="c-h"><span class="tag">从 RL 看</span> 「policy」这个词也有一模一样的三义性</div>
+          <p>你其实早就习惯这种分层了。RL 里说「policy」，可以指<b>接口</b>（任何 $\pi: s \to a$ 的映射）、可以指<b>参数化</b>（高斯 actor？确定性 DDPG actor？还是 Q 函数隐式诱导的贪心策略？），也可以指<b>训练法</b>（policy gradient 训的、TD 训的、还是 BC 训的）。「SAC 的 policy 和 DQN 的 policy 是不是一回事」——和「RDT 是不是 VLA」是同构的问题：接口层是，参数化和训练法不是。</p>
+        </div>
+
+        <h2 id="why-it-matters">为什么这个分层重要</h2>
+        <p>因为三层对应三种不同的<b>结论边界</b>。接口层相同 → 可以进同一个 benchmark 公平接入（EBench 正是这么做的）；架构层不同 → 性能差异可能来自结构先验（比如 VLM 带来的 web 知识 vs 扩散策略的动作多模态表达）；recipe 层不同 → 差异可能只是<b>数据和训练暴露</b>的差异，和架构无关。5b-7 对比 π0.5 和 LabVLA、5b-8 讨论公平比较时，我们会反复用到这个分层：<b>「谁赢了」必须说清是在哪一层赢的</b>。</p>
+
+        <h2 id="recap">这一节你需要带走的 · 下一节</h2>
+        <p>(1) 「VLA」有三层定义：<b>接口</b>（V+L+state→action，EvalClient 契约就是它的化身）、<b>架构</b>（VLM 大脑 + 动作小脑）、<b>recipe</b>（FAST→flow→KI 谱系）；(2) RDT 在接口层是 VLA-style，架构层是<b>条件扩散策略</b>而非「VLM+expert」；(3) π0.5 与 LabVLA 在 recipe 层高度同源——这层的标准化正是本 Part 的主线索。</p>
+        <p>下一节是全 Part 的核心：把 recipe 这层彻底摊开，给 π0.5 和 LabVLA 各立一本<b>训练账本</b>——每个阶段输入什么、监督什么、用什么 loss、更新谁。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

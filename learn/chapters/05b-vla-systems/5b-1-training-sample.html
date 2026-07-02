@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>一条训练样本长什么样：episode → 切片 · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="5b-1">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 5.5 · VLA 训练系统 · 5b-1</div>
+        <h1>一条训练样本长什么样：episode → 切片</h1>
+        <p class="lede">Part 5 把 VLA 的「发动机」拆完了：你知道了 <span class="term">action chunking</span> 为什么存在、<span class="term">flow matching</span> 怎么把噪声积分成动作。但有一个问题我们一直没有正面回答：<b>这台发动机吃的「油」到底长什么样？</b>一条训练样本包含哪些字段？一条成功的 rollout 贡献几条样本？这一 Part 我们不再讲新的数学，而是把 VLA 从数据到评测的<b>整条训练流水线</b>解剖一遍——从最小的单位开始：一条样本。</p>
+
+        <h2 id="the-map">先给你整个 Part 的地图</h2>
+        <p>接下来八节会沿一条固定的路线走：<b>数据从哪来 → 怎么切成样本 → 用什么表示 → 喂给哪个模块 → 用什么 loss 更新谁 → 部署时怎么解码 → 最后怎么评测</b>。这七层就是任何一个现代 VLA 系统的完整骨架。下面这个部件是全 Part 的地图——每一层都给出 <span class="term">π0.5</span>（你在 <a href="../05-theory/5-8-discrete-continuous.html">5.8</a> 认识的开放世界 VLA）和 <span class="term">LabVLA</span>（一个实验室特化 VLA，本 Part 的第二主角，5b-7 详拆）的实例。现在快速点一遍建立框架，读完全 Part 再回来点一遍，感受会完全不同。</p>
+
+        <div class="lab">
+          <div class="lab-h"><span class="lab-tag">interactive</span><span class="lab-t">VLA 训练系统的七层骨架</span></div>
+          <div class="lab-body" data-widget="vla-stack"></div>
+          <div class="lab-cap">点每一层看它装什么，以及 π0.5 / LabVLA 在这一层的实例。本节聚焦 L1–L2（数据与样本），5b-3/5b-4 讲 L3–L5，5b-7/5b-8 讲 L6–L7。</div>
+        </div>
+
+        <h2 id="misconception">先拆一个常见误区</h2>
+        <p>很多初学者对「用成功数据训练 VLA」的想象是这样的：</p>
+        <div class="callout warn">
+          <div class="c-h">误区</div>
+          <p>「VLA 后训练 = 给模型看<b>最终成功的画面</b> + 一条轨迹，模型就学会了成功。」</p>
+        </div>
+        <p>这个说法把监督信号想错了。模型<b>从来不学「成功画面」</b>——最后一帧微波炉门关上的样子对控制毫无直接用处。真正的监督信号是：<b>在成功 episode 的每一个时刻 $t$，专家接下来是怎么动的</b>。形式化写出来，一条训练样本是：</p>
+        <div class="math-block">$$\underbrace{(o_t,\; q_t,\; \ell)}_{\text{输入：图像、状态、指令}} \;\longrightarrow\; \underbrace{A_t = [a_t, a_{t+1}, \dots, a_{t+H-1}]}_{\text{目标：未来 } H \text{ 步专家动作}}$$</div>
+        <ul>
+          <li>$o_t$：当前时刻的图像观测（通常多相机 RGB）。</li>
+          <li>$q_t$：机器人本体状态——关节角、夹爪、末端位姿。</li>
+          <li>$\ell$：语言指令，整条 episode 共用一句。</li>
+          <li>$A_t$：从 $t$ 时刻起往后 $H$ 步的 <span class="term">action chunk</span>——正是 <a href="../05-theory/5-1-action-chunking.html">5.1</a> 那个 chunk。π0/π0.5 取 $H=50$，<span class="term">RDT</span> 预测 64 步，LabVLA 取 $K=50$。</li>
+        </ul>
+        <p>换句话说，<a href="../05-theory/5-1-action-chunking.html">5.1</a> 讲 chunk 时你看到的是<b>推理端</b>（一次吐 50 步）；现在你看到它的<b>训练端</b>——监督目标本身就是按 chunk 组织的。两端严丝合缝。</p>
+
+        <div class="bridge rl">
+          <div class="c-h"><span class="tag">从 RL 看</span> 和 replay buffer 里的 (s, a) 对比一下</div>
+          <p>在 RL 里你存的是 $(s, a, r, s')$ 转移，一步一条；训练信号来自 reward。这里存的是<b>专家演示</b>，一条样本是 $(o_t, q_t, \ell) \to a_{t:t+H}$——没有 $r$、没有 $s'$、目标是一整段动作。而且注意分布：replay buffer 混着各种策略的行为，而这里<b>全部来自成功的专家轨迹</b>——这正是 5.1 讲过的 covariate shift 的根源（训练分布 = 专家分布，部署分布 = 学生自己走出来的分布）。</p>
+        </div>
+
+        <h2 id="slicing">一条 episode 切出的不是一条样本</h2>
+        <p>接着是第二个关键认知：episode 和样本<b>不是一比一</b>的关系。以 EBench 的 long-horizon 任务 <span class="term-i">Microwave</span> 为例（开微波炉 → 放蛋挞 → 关门），一条成功 episode 从 $t=0$ 录到 $t=T$，每一帧都存了观测和动作。训练时，我们把它<b>逐时刻切片</b>：</p>
+        <div class="code" data-lang="text"><div class="code-h"><span class="fn">episode → training samples（示意）</span><button class="cp">复制</button></div><pre><code>sample @ t=0:   input: image_0 + state_0 + instruction   target: action_0  … action_49
+sample @ t=1:   input: image_1 + state_1 + instruction   target: action_1  … action_50
+sample @ t=2:   input: image_2 + state_2 + instruction   target: action_2  … action_51
+...
+sample @ t=T-1: input: image_T-1 + ...                   target: action_T-1 …（不足 H 步则 pad/mask）</code></pre></div>
+        <p>所以一条长度 $T$ 的 rollout 大约贡献 $T$ 条 $(obs,\ \text{chunk})$ 样本。EBench-Dataset 的 6,600 条 episodes 合计约 986 万帧——按这个切法，可用的监督样本数量级是<b>百万级</b>，而不是六千级。这就是为什么录数据时「每一帧都要存好」：每一帧都是一个潜在的训练样本起点。亲手切一下：</p>
+
+        <div class="lab">
+          <div class="lab-h"><span class="lab-tag">interactive</span><span class="lab-t">episode 切片器：拖动 t，看每条样本怎么切</span></div>
+          <div class="lab-body" data-widget="episode-slicer"></div>
+          <div class="lab-cap">拖「切片起点 t」或直接点格子，蓝色是这条样本的输入观测，青色是它的 action chunk 目标；调 $H$ 看 chunk 覆盖范围。注意切到尾部时 chunk 会「不够长」——工程上用 pad + mask 处理。</div>
+        </div>
+
+        <h2 id="ebench-shape">用 EBench 自己的数据对号入座</h2>
+        <p>这个抽象格式你其实已经见过实物了。回忆 <a href="../02-sim/2-4-lerobot-dataset.html">2.4</a>：EBench-Dataset 是 LeRobot v2.1 格式，每帧的字段正好就是上面公式里的三类东西：</p>
+        <table>
+          <thead><tr><th>公式里的量</th><th>EBench-Dataset 里的实物</th></tr></thead>
+          <tbody>
+            <tr><td>$o_t$ 图像观测</td><td><span class="term">video.top/left/right/overlook_view</span>（4 相机 480×640，AV1-MP4，15 fps 录制）</td></tr>
+            <tr><td>$q_t$ 本体状态</td><td><span class="term">state.joints</span>(12)、<span class="term">state.gripper</span>(4)、<span class="term">state.base</span>(3)、<span class="term">state.ee_pose</span>(14)</td></tr>
+            <tr><td>$\ell$ 指令</td><td><span class="term">meta/tasks.jsonl</span>（每任务多套指令释义）</td></tr>
+            <tr><td>$a_t$ 动作</td><td><span class="term">action.joints</span>/<span class="term">action.gripper</span>/<span class="term">action.base</span> 及各自 <span class="term">_delta</span> 增量通道</td></tr>
+          </tbody>
+        </table>
+        <p>注意 <span class="term">_delta</span> 通道的存在：同一个物理动作既存了<b>绝对值</b>也存了<b>增量</b>表示。哪个当训练目标是 recipe 的选择——比如 LabVLA 预训练/后训练用 absolute targets、微调阶段切到 delta targets（5b-3 会展开）。数据集把两种都存好，就是把选择权留给训练方。</p>
+
+        <div class="callout note">
+          <div class="c-h">设计建议：一个「可训练」的 benchmark 应该导出什么</div>
+          <p>反过来看，这也定义了对评测/数据系统的要求。如果一个 benchmark 希望自己的 rollout 未来能喂给 VLA 训练，只存视频和成功率是<b>不够</b>的，至少要每帧存齐：<span class="term">instruction</span>、多相机帧、本体状态、<b>实际执行的动作</b>、物体状态，外加 episode 级的 success/failure 与失败原因、（最好有）子任务阶段标注。这是设计建议而非 EBench 现有代码事实——但 EBench-Dataset 的字段设计已经基本对齐这个标准。</p>
+        </div>
+
+        <h2 id="recap">这一节你需要带走的 · 下一节</h2>
+        <p>(1) VLA 的监督信号不是「成功画面」，而是<b>每个时刻的观测 → 往后 $H$ 步的专家动作</b>，一条样本 = $(o_t, q_t, \ell) \to a_{t:t+H}$；(2) 一条 episode 逐时刻切片，贡献 ~$T$ 条样本——6,600 episodes 是百万级样本；(3) EBench-Dataset 的字段正是这个格式的实物，absolute/delta 双通道把表示选择权留给 recipe。</p>
+        <p>但「VLA」这个词本身，其实比这条样本格式模糊得多——π0.5 是 VLA，RDT 也自称 VLA-style，它们内部却很不一样。下一节我们把「VLA」这个词拆成<b>三层定义</b>，你会发现很多争论只是在不同层面各说各话。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/vla-stack.js"></script>
+  <script src="../../assets/js/widgets/episode-slicer.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

@@ -83,6 +83,19 @@ huggingface-cli download InternRobotics/EBench-Dataset --local-dir saved/dataset
           <li>GenManip — arXiv <a href="https://arxiv.org/abs/2506.10966" target="_blank" rel="noopener">2506.10966</a></li>
         </ul>
 
+        <h2 id="vla-systems">Part 5.5 延伸阅读（LabVLA 生态）</h2>
+        <p>Part 5.5 用 <span class="term">π0.5</span> 与 <span class="term">LabVLA</span> 做贯穿案例。下列链接不在 EBench baseline 里，但是理解「数据引擎 / benchmark / recipe」三层生态位的常用外部参照（详见 <a href="../05b-vla-systems/5b-6-ecosystem.html">5b-6</a>）。</p>
+        <table>
+          <thead><tr><th>名称</th><th>链接</th><th>生态位</th></tr></thead>
+          <tbody>
+            <tr><td>LabVLA</td><td>arXiv <a href="https://arxiv.org/abs/2606.13578" target="_blank" rel="noopener">2606.13578</a> · <a href="https://zjunlp.github.io/LabVLA/" target="_blank" rel="noopener">项目页</a> · <a href="https://huggingface.co/zjunlp/LabVLA-5B-Base" target="_blank" rel="noopener">🤗 checkpoint</a></td><td>model recipe（实验室特化 VLA）</td></tr>
+            <tr><td>RoboGenesis</td><td>见 LabVLA 论文 / 项目页</td><td>data engine（LabEmbodied-Data 合成器）</td></tr>
+            <tr><td>LabUtopia</td><td>arXiv <a href="https://arxiv.org/abs/2505.22634" target="_blank" rel="noopener">2505.22634</a> · <a href="https://rui-li023.github.io/labutopia-site/" target="_blank" rel="noopener">项目页</a></td><td>benchmark（LabVLA 的考场）</td></tr>
+            <tr><td>AutoBio</td><td>arXiv <a href="https://arxiv.org/abs/2505.14030" target="_blank" rel="noopener">2505.14030</a></td><td>benchmark（生物实验室仿真评测）</td></tr>
+            <tr><td>RDT-1B</td><td>arXiv <a href="https://arxiv.org/abs/2410.07864" target="_blank" rel="noopener">2410.07864</a> · <a href="https://github.com/thu-ml/RoboticsDiffusionTransformer" target="_blank" rel="noopener">GitHub</a></td><td>recipe 对照样本（扩散 Transformer，非 VLM+expert）</td></tr>
+          </tbody>
+        </table>
+
         <h2 id="next">接着查</h2>
         <p>术语回查去 <a href="a-1-glossary.html">a-1</a>，obs/action/gmp 速查去 <a href="a-3-cheatsheet.html">a-3</a>，带标题的完整文献去 <a href="a-4-references.html">a-4</a>。</p>
       </article>

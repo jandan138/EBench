@@ -24,8 +24,8 @@ cd learn && python3 -m http.server 8000
 - `content.js` —— 导航单一真相源（章节、上下页、搜索都由它驱动）
 - `assets/css/book.css` —— 设计系统（主题、三栏布局、组件）
 - `assets/js/book.js` —— 运行时（导航、主题、进度、搜索、代码高亮、KaTeX、widget 自动挂载）
-- `assets/js/widgets/` —— 10 个交互部件 + 注册表（`data-widget` 自动发现）
-- `chapters/` —— 9 个 Part + Appendix，共 45 节
+- `assets/js/widgets/` —— 15 个交互部件 + 注册表（`data-widget` 自动发现）
+- `chapters/` —— 10 个 Part + Appendix，共 53 节（Part 5.5 为 VLA 训练系统专题）
 - `DESIGN.md` —— 设计文档；`_AGENT_BRIEF.md` —— 写作时用的事实库与风格规范；`_template.html` —— 新章节样板
 
 ## 加新章节

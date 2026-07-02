@@ -53,8 +53,30 @@
             <tr><td>rectified flow</td><td>—</td><td>线性高斯（OT）概率路径下的 flow matching，路径近直线、推理可极少步积分（π0 10 步）。</td></tr>
             <tr><td>compounding error</td><td>—</td><td>单步误差把机器人推到没见过的状态、误差滚雪球，action chunking 要对抗的问题（<a href="../05-theory/5-1-action-chunking.html">5.1</a>）。</td></tr>
             <tr><td>covariate shift</td><td>—</td><td>策略遇到的状态分布偏离训练分布；compounding error 的根因。</td></tr>
-            <tr><td>knowledge insulation</td><td>—</td><td>训 action expert 时停止其梯度回流 backbone（stop-gradient），保住 VLM 的 web 知识、加快训练（arXiv 2505.23705，<a href="../05-theory/5-8-discrete-continuous.html">5.8</a>）。</td></tr>
+            <tr><td>knowledge insulation</td><td>—</td><td>训 action expert 时停止其梯度回流 backbone（stop-gradient），保住 VLM 的 web 知识、加快训练（arXiv 2505.23705，<a href="../05-theory/5-8-discrete-continuous.html">5.8</a>、<a href="../05b-vla-systems/5b-5-ki-gradient.html">5b-5</a>）。</td></tr>
             <tr><td>FAST tokenizer</td><td>FAST action tokenizer</td><td>把连续动作离散化的 tokenizer，π0.5 预训练阶段用它做交叉熵 next-token（<a href="../05-theory/5-8-discrete-continuous.html">5.8</a>）。</td></tr>
+          </tbody>
+        </table>
+
+        <h2 id="g-pipeline">训练系统与数据生态（Part 5.5）</h2>
+        <table>
+          <thead><tr><th>术语</th><th>英文全称</th><th>一句话解释</th></tr></thead>
+          <tbody>
+            <tr><td>training exposure</td><td>—</td><td>模型考前「见过什么」的总称：是否吃过本 benchmark / 同域数据、同类资产任务等，公平比较的第一变量（<a href="../05b-vla-systems/5b-8-fair-comparison.html">5b-8</a>）。</td></tr>
+            <tr><td>training ledger</td><td>—</td><td>本书用的账本读法：每个训练阶段答四问——输入 / 监督 / loss / 更新谁（<a href="../05b-vla-systems/5b-3-training-ledger.html">5b-3</a>）。</td></tr>
+            <tr><td>pretraining / posttraining / finetuning</td><td>—</td><td>VLA 常见三阶段：CE 教 backbone 动作语义 → flow 训 action expert（KI 隔离）→ 对齐具体任务与 schema（<a href="../05b-vla-systems/5b-3-training-ledger.html">5b-3</a>）。</td></tr>
+            <tr><td>data engine</td><td>数据引擎</td><td>自动生成训练数据的系统：造场景→执行→成功过滤→导出；与 benchmark（考场）、recipe（配方）是三个生态位（<a href="../05b-vla-systems/5b-6-ecosystem.html">5b-6</a>）。</td></tr>
+            <tr><td>LabVLA</td><td>—</td><td>实验室特化 VLA：Qwen3-VL-4B backbone + DiT action expert，FAST→flow→KI recipe（arXiv 2606.13578，<a href="../05b-vla-systems/5b-7-pi05-vs-labvla.html">5b-7</a>）。</td></tr>
+            <tr><td>RoboGenesis</td><td>—</td><td>LabVLA 的 Isaac Sim 数据引擎：资产生成→agentic workflow→成功过滤导出；不需预录轨迹、需可执行专家逻辑（<a href="../05b-vla-systems/5b-6-ecosystem.html">5b-6</a>）。</td></tr>
+            <tr><td>LabEmbodied-Data</td><td>—</td><td>RoboGenesis 导出的实验室演示语料：多相机 + 指令 + state + action + 结构化标注。</td></tr>
+            <tr><td>LabUtopia</td><td>—</td><td>实验室仿真评测套件（LabSim+LabScene+LabBench，30 任务 5 层级），LabVLA 的考场（arXiv 2505.22634）。</td></tr>
+            <tr><td>AutoBio</td><td>—</td><td>生物实验室仿真器 + benchmark：仪器数字化、专用物理插件、透明液体渲染，评现有 VLA（arXiv 2505.14030）。</td></tr>
+            <tr><td>RDT</td><td>Robotics Diffusion Transformer</td><td>1.2B 扩散 Transformer 策略：图像/语言作条件、预测 64 步 chunk——接口层是 VLA、架构层不是「VLM+expert」（arXiv 2410.07864，<a href="../05b-vla-systems/5b-2-vla-definitions.html">5b-2</a>）。</td></tr>
+            <tr><td>DiT</td><td>Diffusion Transformer</td><td>扩散/流模型常用的 Transformer 骨架；LabVLA 的 action expert 采用此结构。</td></tr>
+            <tr><td>OXE</td><td>Open X-Embodiment</td><td>大规模跨本体真实机器人数据集集合；LabVLA 用其增强子集 OXE-AugE（LeRobot 格式 ≈572k 轨迹）。</td></tr>
+            <tr><td>DROID / AgiBot World</td><td>—</td><td>大规模真实机器人操作数据集，VLA 预训练常客（<a href="../05b-vla-systems/5b-4-data-mixture.html">5b-4</a>）。</td></tr>
+            <tr><td>zero-shot public checkpoint</td><td>—</td><td>模型状态五档之一：直接拿公开权重来评，未用本 benchmark 数据后训练（<a href="../05b-vla-systems/5b-8-fair-comparison.html">5b-8</a>）。</td></tr>
+            <tr><td>ID / OOD</td><td>in- / out-of-distribution</td><td>评测设置：贴近训练分布 vs 故意扰动物体位置/外观/场景以测泛化。</td></tr>
           </tbody>
         </table>
 

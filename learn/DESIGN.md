@@ -27,7 +27,7 @@
 
 ## 2. 信息架构（章节）
 
-9 个 Part + Appendix，共 45 节。详见 `content.js`（导航单一真相源）。
+10 个 Part + Appendix，共 53 节。详见 `content.js`（导航单一真相源）。
 
 - **Part 0 序章**：why EBench / repo constellation / 怎么读这本书
 - **Part 1 问题域**：RL→behavior cloning（生成式策略）/ 什么是 VLA / `lift2` 本体
@@ -35,6 +35,7 @@
 - **Part 3 benchmark 方法论**：capability profile 愿景 / 3 tracks×3 splits / 26 tasks 与打分 / 泛化轴 / 指标与诊断报告
 - **Part 4 评测引擎(client-server)**：为何 client-server / EvalClient 契约 / action 向量解剖 / chunk vs step、receding horizon / gmp CLI 与 online challenge
 - **Part 5 VLA 理论**：compounding error→action chunking / flow matching 数学 / action expert / 离散 vs 连续解码、FAST、knowledge insulation
+- **Part 5.5 VLA 训练系统**：训练样本切片 / VLA 三层定义 / 训练账本（预训练·后训练·微调）/ 多源数据混合 / KI 梯度计算图 / 数据引擎·benchmark·recipe 生态位 / π0.5 vs LabVLA case study / 公平比较与训练暴露披露
 - **Part 6 baseline 全链路**：π0/π0.5(openpi) / X-VLA(soft prompt+domain_id) / InternVLA-A1(MoT+visual foresight) / 三者对比
 - **Part 7 实战 capstone**：接入自己的模型 / 本地 vs online / 追踪一个 episode 全程
 - **Part 8 评测系统通论**：construct validity / 五层解剖 / contract / reproducibility / aggregation / generalization
@@ -63,9 +64,14 @@ learn/
 │           ├── task-taxonomy.js
 │           ├── moe-attention.js
 │           ├── aggregation-pitfall.js
-│           └── eval-anatomy.js
+│           ├── eval-anatomy.js
+│           ├── vla-stack.js
+│           ├── episode-slicer.js
+│           ├── training-ledger.js
+│           ├── data-loss-map.js
+│           └── ki-gradient.js
 └── chapters/
-    ├── 00-orientation/ … 08-eval-systems/ , appendix/
+    ├── 00-orientation/ … 05b-vla-systems/ … 08-eval-systems/ , appendix/
 ```
 
 ### 3.1 相对 ConvertAsset/learn 的改进（去其糟粕）
@@ -94,6 +100,11 @@ learn/
 8. **moe-attention**：image/text token 与 action token 经不同权重路由、attention mask 可视化。
 9. **aggregation-pitfall**：展示指标聚合、加权与 Simpson's paradox 风险。
 10. **eval-anatomy**：评测系统五层通用骨架与隐式/显式实现对照。
+11. **vla-stack**：VLA 训练系统七层总图（数据→样本→表示→模型→训练→推理→评测），逐层 π0.5/LabVLA 实例。
+12. **episode-slicer**：episode 时间轴拖动 t / 调 H，看 (obs, action chunk) 训练样本怎么切。
+13. **training-ledger**：π0.5 / LabVLA 训练账本——点阶段看输入/监督/loss/更新谁。
+14. **data-loss-map**：数据源→表示→loss→更新模块通路高亮；无动作标签的数据点不亮 expert。
+15. **ki-gradient**：knowledge insulation 计算图，开关 stop-gradient 对比梯度回流路径。
 
 ## 5. 构建顺序
 

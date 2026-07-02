@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Case study：π0.5 vs LabVLA · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="5b-7">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part 5.5 · VLA 训练系统 · 5b-7</div>
+        <h1>Case study：π0.5 vs LabVLA</h1>
+        <p class="lede">压轴案例来了。前六节的所有工具——三层定义、训练账本、数据混合、KI、生态位——现在一次性用上，把 <span class="term">π0.5</span> 和 <span class="term">LabVLA</span> 并排放上解剖台。目的<b>不是裁判谁「绝对更强」</b>（你马上会看到这个问题本身就问错了），而是通过一对「同 recipe、不同世界」的模型，把 VLA 系统的迁移理解焊牢。</p>
+
+        <h2 id="one-liner">一句话定位</h2>
+        <div class="callout">
+          <div class="c-h">两个模型，两个世界</div>
+          <p style="margin-bottom:.4em"><b>π0.5</b>：通用<b>开放世界 / 家庭</b> VLA——走进训练中从未见过的家，清厨房、铺床、挂毛巾；强调对新场景、新物体、长流程的泛化（<a href="../05-theory/5-8-discrete-continuous.html">5.8</a>）。</p>
+          <p style="margin-bottom:0"><b>LabVLA</b>：<b>科学实验室特化</b> VLA——烧杯、加热台、仪器门、倒液、按钮；强调固定 protocol workflow 的可靠执行（arXiv 2606.13578）。</p>
+        </div>
+
+        <h2 id="structure">训练结构对比：recipe 同源，器官不同</h2>
+        <p>用 5b-2 的三层定义扫一遍：接口层两者都是标准 VLA；recipe 层高度同源（FAST 预训练 → flow 后训练 → KI）；差异集中在架构选型与数据来源：</p>
+        <table>
+          <thead><tr><th>维度</th><th>π0.5</th><th>LabVLA</th></tr></thead>
+          <tbody>
+            <tr><td>目标场景</td><td>开放世界家庭、移动操作、长流程整理</td><td>科学实验室、固定 protocol、仪器容器操作</td></tr>
+            <tr><td>backbone</td><td>PaliGemma（3B，π0 系）</td><td>Qwen3-VL-4B-Instruct</td></tr>
+            <tr><td>action head</td><td>action expert（~300M，Transfusion 式）</td><td><span class="term">DiT</span> action expert</td></tr>
+            <tr><td>动作生成</td><td>flow matching 连续 chunk</td><td>flow matching 连续 chunk</td></tr>
+            <tr><td>action horizon</td><td>$H=50$</td><td>$K=50$</td></tr>
+            <tr><td>离散阶段</td><td>FAST action token 预训练</td><td>FAST action token 预训练（100k steps）</td></tr>
+            <tr><td>梯度隔离</td><td>KI（stop-gradient）</td><td>KI posttraining（80k steps）</td></tr>
+            <tr><td>高层语义</td><td>high-level subtask 预测（分层推理）</td><td>protocol / skill / object-state 结构化标注</td></tr>
+            <tr><td>数据引擎</td><td>无专用引擎，靠真实数据 co-training</td><td><b>RoboGenesis 是核心贡献</b>（5b-6）</td></tr>
+          </tbody>
+        </table>
+
+        <h2 id="data">训练数据对比：一个靠采，一个靠造</h2>
+        <p>最深刻的差异在数据层。π0.5 的开放世界泛化建立在<b>真实数据的广度</b>上：多本体 + ~400h 真实家庭移动操作 + web 共训，泛化随场景数 scaling（~100 个场景饱和，5.8 讲过）。LabVLA 的实验室能力建立在<b>合成数据的针对性</b>上：通用先验来自公开数据集（DROID、AgiBot、OXE-AugE ≈572k trajectories），实验室领域知识全部来自 RoboGenesis 合成的 LabEmbodied-Data。</p>
+        <div class="callout warn">
+          <div class="c-h">别直接比数据量——单位就没对齐</div>
+          <p>π0.5 的「~400 小时」、OXE-AugE 的「572k trajectories」、EBench 的「6,600 episodes / 9.86M frames」、LabVLA 的「100k steps」——<b>小时、轨迹数、episode 数、帧数、训练步数是五种不同单位</b>，之间没有普适换算（一条轨迹几秒到几分钟不等、一步梯度吃多少帧取决于 batch 与采样）。论文对比表里把不同口径的数字排在一列，是初学者最容易踩的读数陷阱。</p>
+        </div>
+
+        <h2 id="labutopia-numbers">LabUtopia 考场上的成绩单——以及怎么读它</h2>
+        <p>LabVLA 论文在 <span class="term">LabUtopia</span>（5b-6 认识的实验室考场）上评了 6 类任务：<span class="term-i">Pick Up / Press Button / Open Door / Pour Liquid / Heat Beaker / Transport Beaker</span>，每类任务 × <span class="term">ID</span>（贴近训练分布）与 <span class="term">OOD</span>（扰动物体位置、外观、场景配置）两种设置 × <b>120 episodes</b>——每个模型共 6 × 2 × 120 = 1,440 个 episode。关键数字（论文 Table 2）：</p>
+        <table>
+          <thead><tr><th>模型（规模）</th><th>ID 平均</th><th>OOD 平均</th><th>备注</th></tr></thead>
+          <tbody>
+            <tr><td><b>LabVLA</b>（4B）</td><td><b>71.1%</b></td><td><b>70.0%</b></td><td>ID→OOD 仅降 1.1pp；除 Pour Liquid 外每项 ≥48%</td></tr>
+            <tr><td>π0（3B）</td><td>63.3%</td><td>63.2%</td><td>次优，各任务较均衡</td></tr>
+            <tr><td><b>π0.5</b>（3B）</td><td>52.4%</td><td>52.1%</td><td>本节的对比对象</td></tr>
+            <tr><td>其余 baseline</td><td colspan="2">16.0%–57.5% 不等</td><td>X-VLA、GR00T N1.5、InternVLA-A1、SmolVLA、π0-FAST、Wall-oss-flow</td></tr>
+          </tbody>
+        </table>
+        <p>几个值得注意的模式：<b>Pour Liquid 全场没人过 50%</b>（倒液需要精确倾角且没有液面反馈——考场暴露了整个领域的短板）；多个 baseline 呈「单科满分、单科挂科」的尖刺形（SmolVLA：Heat Beaker 98.3% / Pour Liquid 1.67%），LabVLA 则最均衡——对要<b>串联</b>多步操作的 protocol 来说，均衡比单科峰值重要得多。这正是 <a href="../00-orientation/0-1-why-ebench.html">0.1</a> capability profile 哲学的又一例证：平均分相近的模型，画像可以完全不同。</p>
+
+        <h2 id="how-to-read">这张成绩单能证明什么、不能证明什么</h2>
+        <p>现在到本节最重要的部分。先看一个论文里写明、却极易被忽略的实验条件：</p>
+        <div class="callout note">
+          <div class="c-h">训练暴露（training exposure）声明</div>
+          <p>LabUtopia 对比中，<b>所有 baseline 都以 public checkpoint 接入</b>评测 harness（只做 action/state schema 适配），<b>没有在 LabEmbodied-Data 上微调</b>；而 LabVLA 的后训练吃了大量 RoboGenesis 合成的实验室数据。也就是说：一边是「实验室特训生」，一边是「通用公开模型直接进考场」。</p>
+        </div>
+        <p>于是结论必须小心措辞：</p>
+        <ul>
+          <li><b>可以说</b>：实验室特化训练后的 LabVLA，在 LabUtopia 上显著优于以 public checkpoint 接入的 π0.5——说明 <b>lab-specific 数据与训练对实验室任务非常有效</b>。</li>
+          <li><b>不能说</b>：LabVLA 的<b>架构</b>本身强于 π0.5 的架构。这不是 same-data 的 architecture ablation——数据暴露完全不同，架构贡献无法从中分离（5b-2 的三层定义：赢在 recipe+数据层，不能记账到架构层）。</li>
+        </ul>
+        <p>有意思的是，LabVLA 论文自己补了一个佐证「赢在数据」的实验（Table 3）：把 <span class="term">X-VLA</span>（EBench 读者的老朋友，<a href="../06-baselines/6-2-xvla.html">6.2</a>）拿来在 LabEmbodied-Data 上微调，5 个非饱和任务平均 <b>ID +15.0pp、OOD +19.3pp</b>（Heat Beaker 从 25.8% 涨到 68.3%）。<b>监督不绑定 LabVLA 架构</b>——换个模型喂同样的实验室数据，也涨。这几乎就是「数据 vs 架构」归因实验的教科书做法。</p>
+        <p>论文还做了真机迁移（Franka 平台 4 个 2–4 步任务，各 50 rollouts/setting）：LabVLA 与 DreamZero 互有胜负、差距多在方差内，两者都稳定超过 π0.5——仿真预训练能上真机，但排名逻辑与上面同理：训练暴露不同，读数要带上下文。</p>
+
+        <div class="bridge rl">
+          <div class="c-h"><span class="tag">从 RL 看</span> 这是「换 reward 再比较」的老陷阱</div>
+          <p>RL 里你不会拿「在迷宫 A 训练的 agent」和「没见过迷宫的 agent」在迷宫 A 里比分，然后宣布前者的<b>网络结构</b>更好——分布内经验才是主导变量。VLA 的对比同理：训练分布与评测分布的重叠度（domain exposure）是第一解释变量，架构差异只有在暴露对齐后才可归因。这个直觉将在下一节被系统化成一张 checklist。</p>
+        </div>
+
+        <h2 id="recap">这一节你需要带走的 · 下一节</h2>
+        <p>(1) π0.5 与 LabVLA 是<b>同一 recipe 谱系在两个世界的实例</b>——差异集中在 backbone 选型、数据来源（真实广度 vs 合成针对性）与高层语义形态；(2) LabUtopia 成绩单（LabVLA 71.1/70.0 vs π0.5 52.4/52.1）证明的是<b>实验室数据+训练的价值</b>，不是架构优劣——所有 baseline 都是 public checkpoint 接入；(3) X-VLA + LabEmbodied-Data 微调 +15/+19.3pp 是「赢在数据」的干净佐证；(4) 读任何对比表，先查训练暴露、再看数字单位。</p>
+        <p>「先查训练暴露」——这句话值得升级成一套完整的方法论。下一节（也是全 Part 的收束）：怎么公平地比较 VLA，以及一个 benchmark 报告应该披露什么。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

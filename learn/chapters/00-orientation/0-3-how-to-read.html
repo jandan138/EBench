@@ -27,7 +27,7 @@
         <h1>怎么读这本书 · 两座桥</h1>
         <p class="lede">这本书是为<i>一类特定读者</i>写的：你有扎实的<span class="term">RL</span>数学底子，上过 <span class="term">GAMES103</span> 那样的物理仿真课，但 VLA 对你还是新世界。这一节给你一张路线图，外加两座专门为你搭的桥——让你每遇到一个陌生概念，都能踩着已知的东西走过去。</p>
 
-        <h2 id="roadmap">全书结构：9 个 Part + 附录</h2>
+        <h2 id="roadmap">全书结构：10 个 Part + 附录</h2>
         <p>全书是一条从「为什么」走到「怎么做」，再退一步审视「怎么评才可信」的线。前面建直觉与背景，中间讲机制与理论，后面落到真实代码、实战和评测系统通论。结构如下：</p>
         <table>
           <thead><tr><th>Part</th><th>主题</th><th>你会得到什么</th></tr></thead>
@@ -38,6 +38,7 @@
             <tr><td><b>Part 3</b></td><td>Benchmark 方法论</td><td>capability profile 愿景、tracks×splits、26 任务与打分、泛化轴、诊断报告。</td></tr>
             <tr><td><b>Part 4</b></td><td>评测引擎 · Client–Server</td><td>依赖隔离、EvalClient 契约、action 向量、chunk/step、gmp CLI。</td></tr>
             <tr><td><b>Part 5</b></td><td>VLA 理论 · The Engine Inside</td><td>action chunking、flow matching、action expert、离散 vs 连续。</td></tr>
+            <tr><td><b>Part 5.5</b></td><td>VLA 训练系统 · Training Pipeline</td><td>训练样本切片、训练账本、多源数据混合、KI 梯度、数据引擎/考场/配方生态位、π0.5 vs LabVLA 案例与公平比较。</td></tr>
             <tr><td><b>Part 6</b></td><td>Baseline 全链路</td><td>π0/π0.5、X-VLA、InternVLA-A1 的真实代码，以及三者对比。</td></tr>
             <tr><td><b>Part 7</b></td><td>实战 · Capstone</td><td>接入自己的模型、本地 vs online、追踪一个 episode 全程。</td></tr>
             <tr><td><b>Part 8</b></td><td>评测系统通论</td><td>construct validity、五层解剖、契约、可复现、聚合陷阱与泛化泄漏。</td></tr>
@@ -76,13 +77,13 @@
           <div class="lab-body"><p style="margin:0;color:var(--muted)">真正的部件会渲染在这里——比如雷达图、ODE 积分动画、action 向量解剖器。在它各自的章节里它是活的，可以拖、可以勾选、可以观察参数变化。</p></div>
           <div class="lab-cap">每个部件下方都有一句说明：告诉你怎么玩、该看什么。</div>
         </div>
-        <p>你会在书里遇到这些部件：<span class="term">capability-radar</span>（能力画像，<a href="0-1-why-ebench.html">0.1</a> 已出现）、<span class="term">action-chunking</span>、<span class="term">eval-flow</span>（client↔server 时序）、<span class="term">action-dissector</span>（动作向量解剖）、<span class="term">flow-matching-ode</span>（noise→action 的积分动画）、<span class="term">mode-averaging</span>（回归动作均值化）、<span class="term">task-taxonomy</span>（26 任务全景）、<span class="term">moe-attention</span>（action expert 的注意力路由）、<span class="term">aggregation-pitfall</span>（聚合陷阱）、<span class="term">eval-anatomy</span>（评测系统五层解剖）。遇到时<b>动手玩</b>，比读十行字都管用。</p>
+        <p>你会在书里遇到这些部件：<span class="term">capability-radar</span>（能力画像，<a href="0-1-why-ebench.html">0.1</a> 已出现）、<span class="term">action-chunking</span>、<span class="term">eval-flow</span>（client↔server 时序）、<span class="term">action-dissector</span>（动作向量解剖）、<span class="term">flow-matching-ode</span>（noise→action 的积分动画）、<span class="term">mode-averaging</span>（回归动作均值化）、<span class="term">task-taxonomy</span>（26 任务全景）、<span class="term">moe-attention</span>（action expert 的注意力路由）、<span class="term">vla-stack</span>（训练系统七层总图）、<span class="term">episode-slicer</span>（episode→训练样本切片）、<span class="term">training-ledger</span>（训练账本）、<span class="term">data-loss-map</span>（数据→loss 通路）、<span class="term">ki-gradient</span>（stop-gradient 计算图）、<span class="term">aggregation-pitfall</span>（聚合陷阱）、<span class="term">eval-anatomy</span>（评测系统五层解剖）。遇到时<b>动手玩</b>，比读十行字都管用。</p>
 
         <h2 id="search">搜索与导航</h2>
         <p>顶栏右上有个搜索按钮，但更快的是直接按 <kbd>/</kbd> 键——任何页面随时唤起搜索框，输入小节标题或术语，<kbd>↑</kbd><kbd>↓</kbd> 选择、<kbd>Enter</kbd> 跳转、<kbd>Esc</kbd> 关闭。左侧栏是自动生成的目录树，右侧栏是当前页的「On this page」并随滚动高亮你所在的位置。上一页 / 下一页也是自动生成的，跟着 <a href="../../index.html">封面</a> 的顺序走。</p>
 
         <h2 id="whats-next">这一节你需要带走的</h2>
-        <p>这本书：9 个 Part + 附录，从「为什么」走到「怎么做」，再到「怎么评才可信」；两座桥（RL 桥、GAMES103 桥）帮你从已知走向未知；英文术语一律保留；交互部件请动手玩；按 <kbd>/</kbd> 随时搜索。带着这张路线图，我们正式进入正题。</p>
+        <p>这本书：10 个 Part + 附录，从「为什么」走到「怎么做」，再到「怎么评才可信」；两座桥（RL 桥、GAMES103 桥）帮你从已知走向未知；英文术语一律保留；交互部件请动手玩；按 <kbd>/</kbd> 随时搜索。带着这张路线图，我们正式进入正题。</p>
         <p>下一节（也是 Part 1 的开场），我们从你最熟的地方出发——<b>RL</b>——一步步走到 manipulation 为什么改用 behavior cloning，以及「生成式策略」到底是什么意思。</p>
       </article>
     </main>

@@ -81,7 +81,7 @@
 
         <h2 id="whats-next">这一节你需要带走的 · 也是整个 Part 5 的收束</h2>
         <p>本节四点：(1) <b>π0.5</b> 在 π0 上加 co-training + 分层推理，冲 open-world；(2) <b>分层</b> = 离散自回归出高层语义子任务 + flow matching 出低层 chunk，同模型双路径；(3) <b>FAST</b> 让预训练把动作离散化、交叉熵 next-token，离散擅长学/迁移、连续擅长实时；(4) <b>knowledge insulation</b> = stop-gradient 切断随机 action expert 对 backbone 的梯度污染 + 用离散监督温和更新 backbone，保住 web 知识、训得更快。</p>
-        <p>至此，VLA 的「发动机」从 action chunking → flow matching → action expert → 离散/连续与知识隔离，已经完整拆开。你现在手里有了读懂任何一个现代 VLA 的全部理论零件。<b>下一 Part，我们把理论合上、打开真实 baseline 的代码</b>——看 π0/π0.5（openpi）、X-VLA、InternVLA-A1 是怎么把这些概念落成 EBench 上能跑的 client，以及它们各自做了哪些务实的取舍。</p>
+        <p>至此，VLA 的「发动机」从 action chunking → flow matching → action expert → 离散/连续与知识隔离，已经完整拆开。你现在手里有了读懂任何一个现代 VLA 的全部理论<b>零件</b>。但零件不等于整机——一条训练样本长什么样？预训练、后训练、微调各自喂什么、更新谁？knowledge insulation 的 stop-gradient 到底剪在哪根线上？<b>下一 Part（5.5），我们把这些零件装回一条真实的训练流水线</b>，用 π0.5 和一个实验室特化的 LabVLA 做贯穿案例，补上「VLA 是怎么被造出来的」这张整机图纸。</p>
       </article>
     </main>
     <aside class="rail" id="rail"></aside>

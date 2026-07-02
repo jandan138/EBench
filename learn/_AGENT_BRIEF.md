@@ -50,7 +50,13 @@
 - `moe-attention` —— action expert 的 token 路由与 attention mask。用于 **5.7**。
 - `aggregation-pitfall` —— 指标聚合、加权与 Simpson's paradox。用于 **8.5**。
 - `eval-anatomy` —— 评测系统五层骨架与隐式/显式实现对照。用于 **8.2**。
+- `vla-stack` —— VLA 训练系统七层总图（数据→样本→表示→模型→训练→推理→评测），点层看详情。用于 **5b-1**。
+- `episode-slicer` —— episode 时间轴 → (obs_t, action chunk) 训练样本切片；拖 t、调 H。用于 **5b-1**。
+- `training-ledger` —— π0.5 / LabVLA 训练账本：点阶段看输入/监督/loss/更新谁。用于 **5b-3**。
+- `data-loss-map` —— 数据源 → loss → 更新模块的通路高亮图。用于 **5b-4**。
+- `ki-gradient` —— knowledge insulation 计算图：开关 stop-gradient 看梯度回流路径变化。用于 **5b-5**。
 每个部件**全书只在最相关的那一节用一次**（capability-radar 在 0-1 已用，3.1 可再用一次但换角度）。不要滥用。
+注意：Part 8 之后的章节（含 Part 5.5）底部 script 块只加载 registry.js + 本页实际用到的 widget 脚本（参照 8-2 的做法），不必带全量清单。
 
 ---
 
@@ -159,8 +165,52 @@
   - 模型层：InternVLA-A1（arXiv 2601.02456，InternRobotics）= 统一 Understanding/Generation/Action 的 **Mixture-of-Transformers**，三专家共享一次 unified masked self-attention：understanding(InternVL3 / Qwen3-VL)、generation（预测未来视觉状态 = **visual foresight** 世界模型想象）、action（flow matching 出 chunk）。3B 版基于 **Qwen3-VL-2B**（对应 `QwenA1Policy`）。`decode_image` 大概率切换是否解码 generation expert 预测的未来帧。预训练 692M 帧（真实+合成+人类视频）。~13Hz with torch.compile。
 - **X-VLA 模型层**（arXiv 2510.10274）：flow-matching VLA，纯 soft-prompted 标准 Transformer encoder（24 层 hidden 1024）。**soft prompt**：每个数据源一套可学习 embedding（embodiment-specific），让共享骨干吸收异构性、其余学 embodiment-agnostic 策略。**domain_id**=选哪套 soft-prompt（一般训练默认 0）。VL encoder=Florence-Large。两阶段：预训练 0.9B / 290K episodes / 7 平台；新机器人加新 prompt + 冻结骨干微调。PEFT 仅 ~9M(~1%) 参数即近 SOTA。
 
+## Part 5.5（VLA 训练系统）新增事实 —— 来源：LabVLA 论文（arXiv 2606.13578）、LabUtopia（2505.22634）、AutoBio（2505.14030）、RDT-1B（2410.07864）、π0.5（2504.16054）
+### 训练样本与切片（5b-1）
+- VLA 监督样本 = (o_t, q_t, instruction) → A_t = a_{t:t+H}。一条成功 episode 从每个时刻 t 切出一个样本：obs_0→action_0:H、obs_1→action_1:1+H…… 一条 rollout 贡献 ~T 个样本，不是一个。
+- 监督信号不是「最终成功画面」，是每个时刻起往后 H 步的专家动作。EBench-Dataset 即此形态（LeRobot：Parquet 低维 + MP4 帧 + meta；见 2-4 的 `*_delta` 通道）。
+- H 参考值：π0/π0.5 H=50；RDT 预测 64 步；LabVLA K=50（附录超参表）；openpi 微调 pi05_libero H=10、pi05_droid H=16。
+### VLA 三层定义（5b-2）
+- 接口定义：Vision+Language+state→action。π0/π0.5/LabVLA/RDT/OpenVLA/RT-2 都满足。
+- 架构定义（窄）：pretrained VLM backbone + action expert/head。π0.5、LabVLA 典型；**RDT 不同**：RDT-1B（arXiv 2410.07864，清华 TSAIL）= 1.2B **Diffusion Transformer** 作为策略本体（图像/语言是条件，不是「VLM 大脑+动作小脑」），预训练 46 数据集 1M+ episodes，预测 64 步 action chunk，Physically Interpretable Unified Action Space 统一异构本体。
+- recipe 定义：π0.5 与 LabVLA 共享「FAST 离散预训练 → flow matching 后训练 + KI → 任务微调」谱系；RT-2/OpenVLA = action-as-token 自回归；RDT = 扩散去噪训练。
+### 训练账本（5b-3，LabVLA 论文口径）
+- LabVLA：Qwen3-VL-4B-Instruct backbone + DiT action expert（flow matching）。正文口径两阶段：(1) VLM pretraining——数据 Robointer-VQA + AgiBot World Beta + OXE-AugE + DROID，监督 VQA answer/language subtask/离散 FAST action token，全部 cross-entropy，更新 backbone；(2) posttraining——OXE-AugE + LabEmbodied-Data，DiT 出连续 action chunk，flow matching loss + stop-gradient（KI）不回 VLM。附录超参表三列：VLM pretraining 100k steps / KI posttraining 80k / finetuning 80k；pretraining+posttraining 用 absolute action targets，finetuning 用 delta action targets。action horizon K=50，action 向量 pad 到 32 维（单臂常只 8 维活跃；flow loss 只在活跃维平均——padded 维计入分母曾把梯度缩小 4×，是论文附录踩坑实录）。
+- OXE-AugE 只用其 LeRobot 格式子集（6 源合并 ≈572k trajectories）。
+- π0.5 对应账本：pretraining = 异构 co-training（多本体+~400h 家庭移动操作+高层子任务+检测+web），动作经 FAST 离散化走 next-token CE，更新 backbone；posttraining = flow matching action expert 实时连续控制（KI 论文：离散 CE 监督 backbone + flow 梯度 stop-gradient）。推理 = 先离散解码高层 subtask，再 flow 出低层 chunk。
+- 分阶段原因：CE/离散稳定（语言那套机制）；连续 flow 梯度早期大而乱、会冲坏 backbone 语义空间 →「先离散后连续、先语义后控制、先大脑后小脑、连续 loss 小心回传」。
+### 多源数据（5b-4）
+- 类型×监督：VQA/语义（Robointer-VQA、web VQA）→ CE → backbone；高层子任务文本（π0.5）→ CE；真实机器人轨迹（DROID/AgiBot/OXE）→ FAST CE 或 flow；仿真成功 rollout（LabEmbodied-Data）→ FAST CE 或 flow；web 图文（caption/detection）→ CE。
+- 原则：**没有 action 标签的样本不硬塞全零动作**——统一 batch schema + mask 标记有效字段，有什么监督训什么 loss。LabVLA 论文附录的「flow loss 只在活跃 action 维平均」正是该原则的工程体现。
+### KI 梯度（5b-5）
+- 前向：image/text/state → VLM backbone → hidden prefix → action expert(DiT) → chunk → flow loss。action expert 前向**读得到** VLM hidden states。
+- 反向：VQA/language CE → 更新 backbone；FAST action-token CE → 更新 backbone；flow matching loss → 只更新 action expert + projection，**stop-gradient 挡住回 backbone 的路**。
+- KI ≠ 冻结 backbone：backbone 仍被 CE/FAST/annotation loss 更新；KI 只是阻断连续动作 loss 的直接污染。误解表：不是推理技巧（训练时机制）；action expert 并非「看不到」VLM（前向可读）；连续训练不一定更强（不稳，需 FAST/KI 辅助）。
+### 生态位（5b-6）
+- 三层：**数据引擎**（生成训练数据：造场景→执行任务→过滤成功 rollout→导出）/ **benchmark**（考试场+评分器：reset、让模型尝试、算分）/ **model recipe**（backbone、head、loss、阶段、数据混合的规定）。
+- RoboGenesis（LabVLA 论文）= 基于 Isaac Sim 的 workflow+data engine，三阶段：environment building（text-to-image + TRELLIS 2.0 重建造 3D 资产库 → 组装验证场景，10 项 validation check + 0-100 质量分；LabAssetLibrary + 1,000+ 纹理 LabTextureLibrary → 已生成 10,000 场景）；agentic workflow generation（自然语言指令 → 原子技能有序序列 Pick→Pour→Place→Press，16 robot platforms 跨本体实例化 + 六轴 domain randomization）；structured export（按执行成功过滤 + 多种 annotation 流）。产物 = LabEmbodied-Data（多相机+指令+state+action+结构化标注，四 task family：单臂 primitives/多步 procedures/双臂/移动操作）。**不需要预录专家轨迹，但需要可执行专家逻辑**（资产、robot profile、skill library、workflow executor、success checker、exporter）。
+- LabUtopia（arXiv 2505.22634，NeurIPS'25 D&B）= LabSim（Isaac Sim 高保真多物理/化学交互）+ LabScene（程序化场景生成，200+ 资产）+ LabBench（5 层级 30 任务，atomic→long-horizon mobile）。定位 = 实验室 benchmark/考试场。
+- AutoBio（arXiv 2505.14030）= 生物实验室仿真器+benchmark：仪器数字化管线、螺纹/棘轮等专用物理插件、透明液体 PBR 渲染；三难度层级任务；拿现有 VLA baseline 评测。定位 = 「造更真实的生物实验考场看现有 VLA 能考多少」，与 LabVLA「造训练流水线养自己的实验室 VLA」互补。
+- 类比锚点：RoboGenesis 之于 LabEmbodied-Data ≈ GenManip rule-based 管线之于 EBench-Dataset（2-3/2-4 已讲）；LabUtopia 之于 LabVLA ≈ EBench 之于其 baseline。EBench 自己 = benchmark 层（GenManip server + gmp + scoring），其数据管线 = 引擎层。
+### Case study π0.5 vs LabVLA（5b-7，各自论文口径）
+- 共性 recipe：VLM backbone + FAST 离散预训练 + 连续 action expert + flow matching 后训练 + KI + H/K=50。
+- 差异：目标场景（开放世界家庭 vs 实验室固定 protocol）；backbone（PaliGemma 3B vs Qwen3-VL-4B-Instruct）；expert（π0 系 300M action expert vs DiT）；高层语义（subtask 预测 vs protocol/skill annotation）；数据引擎（π0.5 无 RoboGenesis 类引擎，靠真实 co-training ~400h 家庭数据；LabVLA 核心贡献就是引擎）。
+- LabUtopia 评测（LabVLA 论文 Table 2）：6 任务（Pick Up/Press Button/Open Door/Pour Liquid/Heat Beaker/Transport Beaker）× ID/OOD × 120 episodes/setting（合计 1440/模型）。**所有 baseline 用 public checkpoint 接入 LabUtopia harness（适配 action/state schema），未在 LabEmbodied-Data 上微调**；LabVLA 平均最高（ID 71.1% / OOD 70.0%，次优 π0 63.3%/63.2%；π0.5 52.4%/52.1%；Pour Liquid 全场 <50% 未解）。LabVLA ID→OOD 只降 1.1pp（domain randomization 之效）。
+- 正确解读：这说明 lab-specific 数据/训练很有用，**不是** same-data architecture ablation，不能推出「LabVLA 架构本身强于 π0.5 架构」。佐证数据价值的迁移实验（Table 3）：X-VLA + LabEmbodied-Data 微调，5 任务平均 ID +15.0pp / OOD +19.3pp——监督不绑定 LabVLA 架构。
+- 真机（Table 4）：Franka 平台 4 任务（Shake Liquid/Pour Liquid/Magnetic Stir/Stopper Plug-Unplug，各 2-4 skill，每任务 30-50 demos，50 rollouts/setting），LabVLA 与 DreamZero 相当、均稳超 π0.5。
+### 公平比较（5b-8）
+- 评测前 10 问：public checkpoint 还是 benchmark 数据微调过？见过同类任务/资产/仿真器？用过同批专家轨迹？action space/obs schema 一致？外接 planner/wrapper/safety critic？ID/OOD 怎么定义？成绩是单标量还是有失败阶段/过程证据？
+- 模型状态五档：zero-shot public checkpoint / same-domain fine-tuned / same-benchmark fine-tuned（必须披露）/ system-enhanced VLA（不可当裸 VLA 报）/ oracle-scripted expert（只作数据生成或上限）。
+- 更公平的对照设计：双方 public checkpoint 对比 + 双方 same-data fine-tune 对比 + same tasks/scenes/held-out/schema/gradient steps/eval harness。
+- 与 Part 8 关系：8-1 construct validity、8-4 claim boundary、8-6 leakage 的 VLA 实例化；EBench 报告模板（model_card/training_exposure/system_components/metrics）为**设计建议**，非现有代码事实。
+### 口径与诚实标注（贯穿 Part 5.5）
+- LabVLA 正文口径「two-stage」（pretraining/posttraining）与附录超参口径「100k/80k/80k 三列（VLM pretraining/KI posttraining/finetuning）」并存——如实指出，处理成「正文讲 recipe 骨架、附录多一列任务微调」。
+- 不同论文数据量单位不可直接比：小时（π0.5 ~400h）vs trajectories（OXE-AugE ≈572k）vs episodes（EBench 6,600）vs frames vs steps。
+- beaker/hot plate 一类 lab 例子在 5b-6/5b-7/5b-8 使用（LabVLA 语境）；5b-1~5b-5 通用机制处优先用 EBench 自己的任务/数据集做例子，保持读者锚点连续。
+
 # 参考文献（appendix 用）
 - π0 arXiv:2410.24164；π0.5 arXiv:2504.16054；Knowledge Insulation arXiv:2505.23705；X-VLA arXiv:2510.10274；InternVLA-A1 arXiv:2601.02456；GenManip arXiv:2506.10966。
+- Part 5.5 新增：LabVLA arXiv:2606.13578；RDT-1B arXiv:2410.07864；LabUtopia arXiv:2505.22634（NeurIPS'25 D&B）；AutoBio arXiv:2505.14030；ACT arXiv:2304.13705；FAST arXiv:2501.09747。
 - openpi github.com/Physical-Intelligence/openpi；cuRobo github.com/NVlabs/curobo；LeRobot github.com/huggingface/lerobot；Isaac Sim developer.nvidia.com/isaac/sim。
 - EBench docs internrobotics.github.io/EBench-doc；leaderboard internrobotics.shlab.org.cn/eval。
 

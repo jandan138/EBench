@@ -54,6 +54,7 @@ logs/
 outputs/
 results/
 runs/
+tmp/
 wandb/
 mlruns/
 checkpoints/
