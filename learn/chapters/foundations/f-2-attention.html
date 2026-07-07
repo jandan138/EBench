@@ -26,6 +26,7 @@
         <div class="eyebrow">Part F · Foundations · f-2</div>
         <h1>Attention 从零开始（Q/K/V 直觉）</h1>
         <p class="lede">Transformer 里最重要、也最容易被“数学符号”吓跑的一块，就是 <span class="term">Self-Attention</span>。这一节我们完全不讲公式推导，先用一个最日常的语言例子，让你产生强烈的第一感觉：<b>模型是怎么“知道”哪个词该关注哪个词的</b>。</p>
+        <p>上一节我们说 Transformer 的核心是 <b>让所有 token 一次性互相看</b>。这一节就把「互相看」拆成三步：<b>谁想问（Query）→ 和谁匹配（Key）→ 拿走什么信息（Value）</b>。先读例子，再玩下面的交互；不用背公式。</p>
 
         <h2 id="example">“她在指小红”的直觉</h2>
         <p>想象一句话：</p>
@@ -33,12 +34,15 @@
         <p>当模型读到“她”的时候，它需要回答一个问题：<b>“她到底是谁？”</b></p>
         <p>人类大脑会下意识地往后看，找到“指”和“小红”，然后把“小红”这个信息和“她”联系起来。</p>
         <p>Attention 做的就是同一件事——<b>让每个词去“提问”其他词，看看谁最能回答它的问题</b>。</p>
+        <p>读「她」时，大脑其实在问：<b>「她」指谁？</b> 然后扫向「指」「小红」。Attention 把这件事形式化：每个词都带一个「问题」，去和其他词的「标签」比一比，看谁最像答案。</p>
 
         <div class="lab">
-          <div class="lab-h"><span class="lab-tag">interactive</span><span class="lab-t">点击一个词作为 Query，看它最关注谁</span></div>
+          <div class="lab-h"><span class="lab-tag">interactive</span><span class="lab-t">Attention 交互演示</span></div>
           <div class="lab-body" data-widget="attention-viz"></div>
-          <div class="lab-cap">点击不同词（尤其是“她”），观察权重如何变化。权重越高，说明这个词认为对方越能回答自己的问题。</div>
+          <div class="lab-cap">点击下方词切换 Query；顶部会显示你当前选中的词。试试「她」和「小红」，观察权重条如何变化。</div>
         </div>
+
+        <p>你刚才点的词就是 <b>Query（提问者）</b>；柱形越高，说明这个词认为对方越能回答自己的问题。这些权重不是人手工标的，是模型用三套向量算出来的。下面给每个词配上这三套「身份」。</p>
 
         <h2 id="qkv">Query、Key、Value：三个物理角色</h2>
         <p>为了实现上面的“提问-匹配-拿信息”，模型给每个词准备了三套向量：</p>
@@ -47,13 +51,16 @@
           <li><b>Key（标签）</b>：其他词“我能回答什么问题？”</li>
           <li><b>Value（内容）</b>：其他词“我真正包含的信息”</li>
         </ul>
+        <p>回到例句：读「她」时，<b>「她」发 Query</b>（「我是谁？」）；<b>「小红」的 Key</b> 像名牌（「我能回答『指谁』」）；<b>「小红」的 Value</b> 是实际语义（「小红这个人」）。Attention 用 Query 和所有人的 Key 算权重，再按权重混合所有人的 Value——「她」的新表示就混进了「小红」的信息。</p>
 
         <div class="bridge rl">
           <div class="c-h"><span class="tag">从 RL 看</span> 像一个带记忆的策略</div>
+          <p style="font-size:.85rem;color:var(--ink-faint);margin:0 0 6px">（不熟悉强化学习可跳过本框，不影响后文。）</p>
           <p>Query 像当前状态下 policy 发出的“查询请求”；Key 像不同记忆片段的索引；Value 是真正要取出来的动作/信息。Attention 就是在做一个可学习的、软的“记忆检索”。</p>
         </div>
 
         <h2 id="math">最核心的一行数学（只看直觉）</h2>
+        <p>每个词的向量先经过三个可学习的矩阵，变成 Q、K、V（这就是 f-3 里说的「四个线性投影」里的前三个）。公式只是把「提问—匹配—加权取内容」写成一行。</p>
         <div class="math-block">$$\text{Attention}(Q,K,V) = \text{softmax}\left(\frac{QK^T}{\sqrt{d}}\right)V$$</div>
         <p>逐项翻译：</p>
         <ul>
@@ -62,10 +69,11 @@
           <li>softmax：把分数变成“概率权重”（所有词的关注度加起来是 1）。</li>
           <li>乘 V：按权重把真正的内容混合起来。</li>
         </ul>
+        <p>上式默认每个词能看见序列里所有词。但 <b>生成下一个词时不能偷看未来</b>——所以在 $QK^T$ 上盖一层 <b>mask</b>（把不允许看的位置设为 $-\infty$），softmax 后权重为 0。下面分两种常见 mask。</p>
 
         <h2 id="mask">causal vs bidirectional：两种“能看谁”</h2>
-        <p>在语言模型里，生成下一个词时不能偷看未来的词 → <span class="term">causal mask</span>（下三角）。</p>
-        <p>而在 VLA 里，action chunk 内部的动作 token 经常是 <span class="term">full bidirectional</span>（全看），因为“一整段动作”可以互相参考。</p>
+        <p><b>Causal（因果）</b>：语言模型从左到右生成，位置 $i$ 只能看 $\le i$ 的词 → <span class="term">causal mask</span>（下三角）。</p>
+        <p><b>Bidirectional（双向）</b>：编码器或已整段给定的 action chunk 里，token 可以互相看。VLA 里常见组合：看图/读指令用双向，自回归出动作 token 用因果；action chunk 内部的动作 token 经常是 <span class="term">full bidirectional</span>，因为「一整段动作」可以互相参考。</p>
 
         <div class="callout note">
           <div class="c-h">这一节你真正需要记住的画面</div>

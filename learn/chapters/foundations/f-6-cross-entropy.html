@@ -25,10 +25,11 @@
       <article class="article">
         <div class="eyebrow">Part F · Foundations · f-6</div>
         <h1>Cross Entropy 与 Softmax</h1>
-        <p class="lede">所有现代大模型（包括用 FAST 离散化动作的 VLA）在做“选下一个 token”时，用的几乎都是同一个损失：<span class="term">Cross Entropy</span>。这一节讲清楚它为什么这么流行。</p>
+        <p class="lede">所有现代大模型（包括用 FAST 离散化动作的 VLA）在做“选下一个 token”时，用的几乎都是同一个损失：<span class="term">Cross Entropy</span>。这一节讲清楚它为什么这么流行。和 f-5 的 MSE 对比：<b>MSE 预测一个实数向量；Cross Entropy 在有限选项里「选一个」</b>。当动作被离散成 token（f-4），整条训练管线就和训 LLM 几乎一样。</p>
 
         <h2 id="softmax">Softmax 把分数变成概率</h2>
         <p>模型最后一层通常输出一排分数（logits）。Softmax 把它们变成加起来等于 1 的概率分布。</p>
+        <p>你在 f-2 Attention 公式里已经见过 softmax：那里把「相关性分数」变成 <b>注意力权重</b>；这里把「词表 logits」变成 <b>下一个 token 的概率</b>。同一数学操作，不同语义。</p>
 
         <div class="lab">
           <div class="lab-h"><span class="lab-tag">interactive</span><span class="lab-t">调节温度看概率分布变化</span></div>
@@ -38,14 +39,15 @@
 
         <h2 id="ce">Cross Entropy 在惩罚什么</h2>
         <p>Cross Entropy 只关心“正确答案那个 token 的概率有多高”。它想把正确答案的概率推到接近 1。</p>
-        <p>公式本质是 <code>-log(p_correct)</code>。概率越低，损失越大，梯度越强。</p>
+        <div class="math-block">$$\mathcal{L}_{\text{CE}} = -\log p_\theta(y_{\text{true}} \mid x)$$</div>
+        <p>正确答案概率越接近 1，损失越接近 0；接近 0 时损失爆炸，梯度很大——模型会被强烈推着 <b>把概率质量挪到正确 token 上</b>。</p>
 
         <h2 id="why-llm">为什么 LLM 和离散动作都爱用它</h2>
         <p>因为“下一个 token 预测”本质是分类问题（在词表里挑一个）。分类问题用 Cross Entropy 又稳定又高效。</p>
-        <p>FAST 把连续动作先离散成 token，就是为了能复用这套成熟的训练机制。</p>
+        <p>FAST 把连续动作先离散成 token，就是为了能复用这套成熟的训练机制。代价是量化误差；收益是训练稳定、和语言模态共用一套头。</p>
 
         <h2 id="recap">这一节你需要带走的</h2>
-        <p>Softmax 把 logit 变成概率；Cross Entropy 只看正确答案的概率并想把它变大。这是目前训练离散输出的标准做法。</p>
+        <p>Softmax 把 logit 变成概率；Cross Entropy 只看正确答案的概率并想把它变大。这是目前训练离散输出的标准做法。离散动作走 CE；连续高频控制往往不走这条路。下一节进入 <b>机器人仿真通用接口 Gym</b>，看清「动作」在环境里到底是什么类型。</p>
       </article>
     </main>
     <aside class="rail" id="rail"></aside>

@@ -7,6 +7,9 @@
 
     const c = (n) => EBW.c(n);
     const wrap = EBW.el("div");
+    const status = EBW.el("div", {
+      style: "margin-bottom:8px;padding:6px 10px;border-radius:6px;background:var(--surface-2);font-size:.85rem"
+    }, "当前模式：正常分布（温度 = 1.0）");
     const ctrl = EBW.el("div", { class: "ctrl-row" });
     const s = EBW.slider("温度 Temperature", 0.1, 3, 0.1, temp, (v) => { temp = v; render(); });
     ctrl.appendChild(s.wrap);
@@ -34,8 +37,11 @@
         bars.appendChild(row);
       });
       note.textContent = temp < 0.7 ? "温度低 → 更确定（尖锐）" : temp > 1.5 ? "温度高 → 更随机（平滑）" : "温度 ≈1 → 正常分布";
+      const top = probs.indexOf(Math.max(...probs));
+      status.innerHTML = `当前模式：<b>${temp < 0.7 ? "更确定" : temp > 1.5 ? "更随机" : "正常分布"}</b>（温度 = ${temp.toFixed(1)}） · 最可能动作：<b>${labels[top]}</b>（${probs[top].toFixed(3)}）`;
     }
 
+    wrap.appendChild(status);
     wrap.appendChild(ctrl);
     wrap.appendChild(bars);
     wrap.appendChild(note);

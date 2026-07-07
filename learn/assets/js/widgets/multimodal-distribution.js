@@ -9,7 +9,11 @@
       [{label:"单高斯", value:"single"}, {label:"多模态（真实）", value:"multi"}, {label:"Flow 采样", value:"flow"}],
       mode, v => { mode = v; render(); }
     );
+    const modeStatus = EBW.el("div", {
+      style: "margin:8px 0;padding:6px 10px;border-radius:6px;background:var(--accent-soft);font-size:.85rem;color:var(--ink-soft)"
+    }, "当前视图：单高斯（一个峰 → 会平均化）");
     wrap.appendChild(seg);
+    wrap.appendChild(modeStatus);
 
     const canvas = EBW.el("canvas", { width: 420, height: 260, style: "border:1px solid var(--border);border-radius:8px;background:#0b0c14;display:block;margin:10px auto" });
     const ctx = canvas.getContext("2d");
@@ -60,6 +64,12 @@
 
     function render() {
       draw();
+      const labels = {
+        single: "单高斯（一个峰 → 会平均化）",
+        multi: "多模态（两个峰 → 左绕 / 右绕都对）",
+        flow: "Flow 采样（不同噪声 → 不同模态）"
+      };
+      modeStatus.innerHTML = `当前视图：<b>${labels[mode]}</b>`;
     }
 
     wrap.appendChild(canvas);

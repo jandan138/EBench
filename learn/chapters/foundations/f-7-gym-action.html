@@ -25,6 +25,7 @@
       <article class="article">
         <div class="eyebrow">Part F · Foundations · f-7</div>
         <h1>Gym 契约 + 动作空间（离散 vs 连续）</h1>
+        <p>前几节在问：<b>模型怎么学、损失怎么设</b>。学完之后要在 <b>仿真环境</b> 里试——EBench、EvalClient 都沿用同一套 <b>Gym 式契约</b>：<code>reset</code> 开局，<code>step(action)</code> 推进一步。这一节把「环境接口」和「动作是离散还是连续」讲清楚，后面读评测代码不会懵。</p>
         <p class="lede">几乎所有机器人学习和评测框架，都继承了同一个极简契约：<span class="term">reset → step(action) → (obs, reward, done)</span>。这个契约最早在 <span class="term">Gym</span> 里流行开来。理解它，对理解 EvalClient 和 EBench 的整个评测引擎至关重要。</p>
 
         <h2 id="gym-contract">Gym 契约是什么</h2>
@@ -32,6 +33,8 @@
           <li><code>env.reset()</code>：把世界恢复到初始状态，返回第一个观测。</li>
           <li><code>obs, reward, done, info = env.step(action)</code>：给动作，环境推进一帧，返回新观测、奖励、是否结束。</li>
         </ul>
+        <p>走一遍：机械臂抓取任务里，<code>reset()</code> 把物体摆回桌面；策略读 <code>obs</code>（图像、关节角）输出 <code>action</code>；<code>step</code> 执行一帧后返回新 <code>obs</code>、是否 <code>done</code>。<code>reward</code> 在模仿学习里有时不用，但 <b>接口形状不变</b>。</p>
+        <p>契约固定后，变量是 <b>action 长什么样</b>：有限个按钮，还是连续向量。这直接决定你用 f-6 的 Cross Entropy，还是 f-8 的 flow / diffusion。</p>
 
         <h2 id="action-space">动作空间的两种本质</h2>
         <p><b>离散动作空间</b>：有限几个选择（左、右、跳）。模型通常输出概率分布，用 Cross Entropy 训练。</p>
@@ -39,11 +42,11 @@
 
         <div class="callout note">
           <div class="c-h">对 VLA 的意义</div>
-          <p>早期 VLA 把连续动作离散化，就是为了能用语言模型那套 Cross Entropy 训练。后来 π0 证明：高频灵巧控制更适合直接用连续生成模型（flow matching）。</p>
+          <p>早期 VLA 把连续动作离散化，就是为了能用语言模型那套 Cross Entropy 训练。后来 π0（后面 Part 会详讲的 VLA 模型）证明：高频灵巧控制更适合直接用连续生成模型（flow matching）。</p>
         </div>
 
         <h2 id="recap">这一节你需要带走的</h2>
-        <p>Gym 的 reset/step 是现代机器人学习的通用语言。离散动作适合分类损失，连续动作需要生成模型。这条分界线贯穿整个 VLA 发展史。</p>
+        <p>Gym 的 reset/step 是现代机器人学习的通用语言。离散动作适合分类损失，连续动作需要生成模型。这条分界线贯穿整个 VLA 发展史。离散 → 分类损失；连续 → 往往要 <b>对整个动作分布建模</b>。f-5 说过 MSE 会平均；f-8 从概率角度解释 <b>为什么需要生成模型</b>。</p>
       </article>
     </main>
     <aside class="rail" id="rail"></aside>

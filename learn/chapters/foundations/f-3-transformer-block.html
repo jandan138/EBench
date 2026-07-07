@@ -26,6 +26,7 @@
         <div class="eyebrow">Part F · Foundations · f-3</div>
         <h1>Transformer Block 里到底有什么参数</h1>
         <p class="lede">你经常听到“3B 模型”“7B 参数”。这些参数到底花在哪里？一个 Transformer Block 主要就干两件事：让信息在 token 之间流动（Attention），再让每个 token 自己加工（MLP）。理解这个拆分，对后面看 Action Expert 为什么独立一套权重非常关键。</p>
+        <p>上一节你理解了 Attention 在做什么。这一节回答：<b>这些计算在模型里占哪块、参数花在哪</b>。提醒：Block 处理的是 <b>token 向量序列</b>（每个 token 是什么、f-4 会讲）；这里先假设已经有一排向量了。</p>
 
         <h2 id="two-stairs">两层楼梯的比喻</h2>
         <p>把一个 Block 想象成两层楼梯：</p>
@@ -33,12 +34,15 @@
           <li><b>第一层（Attention）</b>：大家坐在一起开会，互相交换信息。</li>
           <li><b>第二层（MLP）</b>：每个人回到座位上，自己消化刚才听到的内容。</li>
         </ol>
+        <p>真实 Block 还多了 <b>残差连接</b>（$x + \text{子层}(x)$，防信息丢）和 <b>LayerNorm</b>（稳定训练）。可以记成：开会（Attention）→ 加残差、归一化 → 独自消化（MLP）→ 再加残差、归一化。下面先拆两块主菜。</p>
 
         <h2 id="attention-part">Attention 部分（信息交换）</h2>
         <p>主要参数是四个线性投影：Q、K、V、以及输出投影。它们负责“谁该看谁”。</p>
+        <p>四个矩阵中，前三个把每个 token 的向量投影成 Q、K、V（对应 f-2）；第四个把 Attention 输出映射回模型维度。参数量通常小于同层的 MLP，但 <b>决定了谁看谁</b>。</p>
 
         <h2 id="mlp-part">MLP 部分（信息加工）</h2>
         <p>通常是两个大矩阵（先升维、再降维），参数量往往占整个 Block 的 2/3 以上。它的任务是对每个 token 做非线性变换。</p>
+        <p>直觉：Attention 负责 <b>横向交流</b>；MLP 负责 <b>每个 token 自己变聪明一点</b>。没有 MLP 的非线性，多层 Attention 叠起来仍偏线性，表达能力不够。</p>
 
         <div class="bridge rl">
           <div class="c-h"><span class="tag">从 RL 看</span> 为什么 MoE 爱改 MLP</div>
@@ -46,7 +50,7 @@
         </div>
 
         <h2 id="recap">这一节你需要带走的</h2>
-        <p>一个 Block = Attention（跨 token 通信） + MLP（单 token 加工）。MLP 参数更多，也更容易被替换成专家（MoE）。后面 π0 的 action expert 正是独立了一套 MLP。</p>
+        <p>一个 Block = Attention（跨 token 通信） + MLP（单 token 加工）。MLP 参数更多，也更容易被替换成专家（MoE）。后面 π0 的 action expert 正是独立了一套 MLP。下一节补上一块拼图：<b>图像、语言、动作怎么变成 token 向量</b>——否则你不知道这排向量从哪来。</p>
       </article>
     </main>
     <aside class="rail" id="rail"></aside>

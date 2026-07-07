@@ -26,9 +26,11 @@
         <div class="eyebrow">Part F · Foundations · f-4</div>
         <h1>一切皆 Token + Embedding</h1>
         <p class="lede">Transformer 眼里只有一件事：<b>一排 token</b>。图像、语言、机器人状态、动作，最后都要变成这排向量里的成员。这就是“一切皆 Token”的世界观。</p>
+        <p>严格来说，「什么是 token」可以放在 Block 之前先讲；我们把它放这里，是因为你已经见过 Block 在 <b>处理一排向量</b>。现在回头回答：<b>这排向量从哪来？</b> Transformer 不认「图像」「关节角」这些名词，只认 <b>token 序列</b>。</p>
 
         <h2 id="what-is-token">Token 到底是什么</h2>
         <p>Token 就是一个可查表的编号 + 对应的向量。模型先把输入拆成编号（tokenization），再通过 Embedding 表查出对应的向量。</p>
+        <p>小例子：指令「把杯子放到桌上」可能被切成 <code>["把", "杯子", "放到", "桌上"]</code> 四个 token；每张相机图切成 196 个 patch token；7 个关节角可以投影成 7 个状态 token。它们 <b>形式不同，进模型后都是同样长度的向量</b>，才能一起开 Attention 的会。</p>
 
         <ul>
           <li>文字 → BPE / WordPiece token</li>
@@ -36,9 +38,11 @@
           <li>机器人状态 → 直接线性投影成向量</li>
           <li>动作 → 离散化后成 token，或直接作为连续向量参与 flow</li>
         </ul>
+        <p><b>BPE / WordPiece</b>：把词切成子词；<b>patch</b>：把图切成小块；<b>离散化动作</b>：把连续关节角量化成有限档位，才能当「词」用 Cross Entropy 训（f-6、f-7 会接这条线）。</p>
 
         <h2 id="embedding">Embedding 的作用</h2>
         <p>Embedding 就是一个巨大的查表矩阵。输入一个 token id，输出一个固定维度的向量。这个向量一开始是随机初始化的，通过训练学会“相近意思的词/状态/动作应该有相近的向量”。</p>
+        <p>注意区分：<b>Embedding</b> 是「第 0 步：把 id 变成初始向量」；f-2 的 Q/K/V 是「Block 内部：为 Attention 再投影三套向量」。同一条 token 向量，先查 Embedding 表，再在每一层 Block 里被反复改写。</p>
 
         <div class="callout note">
           <div class="c-h">对 VLA 的意义</div>
@@ -46,7 +50,7 @@
         </div>
 
         <h2 id="recap">这一节你需要带走的</h2>
-        <p>Transformer 不认图像、不认状态、不认动作，它只认 token 序列。Embedding 把“东西”变成向量。后面所有多模态融合、action chunk、FAST 离散化，都是在这个世界观下发生的。</p>
+        <p>Transformer 不认图像、不认状态、不认动作，它只认 token 序列。Embedding 把「东西」变成向量。后面所有多模态融合、action chunk、FAST 离散化，都是在这个世界观下发生的。架构拼图到这就齐了：Token + Embedding 喂进 Block，Block 里 Attention 通信、MLP 加工。接下来四节换一条线：<b>模型学出来后，用什么损失、在什么环境里和「正确答案」比</b>——从最简单的回归说起。</p>
       </article>
     </main>
     <aside class="rail" id="rail"></aside>

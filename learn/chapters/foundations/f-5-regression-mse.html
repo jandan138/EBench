@@ -25,11 +25,12 @@
       <article class="article">
         <div class="eyebrow">Part F · Foundations · f-5</div>
         <h1>回归与 MSE：为什么会爱平均</h1>
+        <p>前面四章讲清了 Transformer <b>怎么算</b>。从这一节起，我们问：<b>怎么教它输出对的机器人动作？</b> 最直白的教法叫 <span class="term">行为克隆（Behavior Cloning）</span>：给观测，让网络输出动作，和专家演示比差距——这就是 <b>回归 + MSE</b>。</p>
         <p class="lede">在机器人里最常见的学习方式就是“让模型输出动作，然后和专家动作比”。这种方式叫 <span class="term">regression</span>（回归）。它简单，但有一个非常讨厌的脾气——<b>面对多种都对的答案，它会输出它们的平均值</b>。这一节把这个脾气讲清楚。</p>
 
         <h2 id="what-is-regression">什么是回归</h2>
         <p>给你一个输入（当前观测），预测一个连续的数值输出（动作向量）。这就是回归。</p>
-        <p>最常用的衡量标准是 <span class="term">MSE</span>（均方误差）——预测值和真实值的差的平方平均。</p>
+        <p>机器人例：观测 = 相机图 + 关节角；输出 = 7 维动作向量（各关节目标角度）。最常用的衡量标准是 <span class="term">MSE</span>（均方误差）——预测值和真实值的差的平方平均。<b>平方</b>让大错罚得更重，训练更稳定。</p>
 
         <div class="math-block">$$\text{MSE} = \frac{1}{N}\sum (\hat y_i - y_i)^2$$</div>
 
@@ -41,9 +42,10 @@
           <div class="c-h">这不是 bug，是数学性质</div>
           <p>当同一个输入对应多个正确输出时，最小化平方误差的解永远是这些输出的均值。</p>
         </div>
+        <p>这不是实现 bug，而是 <b>用单点预测 + 平方损失</b> 时的数学最优解。机器人数据里「同一画面、多种抓法都对」很常见，所以纯 MSE 回归动作是 Part F 后半段许多故事的起点。</p>
 
         <h2 id="recap">这一节你需要带走的</h2>
-        <p>(1) 直接用 MSE 回归动作 = behavior cloning；(2) MSE 在多模态数据上会平均化；(3) 这就是后面要用生成模型（diffusion / flow）的根本动机。</p>
+        <p>(1) BC + MSE 是最简单的动作学习；(2) 多模态数据上会 <b>平均化</b>；(3) 出路至少两条：<b>生成模型</b>（f-8，保留多峰）或 <b>离散化 + Cross Entropy</b>（f-6，把动作当 token 分类）。下一节先看后者为什么好用。</p>
       </article>
     </main>
     <aside class="rail" id="rail"></aside>

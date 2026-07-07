@@ -26,6 +26,7 @@
         <div class="eyebrow">Part F · Foundations · f-1</div>
         <h1>为什么会有 Transformer？</h1>
         <p class="lede">在开始讲 VLA 之前，我们先回答一个更根本的问题：<b>为什么今天几乎所有大模型（包括 VLA）最后都长成了 Transformer 的样子？</b> 理解了这一点，后面的 Attention、Token、Action Expert 才不会像魔法。</p>
+        <p>本 Part 分两条线并行推进：<b>前半（f-1～f-4）</b> 回答「Transformer 长什么样、数据怎么喂进去」；<b>后半（f-5～f-8）</b> 回答「机器人动作用什么损失学、为什么有时要生成模型而不是回归」。两条线最后在 VLA 里汇合——同一套 Transformer，配上不同的动作输出方式。</p>
 
         <h2 id="before">序列处理的古老难题</h2>
         <p>很长一段时间，人们处理序列（文字、语音、轨迹）用的是 <span class="term">RNN</span>（循环神经网络）。它的核心想法是：一个一个 token 读过去，每读一个就把信息记在“隐藏状态”里。</p>
@@ -43,16 +44,19 @@
           <li>任意两个 token 之间的距离永远是 1 步，不存在“远距离遗忘”。</li>
         </ul>
 
+        <p>上面 callout 里的「互相通信」就是 <b>Self-Attention</b>。你现在只需要记住画面：每个 token 都能直接问其他 token「谁和我有关」。下一节我们不推公式，先用一句话例子把这件事摸清楚。</p>
+
         <div class="callout">
           <div class="c-h">一句话记住 Transformer 的本质</div>
           <p>Transformer = 一堆 token + 让它们互相通信的机制 + 让每个 token 自己加工信息的机制。</p>
         </div>
 
         <h2 id="why-vla">为什么 VLA 也必须用它</h2>
+        <p>先不用管 VLA 具体怎么拼；你只要接受一点：<b>图像、语言、状态、动作最终都会排成 token 序列</b>（f-4 会细讲），而 Transformer 正是为「长序列、多模态互相看」设计的。</p>
         <p>机器人动作是一段连续的序列（action chunk）。图像是空间序列（patches）。语言是指令序列。把这三者放在一起，最自然的模型就是能同时处理多模态序列、并让它们互相通信的架构——Transformer。</p>
 
         <h2 id="recap">这一节你需要带走的</h2>
-        <p>(1) RNN 顺序慢 + 遗忘远距离；(2) Self-Attention 让所有 token 一次性互相看，彻底解决这两个问题；(3) VLA 里的图像、语言、状态、动作最终都要变成 token 序列，因此 Transformer 是目前最自然的骨架。</p>
+        <p>(1) RNN 顺序慢 + 遗忘远距离；(2) Self-Attention 让所有 token 一次性互相看，彻底解决这两个问题；(3) VLA 里的图像、语言、状态、动作最终都要变成 token 序列，因此 Transformer 是目前最自然的骨架。下一章：<a href="f-2-attention.html">Attention 从零开始</a>——用「她在指小红」把 Self-Attention 的直觉走通，再引入 Q/K/V 三个角色。</p>
       </article>
     </main>
     <aside class="rail" id="rail"></aside>
