@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cross Entropy 与 Softmax · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="f-6">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part F · Foundations · f-6</div>
+        <h1>Cross Entropy 与 Softmax</h1>
+        <p class="lede">所有现代大模型（包括用 FAST 离散化动作的 VLA）在做“选下一个 token”时，用的几乎都是同一个损失：<span class="term">Cross Entropy</span>。这一节讲清楚它为什么这么流行。</p>
+
+        <h2 id="softmax">Softmax 把分数变成概率</h2>
+        <p>模型最后一层通常输出一排分数（logits）。Softmax 把它们变成加起来等于 1 的概率分布。</p>
+
+        <div class="lab">
+          <div class="lab-h"><span class="lab-tag">interactive</span><span class="lab-t">调节温度看概率分布变化</span></div>
+          <div class="lab-body" data-widget="softmax-temperature"></div>
+          <div class="lab-cap">温度低 → 模型更确定；温度高 → 更随机。训练时温度通常固定为 1。</div>
+        </div>
+
+        <h2 id="ce">Cross Entropy 在惩罚什么</h2>
+        <p>Cross Entropy 只关心“正确答案那个 token 的概率有多高”。它想把正确答案的概率推到接近 1。</p>
+        <p>公式本质是 <code>-log(p_correct)</code>。概率越低，损失越大，梯度越强。</p>
+
+        <h2 id="why-llm">为什么 LLM 和离散动作都爱用它</h2>
+        <p>因为“下一个 token 预测”本质是分类问题（在词表里挑一个）。分类问题用 Cross Entropy 又稳定又高效。</p>
+        <p>FAST 把连续动作先离散成 token，就是为了能复用这套成熟的训练机制。</p>
+
+        <h2 id="recap">这一节你需要带走的</h2>
+        <p>Softmax 把 logit 变成概率；Cross Entropy 只看正确答案的概率并想把它变大。这是目前训练离散输出的标准做法。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/softmax-temperature.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

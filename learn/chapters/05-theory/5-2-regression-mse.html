@@ -26,6 +26,10 @@
         <div class="eyebrow">Part 5 · VLA 理论 · 5-2</div>
         <h1>回归与 MSE：最基础的「拟合」</h1>
         <p class="lede">接下来的五节，我们要一步步走到 flow matching。但我答应你<b>从零起步</b>——所以这一节先把最朴素的一块地基打牢：什么叫「回归」，什么叫 MSE。后面每一种方法（diffusion、flow matching、rectified flow），本质都只是<b>「回归一个不同的东西」</b>。先把"回归"这个词彻底搞懂，后面就顺了。</p>
+        <div class="callout note">
+          <div class="c-h">如果你跳过了基础</div>
+          <p>更浅显的版本在 <a href="../foundations/f-5-regression-mse.html">Part F 的 F-5</a>。多学几遍有助于建立直觉，建议根据自己需要来回参考。</p>
+        </div>
 
         <h2 id="fit-a-line">先看一个最小的例子：拟合一条线</h2>
         <p>假设你收集了一堆数据点：每个点是一对数字 $(x, y)$。比如 $x$ 是"踩油门的力度"，$y$ 是"车速"。你把它们画在坐标纸上，发现大致排成一条向上的趋势，但有抖动、不完全在一条直线上。</p>

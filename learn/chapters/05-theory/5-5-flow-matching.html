@@ -26,6 +26,10 @@
         <div class="eyebrow">Part 5 · VLA 理论 · 5-5</div>
         <h1>Flow Matching：回归「流动方向」</h1>
         <p class="lede">铺垫了三节，主角登场。有了"从噪声变换到数据""不同噪声→不同模态"的直觉，flow matching 其实只多问一句：<b>这个变换，能不能用一个"每一点该往哪走"的方向场来描述，然后我去回归那个方向？</b>答案是能。这一节我们把它讲成一个"水流"的故事，公式只在讲透处出现。</p>
+        <div class="callout note">
+          <div class="c-h">基础提醒</div>
+          <p>如果你对概率分布、多模态、为什么需要从噪声出发还没有清晰画面，强烈建议先阅读 <a href="../foundations/f-8-probability-multimodal.html">Part F 的 F-8</a>。多看几次会让 flow matching 的直觉更牢固。</p>
+        </div>
 
         <h2 id="picture">先建一幅画面：一池子在流动的点</h2>
         <p>想象一个池子。<b>左边</b>撒满纯噪声的点（高斯一团）；<b>右边</b>是目标——合理动作聚成的几簇（"绕上"一簇、"绕下"一簇）。我们想要一股<b>水流</b>，把左边每个噪声点，顺顺当当地<b>漂</b>到右边某个合理动作上。</p>

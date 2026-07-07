@@ -26,6 +26,10 @@
         <div class="eyebrow">Part 4 · Client–Server · 4-2</div>
         <h1>EvalClient 契约：reset/step/close 与 obs</h1>
         <p class="lede">上一节我们说「所有聪明都在 client 一侧」。这一节就盯住 client 的入口对象——<span class="term">EvalClient</span>。它出奇地小：只有三个动作 <span class="term">reset</span> / <span class="term">step</span> / <span class="term">close</span>，以及一个它递给你的 observation 字典。把这两样东西吃透，你就掌握了接入任何模型的全部协议。</p>
+        <div class="callout note">
+          <div class="c-h">基础建议</div>
+          <p>对 Gym 契约不熟悉的读者请先看 <a href="../foundations/f-7-gym-action.html">Part F 的 F-7</a>。EvalClient 本质上是把 Gym 那套极简契约搬到 client-server 架构上。</p>
+        </div>
 
         <h2 id="three-actions">三个动作撑起整条循环</h2>
         <p><span class="term">EvalClient</span> 把 <a href="4-1-client-server.html">4.1</a> 那条 reset→obs→infer→step→done 循环包成了三个方法。先看完整骨架——这就是接入任何模型时你照抄的那段：</p>

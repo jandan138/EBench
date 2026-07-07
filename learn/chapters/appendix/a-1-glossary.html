@@ -27,6 +27,22 @@
         <h1>术语表 Glossary</h1>
         <p class="lede">全书出现的英文术语集中在这里，每条一句话。按主题分组，方便边读正文边回查。想看完整定义与推导，点最右列的章节链接回到正文。</p>
 
+        <h2 id="g-foundations">基础概念（Part F）</h2>
+        <table>
+          <thead><tr><th>术语</th><th>中文</th><th>一句话解释</th><th>章节</th></tr></thead>
+          <tbody>
+            <tr><td>Self-Attention</td><td>自注意力</td><td>让序列中每个 token 同时关注所有其他 token 的机制</td><td><a href="../foundations/f-2-attention.html">F-2</a></td></tr>
+            <tr><td>Query / Key / Value</td><td>查询/键/值</td><td>Attention 里的三个角色：问问题、被匹配、贡献信息</td><td><a href="../foundations/f-2-attention.html">F-2</a></td></tr>
+            <tr><td>Transformer Block</td><td>Transformer 块</td><td>Attention（通信）+ MLP（加工）+ LayerNorm + Residual</td><td><a href="../foundations/f-3-transformer-block.html">F-3</a></td></tr>
+            <tr><td>Token</td><td>令牌 / 词元</td><td>模型统一处理的原子单位，文字/图像/状态/动作最终都变成它</td><td><a href="../foundations/f-4-everything-is-token.html">F-4</a></td></tr>
+            <tr><td>Embedding</td><td>嵌入</td><td>把 token id 映射成向量的可学习查表</td><td><a href="../foundations/f-4-everything-is-token.html">F-4</a></td></tr>
+            <tr><td>Regression</td><td>回归</td><td>预测连续数值，用 MSE 训练</td><td><a href="../foundations/f-5-regression-mse.html">F-5</a></td></tr>
+            <tr><td>Cross Entropy</td><td>交叉熵</td><td>分类任务的标准损失，最大化正确答案的概率</td><td><a href="../foundations/f-6-cross-entropy.html">F-6</a></td></tr>
+            <tr><td>Gym (Gymnasium)</td><td>—</td><td>reset / step 的标准环境接口，EvalClient 直接继承其哲学</td><td><a href="../foundations/f-7-gym-action.html">F-7</a></td></tr>
+            <tr><td>Multimodal distribution</td><td>多模态分布</td><td>同一个输入对应多种合理输出（多个峰）</td><td><a href="../foundations/f-8-probability-multimodal.html">F-8</a></td></tr>
+          </tbody>
+        </table>
+
         <h2 id="g-vla">VLA 模型与架构</h2>
         <table>
           <thead><tr><th>术语</th><th>英文全称</th><th>一句话解释</th></tr></thead>

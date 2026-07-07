@@ -27,12 +27,15 @@
         <h1>怎么读这本书 · 两座桥</h1>
         <p class="lede">这本书是为<i>一类特定读者</i>写的：你有扎实的<span class="term">RL</span>数学底子，上过 <span class="term">GAMES103</span> 那样的物理仿真课，但 VLA 对你还是新世界。这一节给你一张路线图，外加两座专门为你搭的桥——让你每遇到一个陌生概念，都能踩着已知的东西走过去。</p>
 
-        <h2 id="roadmap">全书结构：10 个 Part + 附录</h2>
+        <h2 id="roadmap">全书结构：Part F（基础） + 10 个 Part + 附录</h2>
+        <p>如果你发现自己对现代 AI 的基本概念还不熟悉（Transformer、Attention、Token、Cross Entropy、Gym、概率分布等），建议从 <b>Part F · Foundations</b> 开始。它专门为“有 RL + GAMES103 背景但缺少现代大模型基础”的读者准备的补完章节。</p>
+        <p>已经熟悉这些概念的读者可以直接跳到 Part 0。后面章节在关键地方会加上“如果你跳过了基础，建议先看 F-X”的提示。</p>
         <p>全书是一条从「为什么」走到「怎么做」，再退一步审视「怎么评才可信」的线。前面建直觉与背景，中间讲机制与理论，后面落到真实代码、实战和评测系统通论。结构如下：</p>
         <table>
           <thead><tr><th>Part</th><th>主题</th><th>你会得到什么</th></tr></thead>
           <tbody>
-            <tr><td><b>Part 0</b></td><td>序章 · Orientation</td><td>EBench 是什么、由哪些 repo 组成、怎么读这本书（你在这里）。</td></tr>
+            <tr><td><b>Part F</b></td><td>基础 · Foundations</td><td>Transformer、Attention、Token、回归、CE、Gym、概率分布等必备直觉与数学（可跳读）。</td></tr>
+            <tr><td><b>Part 0</b></td><td>序章 · Orientation</td><td>EBench 是什么、由哪些 repo 组成、怎么读这本书。</td></tr>
             <tr><td><b>Part 1</b></td><td>问题域 · Manipulation &amp; VLA</td><td>从 RL 过渡到 behavior cloning；VLA 是什么；本体 lift2。</td></tr>
             <tr><td><b>Part 2</b></td><td>仿真地基 · Simulation Stack</td><td>Isaac Sim / cuRobo / GenManip / LeRobot 数据。</td></tr>
             <tr><td><b>Part 3</b></td><td>Benchmark 方法论</td><td>capability profile 愿景、tracks×splits、26 任务与打分、泛化轴、诊断报告。</td></tr>

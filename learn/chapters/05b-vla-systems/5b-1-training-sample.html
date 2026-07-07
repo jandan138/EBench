@@ -26,6 +26,10 @@
         <div class="eyebrow">Part 5.5 · VLA 训练系统 · 5b-1</div>
         <h1>一条训练样本长什么样：episode → 切片</h1>
         <p class="lede">Part 5 把 VLA 的「发动机」拆完了：你知道了 <span class="term">action chunking</span> 为什么存在、<span class="term">flow matching</span> 怎么把噪声积分成动作。但有一个问题我们一直没有正面回答：<b>这台发动机吃的「油」到底长什么样？</b>一条训练样本包含哪些字段？一条成功的 rollout 贡献几条样本？这一 Part 我们不再讲新的数学，而是把 VLA 从数据到评测的<b>整条训练流水线</b>解剖一遍——从最小的单位开始：一条样本。</p>
+        <div class="callout note">
+          <div class="c-h">基础建议</div>
+          <p>本节大量使用 Token、Embedding、Gym 概念。如果感觉陌生，先去 <a href="../foundations/f-4-everything-is-token.html">F-4</a> 和 <a href="../foundations/f-7-gym-action.html">F-7</a> 补一下，会理解得更轻松。多学几遍效果更好。</p>
+        </div>
 
         <h2 id="the-map">先给你整个 Part 的地图</h2>
         <p>接下来八节会沿一条固定的路线走：<b>数据从哪来 → 怎么切成样本 → 用什么表示 → 喂给哪个模块 → 用什么 loss 更新谁 → 部署时怎么解码 → 最后怎么评测</b>。这七层就是任何一个现代 VLA 系统的完整骨架。下面这个部件是全 Part 的地图——每一层都给出 <span class="term">π0.5</span>（你在 <a href="../05-theory/5-8-discrete-continuous.html">5.8</a> 认识的开放世界 VLA）和 <span class="term">LabVLA</span>（一个实验室特化 VLA，本 Part 的第二主角，5b-7 详拆）的实例。现在快速点一遍建立框架，读完全 Part 再回来点一遍，感受会完全不同。</p>

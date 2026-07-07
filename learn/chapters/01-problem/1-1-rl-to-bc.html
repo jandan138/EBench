@@ -27,6 +27,11 @@
         <h1>从 RL 到 behavior cloning：生成式策略</h1>
         <p class="lede">你带着 RL 的工具箱走进这本书：policy、value、reward、policy gradient、TD。这一节我们从这套你最熟的语言出发，看清一件事——为什么 manipulation 这个领域，主流方法<i>不是</i>你预期的 online RL，而是 imitation / behavior cloning，以及由此长出的「生成式策略」到底新在哪。</p>
 
+        <div class="callout note">
+          <div class="c-h">基础提醒</div>
+          <p>如果你对回归、MSE、多模态的平均化问题还没有直觉，建议先阅读 <a href="../foundations/f-5-regression-mse.html">Part F 的 F-5</a>。Gym 契约的完整背景可看 <a href="../foundations/f-7-gym-action.html">F-7</a>。</p>
+        </div>
+
         <h2 id="rl-recap">先把 RL 摆在桌上</h2>
         <p>RL 的世界你很熟：一个 agent 在 environment 里，policy $\pi(a\mid s)$ 决定在状态 $s$ 下取动作 $a$，环境回一个 reward $r$，目标是最大化期望累积回报 $\mathbb{E}\big[\sum_t \gamma^t r_t\big]$。你有两条主路去优化它：<span class="term">policy gradient</span>（直接对 $\pi$ 求梯度，如 REINFORCE / PPO）和 <span class="term">value-based</span>（学 $Q(s,a)$ 或 $V(s)$，用 <span class="term">TD</span> 误差自举，再 $\arg\max_a Q$ 取动作）。无论哪条路，前提都是：你能<b>大量、廉价、安全</b>地和环境交互，并拿到<b>有意义的 reward 信号</b>。</p>
 

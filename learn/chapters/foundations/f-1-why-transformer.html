@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>为什么会有 Transformer？· EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="f-1">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part F · Foundations · f-1</div>
+        <h1>为什么会有 Transformer？</h1>
+        <p class="lede">在开始讲 VLA 之前，我们先回答一个更根本的问题：<b>为什么今天几乎所有大模型（包括 VLA）最后都长成了 Transformer 的样子？</b> 理解了这一点，后面的 Attention、Token、Action Expert 才不会像魔法。</p>
+
+        <h2 id="before">序列处理的古老难题</h2>
+        <p>很长一段时间，人们处理序列（文字、语音、轨迹）用的是 <span class="term">RNN</span>（循环神经网络）。它的核心想法是：一个一个 token 读过去，每读一个就把信息记在“隐藏状态”里。</p>
+        <p>这个想法听起来很自然，但有两个致命问题：</p>
+        <ul>
+          <li><b>顺序计算极慢</b>：第 1000 个词必须等前 999 个词全部算完。</li>
+          <li><b>长距离遗忘</b>：越早的信息在反复传递过程中会逐渐衰减。处理一段 50 步的机器人动作时，t=1 的状态信息到 t=50 时几乎没了。</li>
+        </ul>
+
+        <h2 id="attention-revolution">Self-Attention 的革命</h2>
+        <p>2017 年，Attention Is All You Need 提出： <b>不要一个一个读，而是一次性让所有 token 互相看</b>。</p>
+        <p>这样做的两个巨大好处：</p>
+        <ul>
+          <li>计算可以完全并行（GPU 喜欢并行）。</li>
+          <li>任意两个 token 之间的距离永远是 1 步，不存在“远距离遗忘”。</li>
+        </ul>
+
+        <div class="callout">
+          <div class="c-h">一句话记住 Transformer 的本质</div>
+          <p>Transformer = 一堆 token + 让它们互相通信的机制 + 让每个 token 自己加工信息的机制。</p>
+        </div>
+
+        <h2 id="why-vla">为什么 VLA 也必须用它</h2>
+        <p>机器人动作是一段连续的序列（action chunk）。图像是空间序列（patches）。语言是指令序列。把这三者放在一起，最自然的模型就是能同时处理多模态序列、并让它们互相通信的架构——Transformer。</p>
+
+        <h2 id="recap">这一节你需要带走的</h2>
+        <p>(1) RNN 顺序慢 + 遗忘远距离；(2) Self-Attention 让所有 token 一次性互相看，彻底解决这两个问题；(3) VLA 里的图像、语言、状态、动作最终都要变成 token 序列，因此 Transformer 是目前最自然的骨架。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>一切皆 Token + Embedding · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="f-4">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part F · Foundations · f-4</div>
+        <h1>一切皆 Token + Embedding</h1>
+        <p class="lede">Transformer 眼里只有一件事：<b>一排 token</b>。图像、语言、机器人状态、动作，最后都要变成这排向量里的成员。这就是“一切皆 Token”的世界观。</p>
+
+        <h2 id="what-is-token">Token 到底是什么</h2>
+        <p>Token 就是一个可查表的编号 + 对应的向量。模型先把输入拆成编号（tokenization），再通过 Embedding 表查出对应的向量。</p>
+
+        <ul>
+          <li>文字 → BPE / WordPiece token</li>
+          <li>图像 → patch 或视觉 token</li>
+          <li>机器人状态 → 直接线性投影成向量</li>
+          <li>动作 → 离散化后成 token，或直接作为连续向量参与 flow</li>
+        </ul>
+
+        <h2 id="embedding">Embedding 的作用</h2>
+        <p>Embedding 就是一个巨大的查表矩阵。输入一个 token id，输出一个固定维度的向量。这个向量一开始是随机初始化的，通过训练学会“相近意思的词/状态/动作应该有相近的向量”。</p>
+
+        <div class="callout note">
+          <div class="c-h">对 VLA 的意义</div>
+          <p>当我们把多相机图像、关节角、语言指令、action chunk 全部变成 token 序列后，同一个 Transformer 就可以用同一套机制处理它们。这也是为什么 π0、X-VLA、InternVLA 都长得像“多模态语言模型 + 动作头”。</p>
+        </div>
+
+        <h2 id="recap">这一节你需要带走的</h2>
+        <p>Transformer 不认图像、不认状态、不认动作，它只认 token 序列。Embedding 把“东西”变成向量。后面所有多模态融合、action chunk、FAST 离散化，都是在这个世界观下发生的。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

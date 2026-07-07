@@ -27,8 +27,9 @@
 
 ## 2. 信息架构（章节）
 
-10 个 Part + Appendix，共 53 节。详见 `content.js`（导航单一真相源）。
+Part F（基础补完） + 10 个 Part + Appendix，共 61 节。详见 `content.js`（导航单一真相源）。
 
+- **Part F 基础**：Transformer、Attention、Token、回归、CE、Gym、概率分布等核心直觉与数学（可跳读，为后续 Part 提供共同语言）
 - **Part 0 序章**：why EBench / repo constellation / 怎么读这本书
 - **Part 1 问题域**：RL→behavior cloning（生成式策略）/ 什么是 VLA / `lift2` 本体
 - **Part 2 仿真地基**(GAMES103 桥)：Isaac Sim(USD+PhysX+RTX) / cuRobo / GenManip / LeRobot+数据集

@@ -26,6 +26,10 @@
         <div class="eyebrow">Part 5 · VLA 理论 · 5-7</div>
         <h1>Action expert：Transfusion 与 MoE</h1>
         <p class="lede">上一节我们用 flow matching 把动作「积」了出来。但这套机制要嫁接到一个<b>预训练好的 VLM</b>（PaliGemma）上——VLM 天生处理离散文本 token、用交叉熵训练，而动作是连续的、用 flow matching 训练。怎么让<i>同一个 transformer</i>同时干这两件事？π0 的答案是 <span class="term">Transfusion</span> 加上一个 <span class="term">action expert</span>。</p>
+        <div class="callout note">
+          <div class="c-h">如果你对 Transformer 结构还不熟</div>
+          <p>建议先看 <a href="../foundations/f-2-attention.html">F-2</a>（Attention） 和 <a href="../foundations/f-3-transformer-block.html">F-3</a>（Block 结构）。理解 Q/K/V 和 MLP 独立权重后，再看 action expert 会轻松很多。</p>
+        </div>
 
         <h2 id="transfusion">Transfusion：一个 transformer，两套目标</h2>
         <p>π0 在结构上 follow <span class="term">Transfusion</span> 的思路。核心一句话：<b>一个 transformer，按 token 类型用不同的训练目标</b>。</p>

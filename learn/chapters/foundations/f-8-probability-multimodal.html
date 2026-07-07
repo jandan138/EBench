@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>概率分布、多模态与生成模型 · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="f-8">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part F · Foundations · f-8</div>
+        <h1>概率分布、多模态与生成模型</h1>
+        <p class="lede">为什么同一个观测下会有多种合理动作？为什么直接回归会失败？这一节从概率分布的角度，把“为什么需要 diffusion / flow matching”讲透。</p>
+
+        <h2 id="single-gaussian">一个高斯只能有一个峰</h2>
+        <p>普通高斯分布 $N(\mu, \Sigma)$ 只有一个中心。无论你怎么调，它都只能描述“最可能在这里”。当真实世界有两条完全不同的正确做法时，一个高斯就会把它们平均掉。</p>
+
+        <div class="lab">
+          <div class="lab-h"><span class="lab-tag">interactive</span><span class="lab-t">单高斯 vs 多模态 vs Flow 采样</span></div>
+          <div class="lab-body" data-widget="multimodal-distribution"></div>
+          <div class="lab-cap">切换不同模式，看单高斯如何失败，而生成模型可以从不同噪声采样到不同模态。</div>
+        </div>
+
+        <h2 id="multimodal">多模态分布</h2>
+        <p>真实动作分布往往是多峰的（multimodal）。生成模型的目标就是学会从这种任意形状的分布里正确采样，而不是输出一个均值。</p>
+
+        <h2 id="why-flow">为什么 Flow / Diffusion 能解决</h2>
+        <p>它们不直接预测动作，而是学习“如何把噪声一步步变成合理动作”。不同的起始噪声会被推向不同的峰，从而自然地保留了多模态性。</p>
+
+        <h2 id="recap">这一节你需要带走的</h2>
+        <p>单峰分布（高斯）无法表达“多种都对”的情况。生成模型通过从噪声到数据的变换，学会了对多模态分布采样。这就是 Part 5 后面所有 flow matching 的根本动机。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/multimodal-distribution.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>
