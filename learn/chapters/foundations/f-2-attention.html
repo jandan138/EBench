@@ -25,22 +25,28 @@
       <article class="article">
         <div class="eyebrow">Part F · Foundations · f-2</div>
         <h1>Attention 从零开始（Q/K/V 直觉）</h1>
-        <p class="lede">如果你看到 $QK^T$ 就懵，通常不是你不适合学，而是中间少了几级台阶。这一节把 Attention 拆成小白可跟的五步：token 是向量，点积表示相似，Q/K/V 是同一个 token 的三种角色，softmax 把分数变成权重，最后按权重混合 Value。</p>
+        <p class="lede">如果你看到 $QK^T$ 就懵，通常不是你不适合学，而是中间少了几级台阶。这一节把 Attention 拆成一条小白可跟的链路：token 是向量，点积表示相似，Q/K/V 是同一个位置的三种投影角色，softmax 把分数变成权重，最后按权重混合 Value。</p>
 
         <h2 id="scene">先看一句人话：“她在指小红”</h2>
         <p>假设输入是：</p>
         <div class="callout"><p style="margin:0;font-size:1.05rem">“她 在 指 小红 的 方向”</p></div>
         <p>当模型读到“她”时，它不能只看“她”这个字。它要问：这个“她”指谁？比较合理的线索是后面的“指”和“小红”。人类会自动把“小红”的信息补到“她”上；Attention 就是在模型内部做这个补信息的过程。</p>
         <p>上一节的圆桌会议比喻到这里变具体：每个 token 都可以发问，也可以被别人查询。Attention 不会给一个硬答案，而是给一排软权重：看“小红”多一点，看“方向”少一点，看“在”更少一点。</p>
+        <div class="callout warn">
+          <div class="c-h">先说明：Query 不是一个真的中文问题</div>
+          <p>“它要问”只是比喻。数学上，Query 是当前 hidden state 乘 $W_Q$ 得到的一条向量；Key 是 hidden state 乘 $W_K$ 得到的一条向量；二者点积给出匹配分数。没有任何 token 真的在发问，GPU 只是在做矩阵乘法。</p>
+        </div>
 
         <div class="lab">
           <div class="lab-h"><span class="lab-tag">interactive</span><span class="lab-t">Attention 交互演示</span></div>
           <div class="lab-body" data-widget="attention-viz"></div>
-          <div class="lab-cap">点击不同词切换 Query。先点“她”，再点“小红”，观察每个词看别人的权重如何变化。数值是教学示意，不是训练出的真实权重。</div>
+          <div class="lab-cap">点击不同词切换 Query。直觉模式看权重变化；手算模式会展示 toy Q/K/V、点积 score、scaled score、softmax 和 weighted Value。数值是教学示意，不是训练出的真实权重。</div>
         </div>
 
-        <h2 id="vectors">第一层台阶：token 先变成向量</h2>
-        <p>模型不是直接处理汉字。每个 token 进入 Transformer 前，都会变成一个向量。为了能手算，先假装每个词只有 2 维：</p>
+        <h2 id="vectors">第一层台阶：Attention 的输入是当前 hidden state</h2>
+        <p>模型不是直接处理汉字。每个 token 进入 Transformer 前，会先变成初始向量；进入第 $\ell$ 层 Attention 时，真正输入的是这一层的 hidden states，常写成 $X^\ell$。</p>
+        <div class="math-block">$$X^\ell = [h_1^\ell,\ldots,h_n^\ell] \in \mathbb{R}^{n \times d}$$</div>
+        <p>为了能手算，先假装某一层里每个词的 hidden state 只有 2 维：</p>
         <table>
           <thead>
             <tr><th>token</th><th>向量示意</th><th>直觉</th></tr>
@@ -51,10 +57,16 @@
             <tr><td>小红</td><td><code>[0.9, 0.2]</code></td><td>更像“具体人物”</td></tr>
           </tbody>
         </table>
-        <p>向量之间可以做点积。点积越大，粗略表示越相似、越匹配。比如 <code>[0.8, 0.1]</code> 和 <code>[0.9, 0.2]</code> 的点积是 $0.8 \times 0.9 + 0.1 \times 0.2 = 0.74$，比和很多无关词的点积更高。</p>
+        <p>这里的向量如果在第 0 层，接近 embedding 加位置信息；如果在更深层，已经混入了前面层的上下文。Attention 每层都在更新这些 hidden states。</p>
+
+        <h2 id="dot-product">为什么点积能当匹配分数</h2>
+        <p>两个向量 $a,b$ 的点积是：</p>
+        <div class="math-block">$$a\cdot b = \|a\|\,\|b\|\cos\theta$$</div>
+        <p>如果向量长度差不多，点积主要看夹角 $\theta$。方向越接近，$\cos\theta$ 越大，点积越大；方向接近垂直，点积接近 0；方向相反，点积可能为负。所以点积可以当作一种“方向是否对得上”的匹配分数。</p>
+        <p>但要小心：它不是天然语义相似度。真正学到“谁该匹配谁”的，是 $W_Q,W_K$ 把 hidden state 投到什么几何空间里。训练前，这个空间基本随机；训练后，模型才逐渐学出有用的方向。</p>
 
         <h2 id="qkv">第二层台阶：为什么要 Q/K/V 三套向量</h2>
-        <p>现在问题来了：同一个 token 只有一条向量不行吗？不太够。因为一个 token 在 Attention 里同时有三种职责：</p>
+        <p>现在问题来了：既然已经有 hidden state，为什么还要再变出 Q/K/V 三套向量？因为同一条 hidden state 在 Attention 里要承担三种不同的计算用途：拿来匹配别人、被别人匹配、以及被加权汇聚。如果只用一套向量，三件事会被绑死。</p>
         <table>
           <thead>
             <tr><th>名字</th><th>中文直觉</th><th>它在问什么</th><th>例句里的角色</th></tr>
@@ -65,40 +77,81 @@
             <tr><td>Value</td><td>内容</td><td>如果别人关注我，我贡献什么信息？</td><td>“小红”的 Value 是具体人物语义。</td></tr>
           </tbody>
         </table>
-        <p>Q/K/V 不是人工给词贴的标签，也不是三份不同输入。它们是同一个输入向量经过三套可学习矩阵变出来的三种角色。</p>
-        <div class="math-block">$$q_i = x_i W_Q,\qquad k_i = x_i W_K,\qquad v_i = x_i W_V$$</div>
-        <p>这里 $x_i$ 是第 $i$ 个 token 的原始表示，$W_Q,W_K,W_V$ 是模型训练出来的参数。训练足够多之后，模型会学会让“人物指代”的 Query 更容易匹配到“具体人物”的 Key。</p>
+        <p>Q/K/V 不是人工给词贴的标签，也不是三份不同输入。它们是同一条 hidden state 经过三套可学习矩阵投影出来的三组工作向量：</p>
+        <div class="math-block">$$q_i = h_i^\ell W_Q,\qquad k_i = h_i^\ell W_K,\qquad v_i = h_i^\ell W_V$$</div>
+        <p>$W_Q,W_K,W_V$ 是普通参数矩阵，训练开始时通常随机初始化。刚初始化时，它们不会“找主语”“找宾语”。只有在大量训练样本和 loss 反向传播推动下，它们才会慢慢变成有用的投影：让该互相匹配的 query/key 在投影空间里点积更大，让不该匹配的点积更小。</p>
+        <div class="callout note">
+          <div class="c-h">Q/K/V 有没有全局信息？</div>
+          <p>取决于 $h_i^\ell$ 本身。第一层的 $h_i^0$ 主要来自 embedding 和位置，几乎还没有跨 token 上下文；更深层的 $h_i^\ell$ 已经经过前面层的 Attention，可能带有上下文。无论哪一层，真正把“这一层的所有可见 token 信息”汇入第 $i$ 个位置，是后面的加权 Value：$z_i=\sum_j \alpha_{ij}v_j$。</p>
+        </div>
 
         <h2 id="single-row">第三层台阶：先看一个 Query 怎么看所有 Key</h2>
         <p>先不要看矩阵。只看“她”这一个 Query。它会和所有 token 的 Key 算匹配分数：</p>
         <div class="math-block">$$s_{\text{她},j} = \frac{q_{\text{她}} \cdot k_j}{\sqrt{d_k}}$$</div>
-        <p>$j$ 会扫过“她、在、指、小红、的、方向”。得到的不是最终答案，而是一排分数。比如教学示意里，“她”对三个 token 的分数可能是：</p>
+        <p>$j$ 会扫过“她、在、指、小红、的、方向”。得到的不是最终答案，而是一排分数。教程或 widget 里的“她 4、指 1、小红 7”这类数字，本质上就是 $q_{\text{她}}$ 分别和每个 $k_j$ 点积后得到的 score。下面给一个完整玩具计算。</p>
+        <table>
+          <thead>
+            <tr><th>对象</th><th>向量</th><th>点积</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>$q_{\text{她}}$</td><td><code>[1, 2]</code></td><td>-</td></tr>
+            <tr><td>$k_{\text{她}}$</td><td><code>[2, 1]</code></td><td>$1\times2+2\times1=4$</td></tr>
+            <tr><td>$k_{\text{指}}$</td><td><code>[1, 0]</code></td><td>$1\times1+2\times0=1$</td></tr>
+            <tr><td>$k_{\text{小红}}$</td><td><code>[3, 2]</code></td><td>$1\times3+2\times2=7$</td></tr>
+          </tbody>
+        </table>
+        <p>这些分数可以很大也可以为负，不能直接当“比例”。先除以 $\sqrt{d_k}$ 做缩放。这里 $d_k=2$，所以 $\sqrt{d_k}\approx1.414$：</p>
         <table>
           <thead>
             <tr><th>Key</th><th>她</th><th>指</th><th>小红</th></tr>
           </thead>
           <tbody>
-            <tr><td>score</td><td>1.0</td><td>0.0</td><td>2.0</td></tr>
-            <tr><td>softmax 后权重</td><td>0.245</td><td>0.090</td><td>0.665</td></tr>
+            <tr><td>raw score</td><td>4</td><td>1</td><td>7</td></tr>
+            <tr><td>scaled score</td><td>2.83</td><td>0.71</td><td>4.95</td></tr>
+            <tr><td>softmax 后权重</td><td>约 0.106</td><td>约 0.013</td><td>约 0.881</td></tr>
           </tbody>
         </table>
-        <p>这说明“她”主要看“小红”，也保留一点自信息。权重加起来等于 1。最后，“她”的新表示就是按这些权重混合各 token 的 Value：</p>
-        <div class="math-block">$$z_{\text{她}} = \sum_j \alpha_{\text{她},j} v_j$$</div>
+        <p>如果不除以 $\sqrt{d_k}$，raw score 进入 softmax 会更尖，最大项更容易接近 1，其他项接近 0。维度越高，点积方差越大，softmax 越容易饱和，训练梯度也更不稳定。缩放不是语义技巧，而是数值稳定技巧。</p>
 
-        <h2 id="matrix">第四层台阶：矩阵公式只是把所有 Query 一次算完</h2>
+        <h2 id="softmax">Softmax：把分数变成可加权的比例</h2>
+        <p>Softmax 的输入是一行 scores，输出是一行非负权重：</p>
+        <div class="math-block">$$\alpha_{ij}=\frac{\exp(s_{ij})}{\sum_m \exp(s_{im})}$$</div>
+        <p>为什么不用“每个 score 直接除以总和”？因为 score 可能是负数，总和也可能接近 0，直接归一化会得到负权重或不稳定比例。指数函数有三个好处：输出永远为正；高分会被放大得更多；整个函数可微，方便反向传播。Softmax 叫“soft max”，是因为它像一个可微的近似最大选择：最高分权重大，但不是硬选唯一一个。</p>
+        <p>softmax 后权重一定加起来等于 1，因为分母就是所有指数值的总和。因此这一行权重可以理解成“第 i 个位置从各个位置取信息的比例”。这不是概率的唯一解释，但作为 attention weight 很自然。</p>
+
+        <h2 id="value-aggregation">为什么最后加权 Value，而不是 Key</h2>
+        <p>Key 的职责是“被匹配”，Value 的职责是“被取走”。这两件事分开很重要。一个位置可以用某种索引特征让别人找到自己，但真正贡献给别人的内容可以是另一组特征。数据库里也类似：索引用来查找，记录内容才是读出来的数据。</p>
+        <p>假设三个 Value 是：</p>
+        <table>
+          <thead>
+            <tr><th>Value</th><th>向量</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>$v_{\text{她}}$</td><td><code>[1, 0]</code></td></tr>
+            <tr><td>$v_{\text{指}}$</td><td><code>[0, 1]</code></td></tr>
+            <tr><td>$v_{\text{小红}}$</td><td><code>[3, 1]</code></td></tr>
+          </tbody>
+        </table>
+        <p>那么“她”的新上下文向量就是：</p>
+        <div class="math-block">$$z_{\text{她}} = \sum_j \alpha_{\text{她},j} v_j$$</div>
+        <p>代入上面的权重，得到大约：</p>
+        <div class="math-block">$$z_{\text{她}}\approx0.106[1,0]+0.013[0,1]+0.881[3,1]=[2.749,0.894]$$</div>
+        <p>这一步之后，第“她”这个位置的 hidden state 已经混入了“小红”的 Value，所以它开始拥有当前层可见范围内的上下文。后面还会经过输出投影、残差、LayerNorm、MLP，形成下一层 hidden state。</p>
+
+        <h2 id="matrix">矩阵公式：把所有 Query 一次算完</h2>
         <p>如果序列里有 $n$ 个 token，每个 token 都要当一次 Query。逐个写太慢，所以用矩阵一次性写完：</p>
         <div class="math-block">$$Q,K,V \in \mathbb{R}^{n \times d_k},\qquad QK^T \in \mathbb{R}^{n \times n}$$</div>
         <p>$QK^T$ 的第 $i$ 行表示“第 $i$ 个 token 看所有 token 的原始分数”。第 $j$ 列表示“所有 token 看第 $j$ 个 token 的分数”。softmax 是按行做的，因为每一行都要变成“某个 Query 看全体 Key 的权重分布”。</p>
         <div class="math-block">$$\text{Attention}(Q,K,V) = \text{softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right)V$$</div>
         <p>把这行公式翻译成人话：</p>
         <ul>
-          <li>$QK^T$：所有人拿自己的问题，去匹配所有人的标签。</li>
+          <li>$QK^T$：所有 query 同时和所有 key 点积，得到 $n\times n$ 的 score 矩阵。</li>
           <li>$\sqrt{d_k}$：缩放分数，避免维度大时点积过大。</li>
           <li>softmax：每一行分数变成权重，合计为 1。</li>
           <li>乘 $V$：按权重把内容混合回来，得到每个 token 的新表示。</li>
         </ul>
 
-        <h2 id="mask">第五层台阶：mask 决定“能看谁”</h2>
+        <h2 id="mask">mask：决定“能看谁”</h2>
         <p>有时不是所有 token 都允许互相看。语言模型从左到右生成时，当前位置不能偷看未来 token。这时会在 softmax 前把禁止看的分数改成极小值，softmax 后权重近似 0。</p>
         <table>
           <thead>
@@ -119,7 +172,7 @@
         <h2 id="checkpoint">小检查：看到 QKV 时怎么不慌</h2>
         <p>请你在脑子里把公式拆成三句话：</p>
         <ol>
-          <li>每个 token 先从 $x_i$ 变出 $q_i,k_i,v_i$。</li>
+          <li>每个位置先从当前 hidden state $h_i^\ell$ 变出 $q_i,k_i,v_i$。</li>
           <li>某个 $q_i$ 和所有 $k_j$ 点积，得到“我该看谁”的分数。</li>
           <li>softmax 后按权重混合所有 $v_j$，得到这个 token 的新表示。</li>
         </ol>

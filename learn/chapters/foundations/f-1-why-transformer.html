@@ -27,6 +27,23 @@
         <h1>为什么会有 Transformer？</h1>
         <p class="lede">这一节先不碰 Q/K/V。我们只解决一个问题：为什么现代 VLA、LLM、VLM 都喜欢把输入排成一串向量，再交给 Transformer 处理？如果你是小白，请把这里当成“进场券”：看懂 token、向量、序列、并行通信四个词，后面的 Attention 才不会像魔法。</p>
 
+        <h2 id="personification">先拆掉一个比喻：不是 token 真的在思考</h2>
+        <p>教程里会说“每个 token 问别人”“token 自己加工信息”。这是教学拟人化，不是实现事实。真实实现里没有小人、没有每个 token 私有的函数，也没有 token 自己主动做事。真实存在的是一个矩阵：第 $i$ 行是一条向量，代表第 $i$ 个序列位置当前保存的信息。</p>
+        <table>
+          <thead>
+            <tr><th>教程说法</th><th>更准确的说法</th><th>真实对象</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>第 i 个 token 自己</td><td>序列第 i 个位置上的当前向量状态</td><td>矩阵第 i 行，常写 $x_i$ 或 $h_i^\ell$</td></tr>
+            <tr><td>token 在问问题</td><td>这行向量乘 $W_Q$ 得到 query，再和所有 key 点积</td><td>矩阵乘法和点积</td></tr>
+            <tr><td>token 有自己的表示</td><td>第 i 个位置当前的 representation / hidden state</td><td>一条 $d$ 维向量</td></tr>
+          </tbody>
+        </table>
+        <div class="callout warn">
+          <div class="c-h">本书的拟人化边界</div>
+          <p>“token 自己”永远只表示“某个序列位置上的向量”。它没有记忆槽、函数或意识；它的“状态”就是当前层矩阵中的一行。这个边界越早划清，Q/K/V 越不容易被误解成玄学。</p>
+        </div>
+
         <div class="callout note">
           <div class="c-h">Part F 的读法</div>
           <p>前四节讲“模型怎么吃东西”：序列、Attention、Block、Token/Embedding。后四节讲“模型怎么学动作”：MSE、Cross Entropy、Gym action space、概率分布与生成模型。读完后，你应该能看懂后文反复出现的核心样本式：给观测和指令，输出一段动作 chunk。</p>
@@ -69,7 +86,7 @@
         </ul>
         <div class="callout">
           <div class="c-h">一句话记住 Transformer 的本质</div>
-          <p>Transformer = 一串同宽向量 + token 间通信的 Attention + 每个 token 自己加工信息的 MLP，再把这些层重复堆起来。</p>
+          <p>Transformer = 一串同宽向量 + 序列位置之间通信的 Attention + 每个位置逐行加工信息的 MLP，再把这些层重复堆起来。</p>
         </div>
 
         <h2 id="what-not">别把 Transformer 神化</h2>

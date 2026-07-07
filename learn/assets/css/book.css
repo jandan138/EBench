@@ -288,7 +288,10 @@ input[type="range"]::-moz-range-thumb { width: 15px; height: 15px; border-radius
     display: block;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
+    contain: paint;
   }
+  .article th, .article td { min-width: 140px; }
+  .article th:first-child, .article td:first-child { min-width: 92px; }
   .cover h1 { font-size: 2.4rem; }
 }
 @media (max-width: 560px) {

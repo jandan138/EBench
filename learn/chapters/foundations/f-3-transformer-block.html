@@ -32,6 +32,35 @@
         <div class="math-block">$$X \in \mathbb{R}^{n \times d} \quad \longrightarrow \quad \text{Block}(X) \in \mathbb{R}^{n \times d}$$</div>
         <p>这很关键。因为形状不变，模型可以把很多个 Block 叠起来。第一层可能让“她”看到“小红”，第十层可能已经形成更抽象的“人物关系”，更深层再把语言、图像、状态融合起来。</p>
 
+        <h2 id="full-flow">一层 Transformer 的完整数据流</h2>
+        <p>把 F-1 到 F-2 的内容连起来，一条样本进到某一层 Transformer，大致走下面这条路。这里用文字流程图，是为了让你先抓住数据形状；真实实现会把这些步骤合成高效的矩阵运算。</p>
+        <div class="code" data-lang="text"><div class="code-h"><span class="fn">从字符串到下一层 hidden state</span><button class="cp">复制</button></div><pre><code>字符串 / 图像 / 状态
+  ↓
+tokenizer 或模态 encoder
+  ↓
+token id / patch feature / state vector
+  ↓
+embedding 查表或线性投影
+  ↓
+加 position / modality 信息
+  ↓
+h^0 或当前层输入 H^l                 shape: [n, d]
+  ↓
+Q = H^l W_Q, K = H^l W_K, V = H^l W_V
+  ↓
+S = Q K^T / sqrt(d_k)                 shape: [n, n]
+  ↓
+A = softmax(S + mask)                 shape: [n, n]
+  ↓
+Z = A V                               shape: [n, d_v]
+  ↓
+输出投影 + Residual + LayerNorm
+  ↓
+MLP / FFN + Residual + LayerNorm
+  ↓
+下一层 hidden state H^{l+1}           shape: [n, d]</code></pre></div>
+        <p>这张图回答一个常见困惑：Embedding 只在开头负责把输入变成初始向量；后面每层传递的是 hidden state。Q/K/V 不是新 token，而是当前 hidden state 为了做 Attention 临时投影出来的工作矩阵。</p>
+
         <h2 id="four-pieces">一个 Block 可以拆成四类零件</h2>
         <table>
           <thead>
@@ -47,8 +76,30 @@
 
         <h2 id="attention-params">Attention 参数：四个投影</h2>
         <p>F-2 里我们见过三套矩阵：$W_Q,W_K,W_V$。完整 Attention 通常还会有一个输出投影 $W_O$，把混合后的信息整理回模型宽度。</p>
-        <div class="math-block">$$Q=XW_Q,\quad K=XW_K,\quad V=XW_V,\quad \text{Out}=\text{Attention}(Q,K,V)W_O$$</div>
+        <div class="math-block">$$\begin{aligned}
+Q &= XW_Q \\
+K &= XW_K \\
+V &= XW_V \\
+A &= \text{Attention}(Q,K,V) \\
+\text{Out} &= AW_O
+\end{aligned}$$</div>
         <p>如果忽略多头细节，并假设宽度都是 $d$，这四个矩阵的参数量大约是 $4d^2$。你不需要背这个数，只要理解：Attention 的参数主要在“如何生成 Q/K/V，以及混合后怎么投回去”。</p>
+
+        <h2 id="gpu-view">从 GPU 看：没有小人，只有张量</h2>
+        <p>教程喜欢说“每个 token 看谁”，是因为人脑更容易理解。但 GPU 实际保存的是一批矩阵：</p>
+        <table>
+          <thead>
+            <tr><th>张量</th><th>典型 shape</th><th>含义</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>$H$</td><td>$[B,n,d]$</td><td>batch 里每个序列位置的当前 hidden state</td></tr>
+            <tr><td>$Q,K,V$</td><td>$[B,n,d_k]$</td><td>由 $H$ 乘不同权重矩阵得到的工作张量</td></tr>
+            <tr><td>$S=QK^T$</td><td>$[B,n,n]$</td><td>所有 query-key pair 的分数表</td></tr>
+            <tr><td>$A=\text{softmax}(S)$</td><td>$[B,n,n]$</td><td>每一行加起来为 1 的 attention weights</td></tr>
+            <tr><td>$Z=AV$</td><td>$[B,n,d_v]$</td><td>所有位置同时完成的 value 加权汇聚</td></tr>
+          </tbody>
+        </table>
+        <p>为什么一次矩阵乘法能完成所有 token 的更新？因为 $QK^T$ 会把所有 $q_i\cdot k_j$ 同时算出来，得到整张 $n\times n$ 关系表；接着 $AV$ 又把每一行权重对所有 Value 的加权和同时算出来。拟人化是读者视角，矩阵乘法才是实现视角。</p>
 
         <h2 id="mlp">MLP 参数：逐 token 的加工厂</h2>
         <p>Attention 让 token 互相通信，但通信完还需要加工。MLP 做的就是这件事。它对每个 token 分别应用同一套小网络，不直接让不同 token 交流。</p>
@@ -82,6 +133,23 @@ $$Z = Y + \text{MLP}(\text{LN}(Y))$$</div>
         <div class="bridge rl">
           <div class="c-h"><span class="tag">从 RL 看</span> 共享大脑与动作小脑</div>
           <p>如果把 VLM backbone 看成通用感知和语言大脑，action expert 就像给动作 token 加的专门控制小脑。它通常不会把全部能力从零学一遍，而是在共享表示上增加适合动作预测的参数路径。</p>
+        </div>
+
+        <h2 id="advanced-bridges">三个进阶问题：Multi-Head、KV Cache、VLM/VLA</h2>
+        <p>这些概念后面还会遇到，Part F 先给最小落点。</p>
+        <table>
+          <thead>
+            <tr><th>概念</th><th>先这样理解</th><th>为什么重要</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Multi-Head Attention</td><td>不是只做一套 $W_Q,W_K,W_V$，而是并行做多套投影空间。</td><td>不同 head 可以学不同几何关系：指代、位置、模态对齐、动作依赖等。</td></tr>
+            <tr><td>KV Cache</td><td>自回归推理时，过去 token 的 $K,V$ 不变，可以缓存；新 token 只算自己的 $Q$ 去查缓存。</td><td>生成长序列时避免重复计算过去所有 token 的 K/V。</td></tr>
+            <tr><td>VLM/VLA 共用 Attention</td><td>图像、语言、状态进入同一序列后，都是 hidden state 的行；Attention 机制相同。</td><td>跨模态对齐来自输入投影、位置/模态信息、mask 和训练目标共同塑造。</td></tr>
+          </tbody>
+        </table>
+        <div class="callout note">
+          <div class="c-h">WQ/WK/WV 的几何意义</div>
+          <p>它们学到的是“把当前 hidden state 投到适合匹配和取值的空间”。训练后，如果某类 query 应该关注某类 key，loss 会推动对应投影方向靠近；如果不该关注，推动它们远离或让分数被 mask/softmax 压低。所谓 Attention 学高维几何，本质就是这些投影空间和点积关系被训练塑形。</p>
         </div>
 
         <h2 id="checkpoint">小检查：判断两句话</h2>

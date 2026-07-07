@@ -27,6 +27,43 @@
         <h1>一切皆 Token + Embedding</h1>
         <p class="lede">“一切皆 token”这句话很容易误导小白，好像图像、状态、动作都被硬切成文字编号。更准确的说法是：不同模态进入 Transformer 前，都要被包装成同宽向量。离散对象通常查 embedding 表；连续对象通常通过线性层或 encoder 投影。</p>
 
+        <h2 id="string-id-vector">从字符串到向量：四个东西不要混</h2>
+        <p>你读 Transformer 时经常会看到 token、token id、embedding、hidden state 混在一起说。它们不是同一个东西，只是在一条流水线上前后相接。</p>
+        <table>
+          <thead>
+            <tr><th>名字</th><th>是什么</th><th>例子</th><th>模型里长什么样</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>字符串片段</td><td>人能读的文本片段</td><td><code>"她"</code>、<code>"Transformer"</code></td><td>还不是模型输入</td></tr>
+            <tr><td>token</td><td>tokenizer 切出的基本单位</td><td>一个字、一个子词、一个特殊符号</td><td>概念单位</td></tr>
+            <tr><td>token id</td><td>词表里的整数编号</td><td><code>3912</code></td><td>整数索引</td></tr>
+            <tr><td>embedding</td><td>id 查表得到的初始向量</td><td>$e_i=E[\text{id}_i]$</td><td>$d$ 维浮点向量</td></tr>
+          </tbody>
+        </table>
+        <p>所以“token 是不是一个 ID？”答案是：日常口语里会混用，但严格说，token 是切分出来的单位，token id 是它在词表里的整数编号，embedding 是这个 id 查表后的向量。模型真正能做矩阵乘法的是向量，不是字符串，也不是中文词本身。</p>
+
+        <h2 id="hidden-lifecycle">Embedding、representation、hidden state 的生命周期</h2>
+        <p>第一层 Transformer 看到的通常不是裸 embedding，而是 token embedding 加上位置信息。最小写法是：</p>
+        <div class="math-block">$$h_i^0 = x_i = e_i + p_i$$</div>
+        <p>$e_i$ 是第 $i$ 个 token id 查表得到的 embedding，$p_i$ 是第 $i$ 个位置的位置 embedding 或位置编码。很多论文直接把第一层输入写成 $x_i$，不是因为忘了 $e_i+p_i$，而是因为后面推导只关心“当前层输入的那条向量”。</p>
+        <table>
+          <thead>
+            <tr><th>术语</th><th>最准确的含义</th><th>什么时候和别的词相同</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>embedding</td><td>输入端查表或投影得到的初始向量</td><td>刚进入模型时，常是 hidden state 的起点</td></tr>
+            <tr><td>hidden state</td><td>某一层、某一位置当前保存的向量</td><td>$h_i^0$ 可由 embedding 加位置得到；$h_i^1$ 以后已不是 embedding</td></tr>
+            <tr><td>representation</td><td>“表示”的泛称，强调这条向量编码了什么信息</td><td>embedding 和 hidden state 都是 representation</td></tr>
+          </tbody>
+        </table>
+        <p>经过一层 Transformer 后，hidden state 会被更新：</p>
+        <div class="math-block">$$h_i^{\ell+1} = \text{TransformerBlock}^{\ell}(h_1^\ell,\ldots,h_n^\ell)_i$$</div>
+        <p>这行式子说明两件事。第一，下一层第 $i$ 个位置的向量来自上一层所有位置的共同计算，不只是原来的第 $i$ 个 embedding。第二，后面的 $h_i^1,h_i^2,\ldots$ 已经包含上下文信息，所以再叫它 embedding 就不准确了，应该叫 hidden state 或 representation。</p>
+        <div class="callout note">
+          <div class="c-h">为什么论文爱写 $x_i$</div>
+          <p>$x_i$ 常常是“当前正在处理的第 $i$ 个位置向量”的通用符号。第一层时它可能等于 $e_i+p_i$；第 10 层时它可能表示第 10 层输入 hidden state。读论文时要看上下文，不要默认所有 $x_i$ 都是原始 embedding。</p>
+        </div>
+
         <h2 id="two-routes">两条进场路线：查表和投影</h2>
         <p>先把 token 分成两类，你会少很多困惑。</p>
         <table>

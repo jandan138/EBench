@@ -5,6 +5,10 @@
     const tokens = ["她", "在", "指", "小红", "的", "方向"];
     let queryIdx = 0;
     let maskMode = "full";
+    let viewMode = "intuition";
+    const toyQ = [[1, 2], [0.4, 0.1], [0.7, 1.3], [1.2, 1.9], [0.2, 0.1], [0.6, 0.5]];
+    const toyK = [[2, 1], [0.2, 0.4], [1, 0], [3, 2], [0.1, 0.2], [0.5, 0.6]];
+    const toyV = [[1, 0], [0.2, 0.2], [0, 1], [3, 1], [0.1, 0.1], [0.5, 1]];
 
     const wrap = EBW.el("div", { style: "font-size:.9rem" });
     const statusBar = EBW.el("div", {
@@ -19,6 +23,14 @@
       (v) => { maskMode = v; render(); }
     ));
     modeRow.appendChild(modeCtrl);
+    const viewCtrl = EBW.el("div", { class: "ctrl" });
+    viewCtrl.appendChild(EBW.el("label", null, "<span>视图</span>"));
+    viewCtrl.appendChild(EBW.seg(
+      [{ label: "直觉", value: "intuition" }, { label: "手算", value: "calc" }],
+      viewMode,
+      (v) => { viewMode = v; render(); }
+    ));
+    modeRow.appendChild(viewCtrl);
     const hint = EBW.el("div", { style: "font-size:.78rem;color:var(--ink-faint);margin-bottom:6px" }, "点击下方词切换 Query（提问者）");
     const tokenRow = EBW.el("div", { style: "display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px" });
     const matrixWrap = EBW.el("div", { style: "margin:10px 0" });
@@ -53,6 +65,42 @@
       return exps.map(e => e / sum);
     }
 
+    function dot(a, b) { return a.reduce((sum, x, i) => sum + x * b[i], 0); }
+
+    function calcScores(q) {
+      const raw = toyK.map(k => dot(toyQ[q], k));
+      const scale = Math.sqrt(toyQ[q].length);
+      return raw.map((s, j) => (maskMode === "causal" && j > q) ? -99 : s / scale);
+    }
+
+    function renderCalc(qTok, scores, weights) {
+      const raw = toyK.map(k => dot(toyQ[queryIdx], k));
+      const scale = Math.sqrt(toyQ[queryIdx].length);
+      const z = [0, 1].map(dim => weights.reduce((sum, w, j) => sum + w * toyV[j][dim], 0));
+      const rows = tokens.map((tok, j) => {
+        const blocked = maskMode === "causal" && j > queryIdx;
+        return `<tr>
+          <td>${tok}</td>
+          <td>[${toyK[j].map(v => v.toFixed(1)).join(", ")}]</td>
+          <td>[${toyV[j].map(v => v.toFixed(1)).join(", ")}]</td>
+          <td>${raw[j].toFixed(2)}</td>
+          <td>${blocked ? "mask" : (raw[j] / scale).toFixed(2)}</td>
+          <td>${blocked ? "0.000" : weights[j].toFixed(3)}</td>
+        </tr>`;
+      }).join("");
+      return `
+        <div style="margin-top:10px;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--surface-2)">
+          <div style="font-size:.8rem;color:var(--ink-soft);margin-bottom:6px">手算模式：以「${qTok}」为 Query，q = [${toyQ[queryIdx].map(v => v.toFixed(1)).join(", ")}]，d_k = ${toyQ[queryIdx].length}</div>
+          <div style="overflow-x:auto">
+            <table style="width:100%;border-collapse:collapse;font-size:.78rem">
+              <thead><tr><th>Key位置</th><th>k_j</th><th>v_j</th><th>q·k</th><th>/sqrt(d_k)</th><th>softmax</th></tr></thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+          <div style="font-family:var(--mono);font-size:.78rem;margin-top:8px;color:var(--ink-soft)">new vector z_${qTok} = Σ weight_j · v_j ≈ [${z.map(v => v.toFixed(3)).join(", ")}]</div>
+        </div>`;
+    }
+
     function render() {
       const qTok = tokens[queryIdx];
       statusBar.innerHTML =
@@ -68,7 +116,7 @@
         b.setAttribute("aria-pressed", on ? "true" : "false");
       });
 
-      const scores = attentionScores(queryIdx);
+      const scores = viewMode === "calc" ? calcScores(queryIdx) : attentionScores(queryIdx);
       const weights = softmax(scores);
 
       // 单行权重条：当前 Query 对所有 Key 的关注度
@@ -106,7 +154,8 @@
       outWrap.innerHTML =
         `<div style="font-size:.8rem;color:var(--ink-soft)">按权重混合各词的 Value（内容）≈</div>` +
         `<div style="font-family:var(--mono);background:var(--surface-2);padding:6px 10px;border-radius:6px;margin-top:4px">${weighted}</div>` +
-        `<div style="margin-top:6px;font-size:.78rem;color:var(--ink-faint)">Query 提问 → Key 匹配 → softmax 权重 → 按权重取 Value。mask 会在 softmax 前屏蔽不允许看的位置。</div>`;
+        `<div style="margin-top:6px;font-size:.78rem;color:var(--ink-faint)">Query 提问 → Key 匹配 → softmax 权重 → 按权重取 Value。mask 会在 softmax 前屏蔽不允许看的位置。</div>` +
+        (viewMode === "calc" ? renderCalc(qTok, scores, weights) : "");
     }
 
     wrap.appendChild(statusBar);
