@@ -25,27 +25,83 @@
       <article class="article">
         <div class="eyebrow">Part F · Foundations · f-8</div>
         <h1>概率分布、多模态与生成模型</h1>
-        <p class="lede">为什么同一个观测下会有多种合理动作？为什么直接回归会失败？这一节从概率分布的角度，把“为什么需要 diffusion / flow matching”讲透。f-5 用「左抓 / 右抓」说明了 MSE 的 <b>平均化</b>；f-7 说连续动作需要 <b>分布</b> 而不只是一个向量。这一节把两件事合成一幅图：<b>真实动作分布往往是多峰的</b>，单峰高斯或单点回归都表达不了「多种都对」。</p>
+        <p class="lede">F-5 说 MSE 会把左绕和右绕平均成中间动作。F-7 说机器人动作常常是连续向量或动作 chunk。这一节把两件事合起来：VLA 真正想学的不是“唯一正确动作”，而是条件动作分布 $p(A_t \mid o_t)$。当这个分布有多个峰时，生成模型就有了用武之地。</p>
 
-        <h2 id="single-gaussian">一个高斯只能有一个峰</h2>
-        <p>普通高斯分布 $N(\mu, \Sigma)$ 只有一个中心。无论你怎么调，它都只能描述“最可能在这里”。当真实世界有两条完全不同的正确做法时，一个高斯就会把它们平均掉。</p>
-        <p>用分布语言重述 f-5：左抓、右抓是两个峰；单高斯的最优拟合是 <b>一个中间的峰</b>——和 MSE 求均值是同一回事。下面交互里可以直观看到 <b>单峰失败、多峰成功</b>。</p>
+        <h2 id="distribution">先把“答案”从一个点改成一个分布</h2>
+        <p>对同一帧观测 $o_t$，专家可能有多种合理动作 chunk。比如绕过障碍物时，可以从左边绕，也可以从右边绕。我们可以把“未来动作”看成随机变量 $A_t$，目标是建模：</p>
+        <div class="math-block">$$p(A_t \mid o_t)$$</div>
+        <p>这句话翻译成人话：在当前观测条件下，哪些未来动作更可能、更合理？MSE 只给一个点 $\hat A_t$；概率模型给的是一整片可能性。</p>
+
+        <h2 id="density">连续分布里，讲的是密度而不是某个点的概率</h2>
+        <p>离散 token 可以说“pick 的概率是 0.7”。连续动作不一样。连续空间里某一个精确点的概率通常是 0，因为点没有宽度。我们真正关心的是某个区域附近的概率密度：左绕轨迹附近密度高，障碍物正中间密度低。</p>
+        <div class="callout note">
+          <div class="c-h">新手口径</div>
+          <p>你可以先把 density 想成“热度图”。热的地方代表很多合理动作会落在那里；冷的地方代表很少或没有示范会落在那里。生成模型希望采样落在热区，而不是落在两个热区之间的冷区。</p>
+        </div>
+
+        <h2 id="single-vs-multi">单峰、高斯、多峰</h2>
+        <p>最简单的连续分布是高斯：</p>
+        <div class="math-block">$$A \sim \mathcal{N}(\mu,\Sigma)$$</div>
+        <p>它有一个中心 $\mu$，可以表达“答案大概在这里，周围有噪声”。如果真实动作只有一类做法，高斯很合理。但如果真实动作有左绕和右绕两个相隔很远的峰，一个高斯会被迫用中间均值解释它们。</p>
+        <p>两峰混合分布可以写成：</p>
+        <div class="math-block">$$p(a\mid o)=0.5\,\mathcal{N}(\mu_1,\Sigma)+0.5\,\mathcal{N}(\mu_2,\Sigma)$$</div>
+        <p>$\mu_1$ 和 $\mu_2$ 分别对应两种动作模式。关键不是这个公式多高级，而是它表达了一个常识：多种做法都对时，分布应该有多个高密度区域。</p>
 
         <div class="lab">
           <div class="lab-h"><span class="lab-tag">interactive</span><span class="lab-t">单高斯 vs 多模态 vs Flow 采样</span></div>
           <div class="lab-body" data-widget="multimodal-distribution"></div>
-          <div class="lab-cap">切换不同模式，看单高斯如何失败，而生成模型可以从不同噪声采样到不同模态。</div>
+          <div class="lab-cap">切换不同模式。单高斯只有一个中心；多模态有多个峰；Flow/Diffusion 的直觉是从不同噪声出发，采样到不同合理峰。</div>
         </div>
 
-        <h2 id="multimodal">多模态分布</h2>
-        <p>真实动作分布往往是多峰的（multimodal）。<b>多模态</b> 这里不是指「图像 + 语言」，而是 <b>同一输入下，输出分布有多个峰</b>——多种动作都合理。生成模型的目标不是输出 $\mu$，而是 <b>从整个分布里采样</b>，每次采样可以落在不同峰上。</p>
+        <h2 id="multimodal">这里的“多模态”不是图文多模态</h2>
+        <p>“多模态”这个词在 VLA 里有两个常见含义，必须分清：</p>
+        <table>
+          <thead>
+            <tr><th>说法</th><th>意思</th><th>例子</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>多模态输入</td><td>输入来自多种 modality。</td><td>图像 + 语言 + 状态。</td></tr>
+            <tr><td>多模态分布</td><td>同一输入下，输出分布有多个峰。</td><td>同一画面下左绕/右绕都合理。</td></tr>
+          </tbody>
+        </table>
+        <p>本节说的 multimodal action distribution 是第二种：输出动作分布有多个峰。它和“图像+语言”的多模态输入不是一回事。</p>
 
-        <h2 id="why-flow">为什么 Flow / Diffusion 能解决</h2>
-        <p>它们不直接预测动作，而是学习“如何把噪声一步步变成合理动作”。不同的起始噪声会被推向不同的峰，从而自然地保留了多模态性。</p>
-        <p>它们学的是 <b>从简单噪声到复杂动作分布</b> 的变换。推理时换不同的起始噪声，会被推到不同的峰——相当于 <b>保留了多种正确行为</b>，而不是像 MSE 那样焊死在均值上。π0 的 flow matching 就是这一路在 VLA 里的代表。</p>
+        <h2 id="generative">生成模型：从噪声采样到动作</h2>
+        <p>生成模型的核心心智模型是：不要直接输出一个平均动作，而是从一个简单噪声 $\epsilon$ 出发，在观测 $o_t$ 的条件下生成一个动作样本。</p>
+        <div class="math-block">$$A_t = g_\theta(\epsilon, o_t),\qquad \epsilon \sim \mathcal{N}(0,I)$$</div>
+        <p>不同噪声可以被推到不同合理峰。一个噪声最后变成左绕，另一个噪声最后变成右绕。这样模型保留了“多种都对”的结构，而不是把它们压成单点均值。</p>
+        <table>
+          <thead>
+            <tr><th>方法</th><th>它输出什么</th><th>多峰能力</th><th>Part 5 会讲什么</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>MSE 回归</td><td>一个点</td><td>弱，容易均值化。</td><td><a href="../05-theory/5-2-regression-mse.html">5-2</a>、<a href="../05-theory/5-3-mode-averaging.html">5-3</a></td></tr>
+            <tr><td>单高斯策略</td><td>一个均值 + 方差</td><td>有限，通常一个主峰。</td><td>作为分布建模过渡。</td></tr>
+            <tr><td>Flow / Diffusion</td><td>从噪声生成样本</td><td>强，可表示复杂多峰。</td><td><a href="../05-theory/5-4-generative-idea.html">5-4</a> 到 <a href="../05-theory/5-6-rectified-flow.html">5-6</a></td></tr>
+          </tbody>
+        </table>
+
+        <h2 id="flow-boundary">这里先不讲完整 Flow Matching</h2>
+        <p>你现在只需要一个画面：噪声点在条件观测的引导下移动，最后落到合理动作区域。Part 5 会再讲向量场、ODE、Euler 这些数学和推理细节。Part F 的任务只是让你接受“为什么要从噪声生成动作”，而不是把完整算法提前塞进来。</p>
+
+        <div class="bridge rl">
+          <div class="c-h"><span class="tag">从 RL 看</span> 策略本来就是分布</div>
+          <p>RL 里常写 $\pi(a\mid o)$，这本来就是条件动作分布。确定性策略只输出一个动作，随机策略可以采样。VLA 的 flow/diffusion policy 可以看成更强的连续动作分布建模器。</p>
+        </div>
+
+        <h2 id="checkpoint">小检查：三种场景怎么选</h2>
+        <ol>
+          <li>同一输入只有一个稳定连续答案：MSE 是合理起点。</li>
+          <li>输出已经被量化为有限 token：Softmax + CE 是合理起点。</li>
+          <li>同一观测下有多条相隔很远的连续轨迹都成功：生成模型更能表达真实分布。</li>
+        </ol>
+        <div class="callout warn">
+          <div class="c-h">常见误解</div>
+          <p>生成模型不是因为“更时髦”才用于机器人动作，而是因为动作数据常常有多峰结构。它解决的是表达能力问题：保留多个高密度动作区域，并从其中采样。</p>
+        </div>
 
         <h2 id="recap">这一节你需要带走的</h2>
-        <p>单峰分布（高斯）无法表达「多种都对」的情况。生成模型通过从噪声到数据的变换，学会了对多模态分布采样。这就是 Part 5 后面所有 flow matching 的根本动机。Part F 收束：<b>Transformer 处理 token 序列（f-1～f-4）</b>；<b>动作可回归、可分类、可生成（f-5～f-8）</b>。后面 Part 会在真实 VLA 系统里看这些零件如何组装。</p>
+        <p>真实机器人动作常常应该被看成条件分布 $p(A_t\mid o_t)$，而不是唯一向量。连续分布里看的是密度和区域概率；多模态动作分布表示同一观测下有多个合理峰；生成模型通过从噪声到动作的变换保留这些峰。到这里，Part F 的地基铺完了：Transformer 负责表示和融合，MSE/CE/生成模型负责不同动作学习路线。接下来读 Part 0 到 Part 5 时，遇到 QKV、action chunk、FAST、flow matching、EvalClient，都应该有可以落脚的直觉。</p>
       </article>
     </main>
     <aside class="rail" id="rail"></aside>

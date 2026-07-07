@@ -4,11 +4,21 @@
   window.EBWidgets["attention-viz"] = function (root) {
     const tokens = ["她", "在", "指", "小红", "的", "方向"];
     let queryIdx = 0;
+    let maskMode = "full";
 
     const wrap = EBW.el("div", { style: "font-size:.9rem" });
     const statusBar = EBW.el("div", {
       style: "margin-bottom:10px;padding:8px 12px;border-radius:8px;background:var(--accent-soft);border:1px solid var(--accent)"
     });
+    const modeRow = EBW.el("div", { class: "ctrl-row", style: "margin-bottom:8px" });
+    const modeCtrl = EBW.el("div", { class: "ctrl" });
+    modeCtrl.appendChild(EBW.el("label", null, "<span>能看谁</span>"));
+    modeCtrl.appendChild(EBW.seg(
+      [{ label: "Full", value: "full" }, { label: "Causal", value: "causal" }],
+      maskMode,
+      (v) => { maskMode = v; render(); }
+    ));
+    modeRow.appendChild(modeCtrl);
     const hint = EBW.el("div", { style: "font-size:.78rem;color:var(--ink-faint);margin-bottom:6px" }, "点击下方词切换 Query（提问者）");
     const tokenRow = EBW.el("div", { style: "display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px" });
     const matrixWrap = EBW.el("div", { style: "margin:10px 0" });
@@ -28,6 +38,7 @@
     function attentionScores(q) {
       const n = tokens.length;
       return Array(n).fill(0).map((_, j) => {
+        if (maskMode === "causal" && j > q) return -99;
         if (q === 0 && j === 3) return 2.8; // 她 -> 小红
         if (q === 2 && j === 3) return 2.2; // 指 -> 小红
         if (q === 3) return (j === 0 || j === 5) ? 1.8 : 0.6; // 小红 -> 她/方向
@@ -47,7 +58,7 @@
       statusBar.innerHTML =
         `<div style="font-size:.78rem;color:var(--ink-soft);margin-bottom:2px">当前 Query（提问者）</div>` +
         `<div style="font-size:1.15rem;font-weight:600;color:var(--accent)">「${qTok}」</div>` +
-        `<div style="font-size:.76rem;color:var(--ink-faint);margin-top:4px">它在问：「${qTok}」和句子里哪些词最相关？</div>`;
+        `<div style="font-size:.76rem;color:var(--ink-faint);margin-top:4px">它在问：「${qTok}」和句子里哪些词最相关？${maskMode === "causal" ? " Causal 模式下不能看右侧未来词。" : " Full 模式下整句都能看。"}</div>`;
 
       buttons.forEach((b, i) => {
         const on = i === queryIdx;
@@ -68,12 +79,13 @@
 
       const barWrap = EBW.el("div", { style: "display:flex;gap:4px;align-items:flex-end;height:72px;margin-bottom:6px" });
       weights.forEach((w, j) => {
+        const blocked = maskMode === "causal" && j > queryIdx;
         const col = EBW.el("div", { style: "flex:1;display:flex;flex-direction:column;align-items:center;gap:4px" });
         const h = Math.max(6, w * 56);
         col.appendChild(EBW.el("div", {
-          style: `width:100%;height:${h}px;border-radius:4px 4px 0 0;background:${j === queryIdx ? "var(--border-strong)" : "var(--interactive)"};opacity:${j === queryIdx ? 0.35 : 0.55 + w * 0.45}`
+          style: `width:100%;height:${h}px;border-radius:4px 4px 0 0;background:${blocked ? "var(--border)" : (j === queryIdx ? "var(--border-strong)" : "var(--interactive)")};opacity:${blocked ? 0.28 : (j === queryIdx ? 0.35 : 0.55 + w * 0.45)}`
         }));
-        col.appendChild(EBW.el("div", { style: "font-family:var(--mono);font-size:.7rem;color:var(--ink-faint)" }, w.toFixed(2)));
+        col.appendChild(EBW.el("div", { style: "font-family:var(--mono);font-size:.7rem;color:var(--ink-faint)" }, blocked ? "mask" : w.toFixed(2)));
         col.appendChild(EBW.el("div", { style: "font-size:.78rem;color:var(--ink-soft)" }, tokens[j]));
         barWrap.appendChild(col);
       });
@@ -94,10 +106,11 @@
       outWrap.innerHTML =
         `<div style="font-size:.8rem;color:var(--ink-soft)">按权重混合各词的 Value（内容）≈</div>` +
         `<div style="font-family:var(--mono);background:var(--surface-2);padding:6px 10px;border-radius:6px;margin-top:4px">${weighted}</div>` +
-        `<div style="margin-top:6px;font-size:.78rem;color:var(--ink-faint)">Query 提问 → Key 匹配 → 按权重取 Value。读「她」时，模型会把「小红」的信息混进「她」的新表示里。</div>`;
+        `<div style="margin-top:6px;font-size:.78rem;color:var(--ink-faint)">Query 提问 → Key 匹配 → softmax 权重 → 按权重取 Value。mask 会在 softmax 前屏蔽不允许看的位置。</div>`;
     }
 
     wrap.appendChild(statusBar);
+    wrap.appendChild(modeRow);
     wrap.appendChild(hint);
     wrap.appendChild(tokenRow);
     wrap.appendChild(matrixWrap);

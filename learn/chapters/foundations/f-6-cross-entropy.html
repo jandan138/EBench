@@ -25,29 +25,81 @@
       <article class="article">
         <div class="eyebrow">Part F · Foundations · f-6</div>
         <h1>Cross Entropy 与 Softmax</h1>
-        <p class="lede">所有现代大模型（包括用 FAST 离散化动作的 VLA）在做“选下一个 token”时，用的几乎都是同一个损失：<span class="term">Cross Entropy</span>。这一节讲清楚它为什么这么流行。和 f-5 的 MSE 对比：<b>MSE 预测一个实数向量；Cross Entropy 在有限选项里「选一个」</b>。当动作被离散成 token（f-4），整条训练管线就和训 LLM 几乎一样。</p>
+        <p class="lede">F-5 的 MSE 是“预测一个连续向量”。Cross Entropy 是另一种常见训练目标：在有限选项里，把概率质量推到正确选项上。LLM 训练下一个词靠它；当动作被 FAST 这类 tokenizer 离散成 action token 时，动作训练也能借用这套机制。</p>
 
-        <h2 id="softmax">Softmax 把分数变成概率</h2>
-        <p>模型最后一层通常输出一排分数（logits）。Softmax 把它们变成加起来等于 1 的概率分布。</p>
-        <p>你在 f-2 Attention 公式里已经见过 softmax：那里把「相关性分数」变成 <b>注意力权重</b>；这里把「词表 logits」变成 <b>下一个 token 的概率</b>。同一数学操作，不同语义。</p>
+        <h2 id="logits">第一步：模型先吐 logits，不是概率</h2>
+        <p>分类模型最后通常输出一排原始分数，叫 <span class="term">logits</span>。比如模型要从 5 个动作词里选一个：</p>
+        <table>
+          <thead>
+            <tr><th>候选 token</th><th>pick</th><th>place</th><th>push</th><th>wait</th><th>other</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>logit</td><td>2.1</td><td>1.4</td><td>0.8</td><td>0.3</td><td>-0.5</td></tr>
+          </tbody>
+        </table>
+        <p>logit 可以是任意实数，不要求大于 0，也不要求加起来等于 1。它只是“模型偏好”的原始分数。要把它变成概率，就用 softmax。</p>
+
+        <h2 id="softmax">第二步：Softmax 把分数变成概率</h2>
+        <div class="math-block">$$p_i = \frac{\exp(z_i)}{\sum_j \exp(z_j)}$$</div>
+        <p>$z_i$ 是第 $i$ 个 logit。指数函数会放大高分和低分的差距；分母把所有选项归一化，让概率加起来等于 1。实际代码里会先减去最大 logit，避免指数爆炸，但数学含义不变。</p>
 
         <div class="lab">
-          <div class="lab-h"><span class="lab-tag">interactive</span><span class="lab-t">调节温度看概率分布变化</span></div>
+          <div class="lab-h"><span class="lab-tag">interactive</span><span class="lab-t">Softmax 温度：概率分布如何变尖或变平</span></div>
           <div class="lab-body" data-widget="softmax-temperature"></div>
-          <div class="lab-cap">温度低 → 模型更确定；温度高 → 更随机。训练时温度通常固定为 1。</div>
+          <div class="lab-cap">温度是推理/采样时常见的旋钮。训练 Cross Entropy 时通常按标准 logits 计算，不靠调高温度来“修”损失。</div>
         </div>
 
-        <h2 id="ce">Cross Entropy 在惩罚什么</h2>
-        <p>Cross Entropy 只关心“正确答案那个 token 的概率有多高”。它想把正确答案的概率推到接近 1。</p>
-        <div class="math-block">$$\mathcal{L}_{\text{CE}} = -\log p_\theta(y_{\text{true}} \mid x)$$</div>
-        <p>正确答案概率越接近 1，损失越接近 0；接近 0 时损失爆炸，梯度很大——模型会被强烈推着 <b>把概率质量挪到正确 token 上</b>。</p>
+        <h2 id="ce">第三步：Cross Entropy 只盯正确类概率</h2>
+        <p>如果正确答案是类别 $c$，Cross Entropy 就是：</p>
+        <div class="math-block">$$\mathcal{L}_{\text{CE}} = -\log p_c$$</div>
+        <p>正确类概率越高，损失越小。几个数感受一下：</p>
+        <table>
+          <thead>
+            <tr><th>正确类概率 $p_c$</th><th>CE = $-\log p_c$</th><th>直觉</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>0.90</td><td>0.105</td><td>模型很确定，罚得小。</td></tr>
+            <tr><td>0.50</td><td>0.693</td><td>模型半信半疑。</td></tr>
+            <tr><td>0.01</td><td>4.605</td><td>正确答案几乎没概率，罚得很重。</td></tr>
+          </tbody>
+        </table>
+        <p>如果用 one-hot 标签 $y_i$ 写，公式是：</p>
+        <div class="math-block">$$\mathcal{L}_{\text{CE}} = -\sum_i y_i \log p_i$$</div>
+        <p>因为 one-hot 里只有正确类位置是 1，所以它等价于 $-\log p_c$。</p>
 
-        <h2 id="why-llm">为什么 LLM 和离散动作都爱用它</h2>
-        <p>因为“下一个 token 预测”本质是分类问题（在词表里挑一个）。分类问题用 Cross Entropy 又稳定又高效。</p>
-        <p>FAST 把连续动作先离散成 token，就是为了能复用这套成熟的训练机制。代价是量化误差；收益是训练稳定、和语言模态共用一套头。</p>
+        <h2 id="sequence">序列训练：每个位置都做一次分类</h2>
+        <p>LLM 训练不是只选一个 token，而是在每个位置预测下一个 token。常见 shape 是：</p>
+        <div class="math-block">$$\text{logits}\in \mathbb{R}^{B \times T \times V},\qquad \text{target}\in \mathbb{R}^{B \times T}$$</div>
+        <p>$B$ 是 batch size，$T$ 是序列长度，$V$ 是词表大小。每个位置都有一排 $V$ 维 logits，对应一个正确 target id。序列版 CE 就是把所有有效位置的 $-\log p(\text{target})$ 平均起来。</p>
+
+        <h2 id="action-token">动作 token 为什么也能用 CE</h2>
+        <p>连续动作本来不能直接分类。但如果先把动作量化成有限词表里的 token，任务就变成“下一个 action token 是哪一个”。这就是 FAST 等 action tokenizer 思路背后的训练便利性：把部分动作学习问题改写成和语言建模非常相似的离散 token 预测。</p>
+        <table>
+          <thead>
+            <tr><th>路线</th><th>输出对象</th><th>典型损失</th><th>优势/代价</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>MSE 回归</td><td>连续向量</td><td>MSE</td><td>简单，但多峰时会平均。</td></tr>
+            <tr><td>离散动作 token</td><td>词表 id</td><td>Cross Entropy</td><td>训练像 LLM，但有量化误差。</td></tr>
+            <tr><td>生成式连续策略</td><td>连续分布采样</td><td>Flow / diffusion loss</td><td>保留多峰，推理更复杂。</td></tr>
+          </tbody>
+        </table>
+
+        <div class="callout warn">
+          <div class="c-h">别混淆两个 softmax</div>
+          <p>F-2 Attention 里的 softmax 是把“某个 Query 看所有 Key 的分数”变成注意力权重。这里的 softmax 是把“词表 logits”变成下一个 token 的概率。数学操作相同，语义不同。</p>
+        </div>
+
+        <h2 id="checkpoint">小检查：手算方向感</h2>
+        <p>如果三个 logits 是 $[2,1,0]$，softmax 后第一个类别概率最大。如果正确答案是第一个类别，CE 比较小；如果正确答案是第三个类别，CE 会大很多。你不需要每次精确心算，但要有这个方向感：CE 惩罚的是“正确 token 被模型放了多少概率”。</p>
+
+        <div class="bridge rl">
+          <div class="c-h"><span class="tag">从 RL 看</span> 离散 action 和连续 action 的分叉</div>
+          <p>如果动作空间是几个按钮，策略可以输出 categorical distribution，用 CE 或 policy gradient 都很自然。如果动作是机械臂连续控制，直接分类不够，需要回归、分布建模或先量化成 action token。</p>
+        </div>
 
         <h2 id="recap">这一节你需要带走的</h2>
-        <p>Softmax 把 logit 变成概率；Cross Entropy 只看正确答案的概率并想把它变大。这是目前训练离散输出的标准做法。离散动作走 CE；连续高频控制往往不走这条路。下一节进入 <b>机器人仿真通用接口 Gym</b>，看清「动作」在环境里到底是什么类型。</p>
+        <p>logits 是原始分数；softmax 把它变成概率；Cross Entropy 用 $-\log p_c$ 惩罚正确 token 概率太低。LLM 的 next-token prediction 和离散 action token 训练共享这套基础。下一节 <a href="f-7-gym-action.html">F-7</a> 回到机器人环境：不管模型内部怎么表示，最终都要和环境交换 observation 与 action。</p>
       </article>
     </main>
     <aside class="rail" id="rail"></aside>

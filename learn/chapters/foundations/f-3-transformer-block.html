@@ -25,32 +25,77 @@
       <article class="article">
         <div class="eyebrow">Part F · Foundations · f-3</div>
         <h1>Transformer Block 里到底有什么参数</h1>
-        <p class="lede">你经常听到“3B 模型”“7B 参数”。这些参数到底花在哪里？一个 Transformer Block 主要就干两件事：让信息在 token 之间流动（Attention），再让每个 token 自己加工（MLP）。理解这个拆分，对后面看 Action Expert 为什么独立一套权重非常关键。</p>
-        <p>上一节你理解了 Attention 在做什么。这一节回答：<b>这些计算在模型里占哪块、参数花在哪</b>。提醒：Block 处理的是 <b>token 向量序列</b>（每个 token 是什么、f-4 会讲）；这里先假设已经有一排向量了。</p>
+        <p class="lede">上一节只讲 Attention 的“谁看谁”。这一节把它放回完整的 Transformer Block：Attention 负责 token 间通信，MLP 负责每个 token 自己加工，LayerNorm 和 Residual 负责让深层网络更好训练。理解这个结构，后面读 action expert、MoE、冻结 backbone 时才知道“到底在动哪些参数”。</p>
 
-        <h2 id="two-stairs">两层楼梯的比喻</h2>
-        <p>把一个 Block 想象成两层楼梯：</p>
-        <ol>
-          <li><b>第一层（Attention）</b>：大家坐在一起开会，互相交换信息。</li>
-          <li><b>第二层（MLP）</b>：每个人回到座位上，自己消化刚才听到的内容。</li>
-        </ol>
-        <p>真实 Block 还多了 <b>残差连接</b>（$x + \text{子层}(x)$，防信息丢）和 <b>LayerNorm</b>（稳定训练）。可以记成：开会（Attention）→ 加残差、归一化 → 独自消化（MLP）→ 再加残差、归一化。下面先拆两块主菜。</p>
+        <h2 id="input-output">Block 的输入输出形状不变</h2>
+        <p>先抓住最重要的稳定点：一个 Transformer Block 吃进去一排向量，吐出来还是同样长度、同样宽度的一排向量。</p>
+        <div class="math-block">$$X \in \mathbb{R}^{n \times d} \quad \longrightarrow \quad \text{Block}(X) \in \mathbb{R}^{n \times d}$$</div>
+        <p>这很关键。因为形状不变，模型可以把很多个 Block 叠起来。第一层可能让“她”看到“小红”，第十层可能已经形成更抽象的“人物关系”，更深层再把语言、图像、状态融合起来。</p>
 
-        <h2 id="attention-part">Attention 部分（信息交换）</h2>
-        <p>主要参数是四个线性投影：Q、K、V、以及输出投影。它们负责“谁该看谁”。</p>
-        <p>四个矩阵中，前三个把每个 token 的向量投影成 Q、K、V（对应 f-2）；第四个把 Attention 输出映射回模型维度。参数量通常小于同层的 MLP，但 <b>决定了谁看谁</b>。</p>
+        <h2 id="four-pieces">一个 Block 可以拆成四类零件</h2>
+        <table>
+          <thead>
+            <tr><th>零件</th><th>负责什么</th><th>有没有主要参数</th><th>新手直觉</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Self-Attention</td><td>token 之间交换信息。</td><td>有，主要是 $W_Q,W_K,W_V,W_O$。</td><td>会议室：每个人听别人说话。</td></tr>
+            <tr><td>MLP / FFN</td><td>每个 token 独立加工自己的表示。</td><td>有，通常是两层线性层。</td><td>私人笔记：每个人整理自己的理解。</td></tr>
+            <tr><td>LayerNorm</td><td>把数值尺度调稳。</td><td>有少量缩放/平移参数。</td><td>调音台：别让某层声音太大。</td></tr>
+            <tr><td>Residual</td><td>保留原输入，加上新变化。</td><td>没有主要矩阵参数。</td><td>改稿：不是重写整页，而是在原稿上增量修改。</td></tr>
+          </tbody>
+        </table>
 
-        <h2 id="mlp-part">MLP 部分（信息加工）</h2>
-        <p>通常是两个大矩阵（先升维、再降维），参数量往往占整个 Block 的 2/3 以上。它的任务是对每个 token 做非线性变换。</p>
-        <p>直觉：Attention 负责 <b>横向交流</b>；MLP 负责 <b>每个 token 自己变聪明一点</b>。没有 MLP 的非线性，多层 Attention 叠起来仍偏线性，表达能力不够。</p>
+        <h2 id="attention-params">Attention 参数：四个投影</h2>
+        <p>F-2 里我们见过三套矩阵：$W_Q,W_K,W_V$。完整 Attention 通常还会有一个输出投影 $W_O$，把混合后的信息整理回模型宽度。</p>
+        <div class="math-block">$$Q=XW_Q,\quad K=XW_K,\quad V=XW_V,\quad \text{Out}=\text{Attention}(Q,K,V)W_O$$</div>
+        <p>如果忽略多头细节，并假设宽度都是 $d$，这四个矩阵的参数量大约是 $4d^2$。你不需要背这个数，只要理解：Attention 的参数主要在“如何生成 Q/K/V，以及混合后怎么投回去”。</p>
+
+        <h2 id="mlp">MLP 参数：逐 token 的加工厂</h2>
+        <p>Attention 让 token 互相通信，但通信完还需要加工。MLP 做的就是这件事。它对每个 token 分别应用同一套小网络，不直接让不同 token 交流。</p>
+        <div class="math-block">$$\text{MLP}(x)=W_2\,\sigma(W_1x+b_1)+b_2$$</div>
+        <p>常见设置里，$W_1$ 把维度从 $d$ 放大到 $d_{ff}$，非线性激活后，$W_2$ 再把它压回 $d$。如果 $d_{ff}=4d$，MLP 的参数量大约是 $8d^2$，经常比 Attention 还大。</p>
+        <div class="callout note">
+          <div class="c-h">一个很有用的边界</div>
+          <p>Attention 负责“谁和谁交换信息”；MLP 负责“每个 token 自己怎么变”。所以后文讲 action expert 时，你会看到一种设计：共享 Attention 让语言/图像/动作通信，但给动作 token 单独的 MLP 或输出头，让动作专门学控制。</p>
+        </div>
+
+        <h2 id="residual-ln">Residual 和 LayerNorm：为什么不是可有可无</h2>
+        <p>深层网络最怕两件事：一是每层都把表示改得太猛，原信息丢掉；二是数值尺度乱飘，训练不稳定。Residual 和 LayerNorm 就是为这两个问题服务的。</p>
+        <div class="math-block">$$Y = X + \text{Attn}(\text{LN}(X))$$
+$$Z = Y + \text{MLP}(\text{LN}(Y))$$</div>
+        <p>上面是常见的 pre-norm 写法。先 LN，再做 Attention 或 MLP，然后把结果加回原输入。这个“加回去”很重要：Block 学的是增量修改，而不是每层都强迫重建全部信息。</p>
+
+        <h2 id="worked">小算例：一个极小 Block 有多少参数</h2>
+        <p>假设模型宽度 $d=4$，MLP 中间维度 $d_{ff}=16$。忽略 bias 和 LayerNorm 的少量参数：</p>
+        <table>
+          <thead>
+            <tr><th>模块</th><th>近似参数量</th><th>怎么算</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Attention 投影</td><td>64</td><td>$4d^2=4\times4\times4$</td></tr>
+            <tr><td>MLP</td><td>128</td><td>$2dd_{ff}=2\times4\times16$</td></tr>
+            <tr><td>合计</td><td>约 192</td><td>这里只是教学玩具，真实模型会大很多。</td></tr>
+          </tbody>
+        </table>
+        <p>这个算例不是为了让你会数参数，而是为了建立直觉：模型能力很大一部分来自这些线性投影和 MLP 权重。训练、冻结、LoRA、action expert 讨论的都是“哪些权重要更新，哪些权重要保护”。</p>
 
         <div class="bridge rl">
-          <div class="c-h"><span class="tag">从 RL 看</span> 为什么 MoE 爱改 MLP</div>
-          <p>Attention 像“大家共享的会议室”，MLP 像“每个人的私人笔记本”。给不同专家单独的 MLP，就等于给不同“人”不同的笔记本，而会议室还是同一个。这就是 Action Expert 独立 MLP 的直觉来源。</p>
+          <div class="c-h"><span class="tag">从 RL 看</span> 共享大脑与动作小脑</div>
+          <p>如果把 VLM backbone 看成通用感知和语言大脑，action expert 就像给动作 token 加的专门控制小脑。它通常不会把全部能力从零学一遍，而是在共享表示上增加适合动作预测的参数路径。</p>
+        </div>
+
+        <h2 id="checkpoint">小检查：判断两句话</h2>
+        <ol>
+          <li>“MLP 负责让第 3 个 token 直接读取第 10 个 token。”这句话不准确；直接通信主要由 Attention 做。</li>
+          <li>“Residual 让 Block 可以在原表示上做增量修改。”这句话正确。</li>
+        </ol>
+        <div class="callout warn">
+          <div class="c-h">常见误解</div>
+          <p>不要把 Transformer Block 理解成“只有 Attention”。很多参数在 MLP 里；很多训练稳定性来自 LayerNorm 和 Residual。后文如果只盯 Q/K/V，会错过 action expert、梯度隔离、微调账本里的关键。</p>
         </div>
 
         <h2 id="recap">这一节你需要带走的</h2>
-        <p>一个 Block = Attention（跨 token 通信） + MLP（单 token 加工）。MLP 参数更多，也更容易被替换成专家（MoE）。后面 π0 的 action expert 正是独立了一套 MLP。下一节补上一块拼图：<b>图像、语言、动作怎么变成 token 向量</b>——否则你不知道这排向量从哪来。</p>
+        <p>一个 Block 的形状是 $n \times d$ 进、$n \times d$ 出。Attention 做 token 间通信，MLP 做逐 token 加工，LayerNorm/Residual 保持训练稳定。下一节 <a href="f-4-everything-is-token.html">F-4</a> 回到输入端：文字、图像、状态、动作到底怎么变成这排向量。</p>
       </article>
     </main>
     <aside class="rail" id="rail"></aside>

@@ -25,27 +25,73 @@
       <article class="article">
         <div class="eyebrow">Part F · Foundations · f-5</div>
         <h1>回归与 MSE：为什么会爱平均</h1>
-        <p>前面四章讲清了 Transformer <b>怎么算</b>。从这一节起，我们问：<b>怎么教它输出对的机器人动作？</b> 最直白的教法叫 <span class="term">行为克隆（Behavior Cloning）</span>：给观测，让网络输出动作，和专家演示比差距——这就是 <b>回归 + MSE</b>。</p>
-        <p class="lede">在机器人里最常见的学习方式就是“让模型输出动作，然后和专家动作比”。这种方式叫 <span class="term">regression</span>（回归）。它简单，但有一个非常讨厌的脾气——<b>面对多种都对的答案，它会输出它们的平均值</b>。这一节把这个脾气讲清楚。</p>
+        <p class="lede">前四节讲的是“模型怎么表示输入”。从这一节开始，我们讲“模型怎么学动作”。最朴素的方法叫行为克隆：给模型一帧观测，让它预测专家动作，再用 MSE 惩罚差距。它非常直观，也非常容易在多种正确动作并存时学出平均化的坏动作。</p>
 
-        <h2 id="what-is-regression">什么是回归</h2>
-        <p>给你一个输入（当前观测），预测一个连续的数值输出（动作向量）。这就是回归。</p>
-        <p>机器人例：观测 = 相机图 + 关节角；输出 = 7 维动作向量（各关节目标角度）。最常用的衡量标准是 <span class="term">MSE</span>（均方误差）——预测值和真实值的差的平方平均。<b>平方</b>让大错罚得更重，训练更稳定。</p>
+        <h2 id="bc">行为克隆：像抄作业一样学动作</h2>
+        <p>机器人示范数据通常长这样：某个时刻的观测 $o_t$，配上一段专家动作 $A_t$。模型输入观测，输出预测动作 $\hat A_t$，训练时让二者尽量接近。</p>
+        <div class="math-block">$$o_t \longrightarrow \hat A_t,\qquad A_t \in \mathbb{R}^{H \times d_a}$$</div>
+        <p>$H$ 是动作 chunk 的长度，比如一次预测未来 50 步；$d_a$ 是每一步动作维度，比如末端位姿、夹爪、底盘速度等。EBench 真实 action schema 后文会细拆，这里只需要记住：连续动作不是“选一个类别”，而是一串实数。</p>
+        <p>这类“输入一个东西，输出连续数值”的任务就叫 <span class="term">regression</span>（回归）。最常见损失是 MSE，均方误差。</p>
 
-        <div class="math-block">$$\text{MSE} = \frac{1}{N}\sum (\hat y_i - y_i)^2$$</div>
-
-        <h2 id="averaging-trap">为什么会爱平均</h2>
-        <p>假设同一个观测下，专家有时从左边抓，有时从右边抓。两个动作都对。</p>
-        <p>MSE 要最小化，就必须为这个观测输出一个固定的值。它会算出“左边抓”和“右边抓”的平均——结果是直直撞向物体。</p>
-
-        <div class="callout warn">
-          <div class="c-h">这不是 bug，是数学性质</div>
-          <p>当同一个输入对应多个正确输出时，最小化平方误差的解永远是这些输出的均值。</p>
+        <h2 id="mse">MSE 到底在算什么</h2>
+        <p>单个数值的 MSE 是预测值和真实值差的平方。动作 chunk 版只是把 batch、时间步、动作维度全部平均起来：</p>
+        <div class="math-block">$$\mathcal{L}_{\text{MSE}} = \frac{1}{B H d_a}\sum_{b=1}^{B}\sum_{h=1}^{H}\sum_{j=1}^{d_a}(\hat A_{b,h,j}-A_{b,h,j})^2$$</div>
+        <p>平方有两个直觉效果：第一，正负误差不会互相抵消；第二，大错会被罚得更重。预测夹爪位置差 0.1 和差 1.0，后者不是大 10 倍惩罚，而是大 100 倍惩罚。</p>
+        <div class="callout note">
+          <div class="c-h">单位也很重要</div>
+          <p>MSE 会把单位平方化。米变成平方米，弧度变成弧度平方。不同动作维度的尺度如果差很多，某些维度会主导损失。因此真实系统常要归一化动作，或者给不同维度加权。</p>
         </div>
-        <p>这不是实现 bug，而是 <b>用单点预测 + 平方损失</b> 时的数学最优解。机器人数据里「同一画面、多种抓法都对」很常见，所以纯 MSE 回归动作是 Part F 后半段许多故事的起点。</p>
+
+        <h2 id="mean">为什么 MSE 的最优解是均值</h2>
+        <p>先看最小的例子。同一个观测下，专家有两种都成功的动作：向左绕，动作值记作 $-1$；向右绕，动作值记作 $+1$。模型如果只能输出一个数 $\hat y$，MSE 是：</p>
+        <div class="math-block">$$L(\hat y) = \frac{1}{2}(\hat y - (-1))^2 + \frac{1}{2}(\hat y - 1)^2$$</div>
+        <p>把它展开：</p>
+        <div class="math-block">$$L(\hat y)=\frac{1}{2}(\hat y+1)^2+\frac{1}{2}(\hat y-1)^2=\hat y^2+1$$</div>
+        <p>这个函数在 $\hat y=0$ 时最小。也就是说，左绕和右绕都对，但 MSE 学到的单点答案是中间的 0。机器人世界里，中间常常正好是障碍物。</p>
+
+        <div class="lab">
+          <div class="lab-h"><span class="lab-tag">interactive</span><span class="lab-t">MSE 平均化：两条都对的路变成中间线</span></div>
+          <div class="lab-body" data-widget="mode-averaging"></div>
+          <div class="lab-cap">拖动数据比例。上绕和下绕都是合理示范；当两种示范比例接近时，MSE 的均值轨迹会穿过障碍物。</div>
+        </div>
+
+        <h2 id="conditional-mean">更一般地说：MSE 学的是条件均值</h2>
+        <p>数学上，如果输入是 $o$，输出动作是随机变量 $A$，那么让 MSE 最小的函数是：</p>
+        <div class="math-block">$$f^*(o)=\mathbb{E}[A\mid o]$$</div>
+        <p>这句话翻译成白话：同一个观测下，数据里专家动作的平均值是什么，MSE 就倾向于预测什么。这个性质在单答案任务里很好。比如同一张图片只有一个正确标签对应的连续坐标，均值很合理。但在“多种做法都对”的机器人任务里，均值可能不是任何一种好做法。</p>
+
+        <h2 id="when-ok">什么时候 MSE 仍然好用</h2>
+        <p>MSE 不是坏东西。它简单、稳定、训练便宜，在很多局部控制和低噪声回归里很好用。问题不是 MSE 本身，而是你把它用于“同一输入有多个相隔很远的正确输出”的场景。</p>
+        <table>
+          <thead>
+            <tr><th>数据形态</th><th>MSE 表现</th><th>原因</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>一个输入基本只有一个正确连续答案</td><td>通常合适</td><td>均值接近真实目标。</td></tr>
+            <tr><td>多个答案很接近</td><td>可能还能用</td><td>平均后仍在合理区域。</td></tr>
+            <tr><td>多个答案相隔很远</td><td>容易失败</td><td>均值落在低概率或危险区域。</td></tr>
+          </tbody>
+        </table>
+
+        <div class="bridge rl">
+          <div class="c-h"><span class="tag">从 RL 看</span> 低 loss 不等于高成功率</div>
+          <p>回归训练看的是动作向量距离，评测看的是任务是否成功。一个动作在 MSE 上离两种示范都不远，执行起来却可能撞上障碍物。Part 5 会继续展开这种“训练目标和成功行为不完全一致”的问题。</p>
+        </div>
+
+        <h2 id="checkpoint">小检查：三种学习路线</h2>
+        <p>面对动作学习，你现在可以先分三类想：</p>
+        <ul>
+          <li>连续动作且单峰：MSE 或高斯策略可能够用。</li>
+          <li>动作被量化成离散 token：下一节的 Softmax + Cross Entropy 很自然。</li>
+          <li>连续动作且多峰：F-8 的生成模型更适合表达“多种都对”。</li>
+        </ul>
+        <div class="callout warn">
+          <div class="c-h">常见误解</div>
+          <p>“MSE 会平均”不是实现 bug，也不是模型不够聪明。只要你要求模型用一个点预测一个多峰分布，平方误差的数学最优解就会走向条件均值。</p>
+        </div>
 
         <h2 id="recap">这一节你需要带走的</h2>
-        <p>(1) BC + MSE 是最简单的动作学习；(2) 多模态数据上会 <b>平均化</b>；(3) 出路至少两条：<b>生成模型</b>（f-8，保留多峰）或 <b>离散化 + Cross Entropy</b>（f-6，把动作当 token 分类）。下一节先看后者为什么好用。</p>
+        <p>行为克隆可以把动作学习变成监督回归；MSE 惩罚预测动作和专家动作的平方差；它的最优单点预测是条件均值。这个性质解释了为什么同一观测存在左绕/右绕等多种正确动作时，纯 MSE 可能学出中间的危险动作。下一节 <a href="f-6-cross-entropy.html">F-6</a> 讲另一条路：把输出变成离散 token，用 Cross Entropy 学“选哪个”。</p>
       </article>
     </main>
     <aside class="rail" id="rail"></aside>
@@ -60,6 +106,7 @@
 
   <script src="../../content.js"></script>
   <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/mode-averaging.js"></script>
   <script src="../../assets/js/book.js"></script>
 </body>
 </html>

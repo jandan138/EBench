@@ -25,63 +25,111 @@
       <article class="article">
         <div class="eyebrow">Part F · Foundations · f-2</div>
         <h1>Attention 从零开始（Q/K/V 直觉）</h1>
-        <p class="lede">Transformer 里最重要、也最容易被“数学符号”吓跑的一块，就是 <span class="term">Self-Attention</span>。这一节我们完全不讲公式推导，先用一个最日常的语言例子，让你产生强烈的第一感觉：<b>模型是怎么“知道”哪个词该关注哪个词的</b>。</p>
-        <p>上一节我们说 Transformer 的核心是 <b>让所有 token 一次性互相看</b>。这一节就把「互相看」拆成三步：<b>谁想问（Query）→ 和谁匹配（Key）→ 拿走什么信息（Value）</b>。先读例子，再玩下面的交互；不用背公式。</p>
+        <p class="lede">如果你看到 $QK^T$ 就懵，通常不是你不适合学，而是中间少了几级台阶。这一节把 Attention 拆成小白可跟的五步：token 是向量，点积表示相似，Q/K/V 是同一个 token 的三种角色，softmax 把分数变成权重，最后按权重混合 Value。</p>
 
-        <h2 id="example">“她在指小红”的直觉</h2>
-        <p>想象一句话：</p>
+        <h2 id="scene">先看一句人话：“她在指小红”</h2>
+        <p>假设输入是：</p>
         <div class="callout"><p style="margin:0;font-size:1.05rem">“她 在 指 小红 的 方向”</p></div>
-        <p>当模型读到“她”的时候，它需要回答一个问题：<b>“她到底是谁？”</b></p>
-        <p>人类大脑会下意识地往后看，找到“指”和“小红”，然后把“小红”这个信息和“她”联系起来。</p>
-        <p>Attention 做的就是同一件事——<b>让每个词去“提问”其他词，看看谁最能回答它的问题</b>。</p>
-        <p>读「她」时，大脑其实在问：<b>「她」指谁？</b> 然后扫向「指」「小红」。Attention 把这件事形式化：每个词都带一个「问题」，去和其他词的「标签」比一比，看谁最像答案。</p>
+        <p>当模型读到“她”时，它不能只看“她”这个字。它要问：这个“她”指谁？比较合理的线索是后面的“指”和“小红”。人类会自动把“小红”的信息补到“她”上；Attention 就是在模型内部做这个补信息的过程。</p>
+        <p>上一节的圆桌会议比喻到这里变具体：每个 token 都可以发问，也可以被别人查询。Attention 不会给一个硬答案，而是给一排软权重：看“小红”多一点，看“方向”少一点，看“在”更少一点。</p>
 
         <div class="lab">
           <div class="lab-h"><span class="lab-tag">interactive</span><span class="lab-t">Attention 交互演示</span></div>
           <div class="lab-body" data-widget="attention-viz"></div>
-          <div class="lab-cap">点击下方词切换 Query；顶部会显示你当前选中的词。试试「她」和「小红」，观察权重条如何变化。</div>
+          <div class="lab-cap">点击不同词切换 Query。先点“她”，再点“小红”，观察每个词看别人的权重如何变化。数值是教学示意，不是训练出的真实权重。</div>
         </div>
 
-        <p>你刚才点的词就是 <b>Query（提问者）</b>；柱形越高，说明这个词认为对方越能回答自己的问题。这些权重不是人手工标的，是模型用三套向量算出来的。下面给每个词配上这三套「身份」。</p>
+        <h2 id="vectors">第一层台阶：token 先变成向量</h2>
+        <p>模型不是直接处理汉字。每个 token 进入 Transformer 前，都会变成一个向量。为了能手算，先假装每个词只有 2 维：</p>
+        <table>
+          <thead>
+            <tr><th>token</th><th>向量示意</th><th>直觉</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>她</td><td><code>[0.8, 0.1]</code></td><td>更像“人物指代”</td></tr>
+            <tr><td>指</td><td><code>[0.4, 0.7]</code></td><td>更像“动作关系”</td></tr>
+            <tr><td>小红</td><td><code>[0.9, 0.2]</code></td><td>更像“具体人物”</td></tr>
+          </tbody>
+        </table>
+        <p>向量之间可以做点积。点积越大，粗略表示越相似、越匹配。比如 <code>[0.8, 0.1]</code> 和 <code>[0.9, 0.2]</code> 的点积是 $0.8 \times 0.9 + 0.1 \times 0.2 = 0.74$，比和很多无关词的点积更高。</p>
 
-        <h2 id="qkv">Query、Key、Value：三个物理角色</h2>
-        <p>为了实现上面的“提问-匹配-拿信息”，模型给每个词准备了三套向量：</p>
+        <h2 id="qkv">第二层台阶：为什么要 Q/K/V 三套向量</h2>
+        <p>现在问题来了：同一个 token 只有一条向量不行吗？不太够。因为一个 token 在 Attention 里同时有三种职责：</p>
+        <table>
+          <thead>
+            <tr><th>名字</th><th>中文直觉</th><th>它在问什么</th><th>例句里的角色</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Query</td><td>问题</td><td>我现在想找什么信息？</td><td>“她”发出问题：我指谁？</td></tr>
+            <tr><td>Key</td><td>标签/索引</td><td>我能被什么问题匹配到？</td><td>“小红”的 Key 像名牌：我能回答人物指代。</td></tr>
+            <tr><td>Value</td><td>内容</td><td>如果别人关注我，我贡献什么信息？</td><td>“小红”的 Value 是具体人物语义。</td></tr>
+          </tbody>
+        </table>
+        <p>Q/K/V 不是人工给词贴的标签，也不是三份不同输入。它们是同一个输入向量经过三套可学习矩阵变出来的三种角色。</p>
+        <div class="math-block">$$q_i = x_i W_Q,\qquad k_i = x_i W_K,\qquad v_i = x_i W_V$$</div>
+        <p>这里 $x_i$ 是第 $i$ 个 token 的原始表示，$W_Q,W_K,W_V$ 是模型训练出来的参数。训练足够多之后，模型会学会让“人物指代”的 Query 更容易匹配到“具体人物”的 Key。</p>
+
+        <h2 id="single-row">第三层台阶：先看一个 Query 怎么看所有 Key</h2>
+        <p>先不要看矩阵。只看“她”这一个 Query。它会和所有 token 的 Key 算匹配分数：</p>
+        <div class="math-block">$$s_{\text{她},j} = \frac{q_{\text{她}} \cdot k_j}{\sqrt{d_k}}$$</div>
+        <p>$j$ 会扫过“她、在、指、小红、的、方向”。得到的不是最终答案，而是一排分数。比如教学示意里，“她”对三个 token 的分数可能是：</p>
+        <table>
+          <thead>
+            <tr><th>Key</th><th>她</th><th>指</th><th>小红</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>score</td><td>1.0</td><td>0.0</td><td>2.0</td></tr>
+            <tr><td>softmax 后权重</td><td>0.245</td><td>0.090</td><td>0.665</td></tr>
+          </tbody>
+        </table>
+        <p>这说明“她”主要看“小红”，也保留一点自信息。权重加起来等于 1。最后，“她”的新表示就是按这些权重混合各 token 的 Value：</p>
+        <div class="math-block">$$z_{\text{她}} = \sum_j \alpha_{\text{她},j} v_j$$</div>
+
+        <h2 id="matrix">第四层台阶：矩阵公式只是把所有 Query 一次算完</h2>
+        <p>如果序列里有 $n$ 个 token，每个 token 都要当一次 Query。逐个写太慢，所以用矩阵一次性写完：</p>
+        <div class="math-block">$$Q,K,V \in \mathbb{R}^{n \times d_k},\qquad QK^T \in \mathbb{R}^{n \times n}$$</div>
+        <p>$QK^T$ 的第 $i$ 行表示“第 $i$ 个 token 看所有 token 的原始分数”。第 $j$ 列表示“所有 token 看第 $j$ 个 token 的分数”。softmax 是按行做的，因为每一行都要变成“某个 Query 看全体 Key 的权重分布”。</p>
+        <div class="math-block">$$\text{Attention}(Q,K,V) = \text{softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right)V$$</div>
+        <p>把这行公式翻译成人话：</p>
         <ul>
-          <li><b>Query（问题）</b>：这个词“我想问什么？”</li>
-          <li><b>Key（标签）</b>：其他词“我能回答什么问题？”</li>
-          <li><b>Value（内容）</b>：其他词“我真正包含的信息”</li>
+          <li>$QK^T$：所有人拿自己的问题，去匹配所有人的标签。</li>
+          <li>$\sqrt{d_k}$：缩放分数，避免维度大时点积过大。</li>
+          <li>softmax：每一行分数变成权重，合计为 1。</li>
+          <li>乘 $V$：按权重把内容混合回来，得到每个 token 的新表示。</li>
         </ul>
-        <p>回到例句：读「她」时，<b>「她」发 Query</b>（「我是谁？」）；<b>「小红」的 Key</b> 像名牌（「我能回答『指谁』」）；<b>「小红」的 Value</b> 是实际语义（「小红这个人」）。Attention 用 Query 和所有人的 Key 算权重，再按权重混合所有人的 Value——「她」的新表示就混进了「小红」的信息。</p>
+
+        <h2 id="mask">第五层台阶：mask 决定“能看谁”</h2>
+        <p>有时不是所有 token 都允许互相看。语言模型从左到右生成时，当前位置不能偷看未来 token。这时会在 softmax 前把禁止看的分数改成极小值，softmax 后权重近似 0。</p>
+        <table>
+          <thead>
+            <tr><th>mask 类型</th><th>能看谁</th><th>后文在哪里出现</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Causal mask</td><td>只能看当前和过去。</td><td>自回归生成下一个词、下一个动作 token。</td></tr>
+            <tr><td>Bidirectional mask</td><td>一段已知 token 内部可以互相看。</td><td>图像/指令编码，或 action chunk 内部的双向通信。</td></tr>
+            <tr><td>Block mask</td><td>某些模态之间允许看，某些不允许。</td><td>Part 5 的 Transfusion / action expert 会用到。</td></tr>
+          </tbody>
+        </table>
 
         <div class="bridge rl">
-          <div class="c-h"><span class="tag">从 RL 看</span> 像一个带记忆的策略</div>
-          <p style="font-size:.85rem;color:var(--ink-faint);margin:0 0 6px">（不熟悉强化学习可跳过本框，不影响后文。）</p>
-          <p>Query 像当前状态下 policy 发出的“查询请求”；Key 像不同记忆片段的索引；Value 是真正要取出来的动作/信息。Attention 就是在做一个可学习的、软的“记忆检索”。</p>
+          <div class="c-h"><span class="tag">从 RL 看</span> Attention 像软检索记忆</div>
+          <p>策略输出动作前，可能要参考当前图像、指令、历史动作、状态。Query 像当前决策点发出的检索请求，Key 像每段信息的索引，Value 是真正取回的内容。不同的是，这个检索不是手写规则，而是通过训练学出来的。</p>
         </div>
 
-        <h2 id="math">最核心的一行数学（只看直觉）</h2>
-        <p>每个词的向量先经过三个可学习的矩阵，变成 Q、K、V（这就是 f-3 里说的「四个线性投影」里的前三个）。公式只是把「提问—匹配—加权取内容」写成一行。</p>
-        <div class="math-block">$$\text{Attention}(Q,K,V) = \text{softmax}\left(\frac{QK^T}{\sqrt{d}}\right)V$$</div>
-        <p>逐项翻译：</p>
-        <ul>
-          <li>$QK^T$：每个词的问题和所有词的标签做匹配，得到“相关性分数”。</li>
-          <li>除以 $\sqrt{d}$：防止分数太大导致 softmax 梯度消失（工程细节）。</li>
-          <li>softmax：把分数变成“概率权重”（所有词的关注度加起来是 1）。</li>
-          <li>乘 V：按权重把真正的内容混合起来。</li>
-        </ul>
-        <p>上式默认每个词能看见序列里所有词。但 <b>生成下一个词时不能偷看未来</b>——所以在 $QK^T$ 上盖一层 <b>mask</b>（把不允许看的位置设为 $-\infty$），softmax 后权重为 0。下面分两种常见 mask。</p>
-
-        <h2 id="mask">causal vs bidirectional：两种“能看谁”</h2>
-        <p><b>Causal（因果）</b>：语言模型从左到右生成，位置 $i$ 只能看 $\le i$ 的词 → <span class="term">causal mask</span>（下三角）。</p>
-        <p><b>Bidirectional（双向）</b>：编码器或已整段给定的 action chunk 里，token 可以互相看。VLA 里常见组合：看图/读指令用双向，自回归出动作 token 用因果；action chunk 内部的动作 token 经常是 <span class="term">full bidirectional</span>，因为「一整段动作」可以互相参考。</p>
-
-        <div class="callout note">
-          <div class="c-h">这一节你真正需要记住的画面</div>
-          <p>每个 token 都同时扮演“提问者”和“被问者”。Query 负责问问题，Key 负责被匹配，Value 负责贡献信息。Attention 就是让模型在序列里做一次可学习的、软的“谁该看谁”。</p>
+        <h2 id="checkpoint">小检查：看到 QKV 时怎么不慌</h2>
+        <p>请你在脑子里把公式拆成三句话：</p>
+        <ol>
+          <li>每个 token 先从 $x_i$ 变出 $q_i,k_i,v_i$。</li>
+          <li>某个 $q_i$ 和所有 $k_j$ 点积，得到“我该看谁”的分数。</li>
+          <li>softmax 后按权重混合所有 $v_j$，得到这个 token 的新表示。</li>
+        </ol>
+        <div class="callout warn">
+          <div class="c-h">常见误解</div>
+          <p>Q/K/V 不是“问题词、关键词、数值词”三类 token。每个 token 都同时有自己的 Q、K、V。比如“小红”既可以作为别人查询的 Key/Value，也可以作为 Query 去看“她”和“方向”。</p>
         </div>
 
         <h2 id="recap">这一节你需要带走的</h2>
-        <p>(1) Attention 的本质是“让每个词去问其他词谁最能回答它”；(2) Q/K/V 是三个不同角色的向量；(3) 权重 = softmax(QK^T)；(4) causal mask 保护生成顺序，bidirectional 让 chunk 内部互相看。下一节我们看这些计算发生在 Transformer Block 里的哪一层。</p>
+        <p>Attention 的本质不是公式，而是“按相关性取信息”。你现在应该能把 $QK^T$ 看成一张 $n \times n$ 的关系表：每一行是一个 Query 看所有 Key 的分数。下一节 <a href="f-3-transformer-block.html">F-3</a> 会把 Attention 放回完整 Transformer Block，看看除了 Q/K/V，模型里还有哪些参数。</p>
       </article>
     </main>
     <aside class="rail" id="rail"></aside>

@@ -25,28 +25,88 @@
       <article class="article">
         <div class="eyebrow">Part F · Foundations · f-7</div>
         <h1>Gym 契约 + 动作空间（离散 vs 连续）</h1>
-        <p>前几节在问：<b>模型怎么学、损失怎么设</b>。学完之后要在 <b>仿真环境</b> 里试——EBench、EvalClient 都沿用同一套 <b>Gym 式契约</b>：<code>reset</code> 开局，<code>step(action)</code> 推进一步。这一节把「环境接口」和「动作是离散还是连续」讲清楚，后面读评测代码不会懵。</p>
-        <p class="lede">几乎所有机器人学习和评测框架，都继承了同一个极简契约：<span class="term">reset → step(action) → (obs, reward, done)</span>。这个契约最早在 <span class="term">Gym</span> 里流行开来。理解它，对理解 EvalClient 和 EBench 的整个评测引擎至关重要。</p>
+        <p class="lede">前面讲了模型内部的 token、loss 和概率。现在回到机器人世界：模型不是在真空里输出数字，它要和环境按固定契约来回交换 observation 与 action。Gym 的 reset/step 心智模型，是理解 EBench EvalClient 的最低门槛。</p>
 
-        <h2 id="gym-contract">Gym 契约是什么</h2>
-        <ul>
-          <li><code>env.reset()</code>：把世界恢复到初始状态，返回第一个观测。</li>
-          <li><code>obs, reward, done, info = env.step(action)</code>：给动作，环境推进一帧，返回新观测、奖励、是否结束。</li>
-        </ul>
-        <p>走一遍：机械臂抓取任务里，<code>reset()</code> 把物体摆回桌面；策略读 <code>obs</code>（图像、关节角）输出 <code>action</code>；<code>step</code> 执行一帧后返回新 <code>obs</code>、是否 <code>done</code>。<code>reward</code> 在模仿学习里有时不用，但 <b>接口形状不变</b>。</p>
-        <p>契约固定后，变量是 <b>action 长什么样</b>：有限个按钮，还是连续向量。这直接决定你用 f-6 的 Cross Entropy，还是 f-8 的 flow / diffusion。</p>
+        <h2 id="loop">最小循环：reset 拿第一帧，step 送动作</h2>
+        <p>Gym 风格环境的核心很小：先 reset，拿到第一帧 observation；然后反复让模型根据 observation 产生 action，再把 action 交给环境 step。</p>
+        <div class="code" data-lang="python"><div class="code-h"><span class="fn">Gym-style loop</span><button class="cp">复制</button></div><pre><code>obs = env.reset()
+done = False
 
-        <h2 id="action-space">动作空间的两种本质</h2>
-        <p><b>离散动作空间</b>：有限几个选择（左、右、跳）。模型通常输出概率分布，用 Cross Entropy 训练。</p>
-        <p><b>连续动作空间</b>：输出一个实数向量（关节角度、速度）。模型需要输出分布的参数（均值、方差）或直接用 flow / diffusion 采样。</p>
+while not done:
+    action = policy(obs)
+    obs, reward, done, info = env.step(action)</code></pre></div>
+        <p>这段代码的重点不是 Python 语法，而是接口边界：环境不管你的模型里面是 Transformer、Diffusion 还是手写规则；模型也不需要知道仿真器内部怎么跑物理。双方只靠 observation 和 action 对话。</p>
+
+        <h2 id="evalclient">EBench 的 EvalClient 是同一件事的 client-server 版本</h2>
+        <p>EBench 把环境放在 server 侧，把你的模型放在 client 侧，所以接口长得略有不同，但心智模型一样：</p>
+        <div class="code" data-lang="python"><div class="code-h"><span class="fn">EvalClient loop mental model</span><button class="cp">复制</button></div><pre><code>client = EvalClient(base_url=endpoint, worker_ids=["0"], run_id=run_id)
+obs = client.reset()
+
+while True:
+    if obs["0"]["obs"]["reset"]:
+        model.reset()
+
+    action = model.get_action(obs["0"]["obs"])
+    obs, eval_finished = client.step(action)
+
+    if eval_finished:
+        break
+
+client.close()</code></pre></div>
+        <p>后文 <a href="../04-engine/4-2-evalclient.html">4-2</a> 会细拆真实字段。Part F 里你只需要先记住：EvalClient 本质上就是把 Gym 的 reset/step 搬到网络和多 worker 评测里。</p>
+
+        <h2 id="obs-action">Observation 是条件，Action 是承诺</h2>
+        <p>模型每一步都在学一个条件映射：</p>
+        <div class="math-block">$$\pi: o_t \mapsto a_t \quad \text{or} \quad \pi: o_t \mapsto A_t$$</div>
+        <p>$o_t$ 是当前观测，$a_t$ 是当前一步动作，$A_t=[a_t,\ldots,a_{t+H-1}]$ 是未来 $H$ 步动作 chunk。输出动作不是随便吐一个数组，而是必须符合环境约定的 shape、单位、范围和语义。</p>
+
+        <h2 id="spaces">动作空间：Discrete、Box、Dict</h2>
+        <table>
+          <thead>
+            <tr><th>动作空间</th><th>数学形态</th><th>例子</th><th>常见训练方式</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Discrete</td><td>$a \in \{1,\ldots,K\}$</td><td>左/右/停，选择一个技能。</td><td>分类、Cross Entropy、categorical policy。</td></tr>
+            <tr><td>Box</td><td>$a \in \mathbb{R}^{d_a}$，带上下界。</td><td>关节速度、末端位姿增量、底盘速度。</td><td>MSE、高斯策略、flow/diffusion。</td></tr>
+            <tr><td>MultiDiscrete</td><td>多个离散维度组合。</td><td>多个按钮或多个量化 code。</td><td>多头 CE 或序列化 token。</td></tr>
+            <tr><td>Dict</td><td>多个字段组成一个 action。</td><td>机械臂 + 夹爪 + 底盘 + 控制类型。</td><td>按字段路由不同 head/loss。</td></tr>
+          </tbody>
+        </table>
+        <p>EBench 的真实 action 更接近 Dict + 连续 Box 的组合，而不是一个简单按钮。比如同一个 action 字典里可能同时包含手臂控制、夹爪控制、底盘运动、绝对/相对控制标志。后文 <a href="../04-engine/4-3-action-vector.html">4-3</a> 会把 16/19-D 与 base_motion 拆开。</p>
+
+        <h2 id="chunk">Action chunk：一次输出未来一段</h2>
+        <p>很多 VLA 不只输出当前一步动作，而是输出未来一段动作：</p>
+        <div class="math-block">$$A_t = [a_t, a_{t+1}, \ldots, a_{t+H-1}] \in \mathbb{R}^{H \times d_a}$$</div>
+        <p>如果控制频率是 50Hz，$H=50$ 就大约是一秒动作。模型可以每隔几步重新规划一次，这叫 receding horizon。action chunk 的好处是让模型看到短期运动结构；代价是接口和训练 shape 都更复杂。</p>
 
         <div class="callout note">
-          <div class="c-h">对 VLA 的意义</div>
-          <p>早期 VLA 把连续动作离散化，就是为了能用语言模型那套 Cross Entropy 训练。后来 π0（后面 Part 会详讲的 VLA 模型）证明：高频灵巧控制更适合直接用连续生成模型（flow matching）。</p>
+          <div class="c-h">把 F-5/F-6/F-8 和动作空间连起来</div>
+          <p>动作是 Discrete 时，Softmax + CE 很自然。动作是连续 Box 且答案比较单峰时，MSE 很自然。动作是连续 Box 但同一观测有多种合理轨迹时，生成式策略更自然。</p>
+        </div>
+
+        <h2 id="units">单位、范围和 reset 比模型名字更容易出错</h2>
+        <p>小白常以为“模型会输出动作”就结束了。实际上，动作字段的单位和范围极其重要：米、弧度、米/秒、归一化到 [-1,1]，绝对目标还是相对增量，夹爪 1 表示开还是关。这些都不是神经网络能自动猜对的接口细节。</p>
+        <p>另一个常见坑是 reset。一个 episode 开始时，模型内部缓存、动作队列、历史图像都应该清空。EBench 的 obs 里会有 reset 标志提醒你；不清空就会把上一局的动作记忆带到下一局。</p>
+
+        <div class="bridge rl">
+          <div class="c-h"><span class="tag">从 RL 看</span> policy 和 env 的边界</div>
+          <p>RL 训练里你已经习惯 $\pi(a_t\mid o_t)$ 和 env.step 分离。EBench 的评测也遵守这个边界，只是 env 在远端 server，policy 在你的进程里。理解这个边界，会让后面的 client-server、online challenge、worker 并行都简单很多。</p>
+        </div>
+
+        <h2 id="checkpoint">小检查：判断动作类型</h2>
+        <ol>
+          <li>“选择 6 个技能中的一个”是 Discrete。</li>
+          <li>“输出 7 个关节速度”是 Box。</li>
+          <li>“同时输出左右臂、夹爪、底盘速度和控制模式”更像 Dict。</li>
+          <li>“一次输出未来 50 步，每步 19 维”是 action chunk，shape 是 $50 \times 19$。</li>
+        </ol>
+        <div class="callout warn">
+          <div class="c-h">常见误解</div>
+          <p>连续动作不等于一定要用生成模型。MSE、高斯策略、flow/diffusion 都能处理连续动作。是否需要生成式方法，关键看数据分布是否多峰、控制频率和任务容错度如何。</p>
         </div>
 
         <h2 id="recap">这一节你需要带走的</h2>
-        <p>Gym 的 reset/step 是现代机器人学习的通用语言。离散动作适合分类损失，连续动作需要生成模型。这条分界线贯穿整个 VLA 发展史。离散 → 分类损失；连续 → 往往要 <b>对整个动作分布建模</b>。f-5 说过 MSE 会平均；f-8 从概率角度解释 <b>为什么需要生成模型</b>。</p>
+        <p>Gym 契约的核心是 reset/step；EvalClient 是它在 EBench client-server 评测里的版本。动作空间决定模型输出 shape 和训练 loss：离散动作适合 CE，连续动作可以回归或建模分布。下一节 <a href="f-8-probability-multimodal.html">F-8</a> 会解释为什么“连续动作分布”往往比“一个连续向量”更重要。</p>
       </article>
     </main>
     <aside class="rail" id="rail"></aside>

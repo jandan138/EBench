@@ -25,38 +25,73 @@
       <article class="article">
         <div class="eyebrow">Part F · Foundations · f-1</div>
         <h1>为什么会有 Transformer？</h1>
-        <p class="lede">在开始讲 VLA 之前，我们先回答一个更根本的问题：<b>为什么今天几乎所有大模型（包括 VLA）最后都长成了 Transformer 的样子？</b> 理解了这一点，后面的 Attention、Token、Action Expert 才不会像魔法。</p>
-        <p>本 Part 分两条线并行推进：<b>前半（f-1～f-4）</b> 回答「Transformer 长什么样、数据怎么喂进去」；<b>后半（f-5～f-8）</b> 回答「机器人动作用什么损失学、为什么有时要生成模型而不是回归」。两条线最后在 VLA 里汇合——同一套 Transformer，配上不同的动作输出方式。</p>
+        <p class="lede">这一节先不碰 Q/K/V。我们只解决一个问题：为什么现代 VLA、LLM、VLM 都喜欢把输入排成一串向量，再交给 Transformer 处理？如果你是小白，请把这里当成“进场券”：看懂 token、向量、序列、并行通信四个词，后面的 Attention 才不会像魔法。</p>
 
-        <h2 id="before">序列处理的古老难题</h2>
-        <p>很长一段时间，人们处理序列（文字、语音、轨迹）用的是 <span class="term">RNN</span>（循环神经网络）。它的核心想法是：一个一个 token 读过去，每读一个就把信息记在“隐藏状态”里。</p>
-        <p>这个想法听起来很自然，但有两个致命问题：</p>
-        <ul>
-          <li><b>顺序计算极慢</b>：第 1000 个词必须等前 999 个词全部算完。</li>
-          <li><b>长距离遗忘</b>：越早的信息在反复传递过程中会逐渐衰减。处理一段 50 步的机器人动作时，t=1 的状态信息到 t=50 时几乎没了。</li>
-        </ul>
-
-        <h2 id="attention-revolution">Self-Attention 的革命</h2>
-        <p>2017 年，Attention Is All You Need 提出： <b>不要一个一个读，而是一次性让所有 token 互相看</b>。</p>
-        <p>这样做的两个巨大好处：</p>
-        <ul>
-          <li>计算可以完全并行（GPU 喜欢并行）。</li>
-          <li>任意两个 token 之间的距离永远是 1 步，不存在“远距离遗忘”。</li>
-        </ul>
-
-        <p>上面 callout 里的「互相通信」就是 <b>Self-Attention</b>。你现在只需要记住画面：每个 token 都能直接问其他 token「谁和我有关」。下一节我们不推公式，先用一句话例子把这件事摸清楚。</p>
-
-        <div class="callout">
-          <div class="c-h">一句话记住 Transformer 的本质</div>
-          <p>Transformer = 一堆 token + 让它们互相通信的机制 + 让每个 token 自己加工信息的机制。</p>
+        <div class="callout note">
+          <div class="c-h">Part F 的读法</div>
+          <p>前四节讲“模型怎么吃东西”：序列、Attention、Block、Token/Embedding。后四节讲“模型怎么学动作”：MSE、Cross Entropy、Gym action space、概率分布与生成模型。读完后，你应该能看懂后文反复出现的核心样本式：给观测和指令，输出一段动作 chunk。</p>
         </div>
 
-        <h2 id="why-vla">为什么 VLA 也必须用它</h2>
-        <p>先不用管 VLA 具体怎么拼；你只要接受一点：<b>图像、语言、状态、动作最终都会排成 token 序列</b>（f-4 会细讲），而 Transformer 正是为「长序列、多模态互相看」设计的。</p>
-        <p>机器人动作是一段连续的序列（action chunk）。图像是空间序列（patches）。语言是指令序列。把这三者放在一起，最自然的模型就是能同时处理多模态序列、并让它们互相通信的架构——Transformer。</p>
+        <h2 id="problem">VLA 面前不是一个输入，而是一桌输入</h2>
+        <p>想象一个 EBench 里的移动操作任务。模型每一步要同时看：</p>
+        <ul>
+          <li>四个相机的图像，里面有桌面、物体、机械臂、底盘位置。</li>
+          <li>一句自然语言指令，比如“把蓝色杯子放进左边托盘”。</li>
+          <li>机器人自己的状态，比如关节角、夹爪开合、底盘速度。</li>
+          <li>它接下来要输出的一段动作，不是一个按钮，而是一串连续控制量。</li>
+        </ul>
+        <p>这些东西看起来类型完全不同，但模型内部不想为每种类型单独造一套世界观。更常见的做法是：先把它们都变成同样宽度的向量，然后排成一行，让它们互相交换信息。</p>
+
+        <div class="math-block">$$X = [x_1, x_2, \ldots, x_n] \in \mathbb{R}^{n \times d}$$</div>
+        <p>这行式子只表达一件朴素的事：这里有 $n$ 个位置，每个位置是一条 $d$ 维向量。$x_i$ 可以来自一个词、一个图像 patch、一个状态投影，或者一个动作 token。$n$ 是“这一行有多长”，$d$ 是“每张入场证的宽度”。</p>
+
+        <h2 id="rnn">老办法：排队传话</h2>
+        <p>早期处理序列的主角是 <span class="term">RNN</span>。它像排队传话：第 1 个 token 把信息交给第 2 个，第 2 个再交给第 3 个，一直传下去。</p>
+        <div class="math-block">$$h_t = f(h_{t-1}, x_t)$$</div>
+        <p>这并不愚蠢。对短序列，它很自然：当前记忆 $h_t$ 来自上一步记忆 $h_{t-1}$ 和当前输入 $x_t$。问题在于，VLA 不是短句填空。图像 patch 可能上百个，语言几十个，动作 chunk 又几十步。一个早期 token 想影响很远的 token，就要经过很多次转手。</p>
+        <table>
+          <thead>
+            <tr><th>方式</th><th>信息怎么走</th><th>新手该记住什么</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>RNN</td><td>一个接一个传，远处信息要经过很多步。</td><td>像排队传话，顺序强，但慢，长距离容易衰减。</td></tr>
+            <tr><td>CNN</td><td>先看局部邻居，多层以后扩大视野。</td><td>像拿小窗口扫图，擅长局部模式。</td></tr>
+            <tr><td>Transformer</td><td>每个 token 可以直接和其他 token 通信。</td><td>像圆桌会议，任意两人可以直接互相看。</td></tr>
+          </tbody>
+        </table>
+
+        <h2 id="attention">新办法：圆桌会议</h2>
+        <p>Transformer 的关键想法不是“把神经网络变复杂”，而是换了一种序列通信方式：让所有 token 同时坐在一张圆桌上。每个 token 都可以问：哪些 token 和我有关？然后把相关 token 的信息混进自己的新表示里。</p>
+        <p>这件事带来两个现实好处：</p>
+        <ul>
+          <li><b>并行</b>：所有 token 的通信可以成批算，GPU 更擅长这种大矩阵运算。</li>
+          <li><b>短路径</b>：任意两个 token 的信息路径很短。图像里的杯子、指令里的“蓝色”、状态里的夹爪位置，可以更直接地互相影响。</li>
+        </ul>
+        <div class="callout">
+          <div class="c-h">一句话记住 Transformer 的本质</div>
+          <p>Transformer = 一串同宽向量 + token 间通信的 Attention + 每个 token 自己加工信息的 MLP，再把这些层重复堆起来。</p>
+        </div>
+
+        <h2 id="what-not">别把 Transformer 神化</h2>
+        <p>Transformer 不是“唯一正确的模型”。RNN、CNN、Diffusion Transformer、state-space model 都有自己的位置。我们在这本书里强调 Transformer，是因为当前 VLA 系统大量复用了 VLM/LLM 的骨架，而这些骨架通常已经是 Transformer。你需要学它，不是因为它神秘，而是因为后文的 action expert、FAST、flow policy 都在这个骨架旁边工作。</p>
+        <div class="bridge rl">
+          <div class="c-h"><span class="tag">从 RL 看</span> 策略需要处理历史与当前观测</div>
+          <p>在 RL 里，策略 $\pi(a_t \mid o_t)$ 看起来只吃当前观测。但机器人任务里，“当前观测”常常已经包含图像、语言、状态、历史动作或动作队列。Transformer 的优势是能把这些对象放到同一张通信桌上，让策略在输出动作前整合上下文。</p>
+        </div>
+        <div class="bridge g103">
+          <div class="c-h"><span class="tag">从 GAMES103 看</span> 图结构里的长距离依赖</div>
+          <p>如果你熟悉物理仿真或图形学，可以把 token 想成很多离散采样点。局部方法像只看邻域，Attention 像允许任意两个点建立软连接。它不是物理约束求解器，但“远处信息能直接参与当前更新”这个直觉很接近。</p>
+        </div>
+
+        <h2 id="checkpoint">小检查：你现在应该能读懂这句话</h2>
+        <p>如果一句话里有 6 个词，每个词被变成 4 维向量，那么输入矩阵就是 $X \in \mathbb{R}^{6 \times 4}$。如果再加 196 个图像 patch 和 7 个状态向量，序列长度会变成 $6 + 196 + 7 = 209$。Transformer 不关心它们原来是词、图像还是状态；它先看到的是 209 个同宽向量。</p>
+        <div class="callout warn">
+          <div class="c-h">常见误解</div>
+          <p>“一切皆 token”不是说世界真的只有词。它说的是：进入 Transformer 前，不同模态会被包装成同宽向量，并获得一个序列位置。离散词通常查表得到向量；连续状态和图像 patch 通常通过线性层或 encoder 投影成向量。</p>
+        </div>
 
         <h2 id="recap">这一节你需要带走的</h2>
-        <p>(1) RNN 顺序慢 + 遗忘远距离；(2) Self-Attention 让所有 token 一次性互相看，彻底解决这两个问题；(3) VLA 里的图像、语言、状态、动作最终都要变成 token 序列，因此 Transformer 是目前最自然的骨架。下一章：<a href="f-2-attention.html">Attention 从零开始</a>——用「她在指小红」把 Self-Attention 的直觉走通，再引入 Q/K/V 三个角色。</p>
+        <p>你只需要带走四件事：(1) Transformer 处理的是一串同宽向量 $X \in \mathbb{R}^{n \times d}$；(2) RNN 像排队传话，Transformer 像圆桌会议；(3) VLA 的图像、语言、状态、动作都可以被排进这串向量；(4) 下一节的 Attention 就是在解释“圆桌上每个 token 到底怎么决定该听谁”。继续读 <a href="f-2-attention.html">F-2</a> 时，先盯住“谁问谁、拿什么信息”，公式可以慢慢来。</p>
       </article>
     </main>
     <aside class="rail" id="rail"></aside>
