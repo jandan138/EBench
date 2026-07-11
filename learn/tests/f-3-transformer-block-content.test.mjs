@@ -67,3 +67,24 @@ test("F-3 wires an accessible four-view Transformer Block widget", () => {
   assert.match(css, /\.transformer-block-viz/);
   assert.match(css, /@media \(max-width: 560px\)/);
 });
+
+test("F-3 stacks Block and MLP traces in one mobile column", () => {
+  const css = readFileSync(new URL("../assets/css/book.css", import.meta.url), "utf8");
+  const mobile = css.match(/@media \(max-width: 560px\) \{([\s\S]*?)\n\}/)?.[1] || "";
+
+  ["tbv-stages", "tbv-mlp-row"].forEach((className) => {
+    assert.match(
+      mobile,
+      new RegExp(`\\.${className}\\s*\\{[^}]*grid-template-columns:\\s*minmax\\(0,\\s*1fr\\)\\s*;`),
+      `${className} must use one mobile column`,
+    );
+    assert.match(
+      mobile,
+      new RegExp(`\\.${className}\\s*>\\s*\\.tbv-arrow\\s*\\{[^}]*display:\\s*none`),
+      `${className} arrows must be hidden on mobile`,
+    );
+  });
+  assert.doesNotMatch(mobile, /grid-template-columns:[^;]*(?:20|24)px/);
+  assert.doesNotMatch(mobile, /\.tbv-(?:stages|mlp-row)[^\{]*:nth-of-type/);
+  assert.doesNotMatch(mobile, /\.tbv-row-output\s*\{[^}]*grid-column/);
+});

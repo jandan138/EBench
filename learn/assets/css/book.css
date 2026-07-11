@@ -297,12 +297,11 @@ input[type="range"]::-moz-range-thumb { width: 15px; height: 15px; border-radius
   .transformer-block-viz .tbv-tensor-row { border-right: 0; border-bottom: 1px solid var(--border); }
   .transformer-block-viz .tbv-tensor-row:nth-child(even) { border-right: 1px solid var(--border); }
   .transformer-block-viz .tbv-tensor-row:last-child { grid-column: 1 / -1; border-bottom: 0; }
-  .transformer-block-viz .tbv-stages { display: grid; grid-template-columns: minmax(0, 1fr) 24px minmax(0, 1fr); }
-  .transformer-block-viz .tbv-stages .tbv-arrow:nth-of-type(6), .transformer-block-viz .tbv-stages .tbv-op:nth-of-type(7), .transformer-block-viz .tbv-stages .tbv-arrow:nth-of-type(8), .transformer-block-viz .tbv-stages .tbv-op:nth-of-type(9), .transformer-block-viz .tbv-stages .tbv-arrow:nth-of-type(10), .transformer-block-viz .tbv-stages .tbv-op:nth-of-type(11) { grid-column: auto; }
+  .transformer-block-viz .tbv-stages { display: grid; grid-template-columns: minmax(0, 1fr); }
+  .transformer-block-viz .tbv-stages > .tbv-arrow { display: none; }
   .transformer-block-viz .tbv-bypasses { grid-template-columns: 1fr; }
-  .transformer-block-viz .tbv-mlp-row { grid-template-columns: minmax(0, 1fr) 20px minmax(0, 1fr); }
-  .transformer-block-viz .tbv-mlp-row > .tbv-arrow:nth-of-type(2) { display: none; }
-  .transformer-block-viz .tbv-row-output { grid-column: 3; }
+  .transformer-block-viz .tbv-mlp-row { grid-template-columns: minmax(0, 1fr); }
+  .transformer-block-viz .tbv-mlp-row > .tbv-arrow { display: none; }
   .transformer-block-viz .tbv-routes { grid-template-columns: 1fr; }
   .transformer-block-viz .tbv-norm-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .transformer-block-viz .tbv-axis { grid-column: 1 / -1; grid-row: 2; }
