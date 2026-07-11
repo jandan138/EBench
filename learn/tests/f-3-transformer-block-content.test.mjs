@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 import vm from "node:vm";
 
@@ -45,4 +45,25 @@ test("F-3 metadata supports the expanded concepts", () => {
   assert.match(entry.title, /Transformer Block/);
   ["mlp", "gelu", "residual", "layernorm", "pre-norm", "gradient", "hidden state", "task head"]
     .forEach((keyword) => assert.ok(entry.keywords.toLowerCase().includes(keyword), `missing keyword: ${keyword}`));
+});
+
+test("F-3 wires an accessible four-view Transformer Block widget", () => {
+  const widgetPath = new URL("../assets/js/widgets/transformer-block-viz.js", import.meta.url);
+  const cssPath = new URL("../assets/css/book.css", import.meta.url);
+  assert.ok(existsSync(widgetPath), "widget file missing");
+  assert.ok(existsSync(cssPath), "widget CSS file missing");
+  const widget = readFileSync(widgetPath, "utf8");
+  const css = readFileSync(cssPath, "utf8");
+
+  assert.match(chapter, /data-widget="transformer-block-viz"/);
+  assert.ok(chapter.indexOf("transformer-block-viz.js") < chapter.indexOf("book.js"));
+  assert.match(widget, /EBWidgets\["transformer-block-viz"\]/);
+  ["block", "mlp", "residual", "norm"].forEach((view) => {
+    assert.ok(widget.includes(`data-view: "${view}"`), `missing ${view} view`);
+  });
+  assert.match(widget, /aria-pressed/);
+  assert.match(widget, /aria-live/);
+  assert.match(widget, /keydown/);
+  assert.match(css, /\.transformer-block-viz/);
+  assert.match(css, /@media \(max-width: 560px\)/);
 });

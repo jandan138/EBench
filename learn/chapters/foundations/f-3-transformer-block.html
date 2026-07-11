@@ -104,7 +104,11 @@ $$H^{\ell+1} = A^\ell + \operatorname{MLP}^\ell\!\left(\operatorname{LN}_2^\ell(
           <li>$\operatorname{LN}_2(A^\ell)$，再逐行经过 MLP。</li>
           <li>$H^{\ell+1}=A^\ell+\operatorname{MLP}(\cdot)$：得到同 shape 的下一层状态。</li>
         </ol>
-        <p>Task 2 会把这条静态追踪做成交互视图；本节正文已经保留了两条残差相加和两次 LayerNorm 的完整语义。</p>
+        <div class="lab">
+          <div class="lab-h"><span class="lab-tag">interactive</span><span class="lab-t">Transformer Block 四视角追踪</span></div>
+          <div class="lab-body transformer-block-viz" data-widget="transformer-block-viz"></div>
+          <div class="lab-cap">四个视图始终追踪同一组三行、四维 toy hidden states。数值只用于辨认数据流、共享范围和归一化轴。</div>
+        </div>
 
         <h2 id="variants">同一个想法有常见变体</h2>
         <table>
@@ -166,6 +170,7 @@ $$H^{\ell+1} = A^\ell + \operatorname{MLP}^\ell\!\left(\operatorname{LN}_2^\ell(
 
   <script src="../../content.js"></script>
   <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/transformer-block-viz.js"></script>
   <script src="../../assets/js/book.js"></script>
 </body>
 </html>
