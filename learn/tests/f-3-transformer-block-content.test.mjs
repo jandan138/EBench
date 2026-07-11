@@ -88,3 +88,52 @@ test("F-3 stacks Block and MLP traces in one mobile column", () => {
   assert.doesNotMatch(mobile, /\.tbv-(?:stages|mlp-row)[^\{]*:nth-of-type/);
   assert.doesNotMatch(mobile, /\.tbv-row-output\s*\{[^}]*grid-column/);
 });
+
+test("F-3 keeps narrow-mobile teaching artifacts readable", () => {
+  const css = readFileSync(new URL("../assets/css/book.css", import.meta.url), "utf8");
+  const mobile = css.match(/@media \(max-width: 560px\) \{([\s\S]*?)\n\}/)?.[1] || "";
+  const section = (id) => chapter.match(new RegExp(`id="${id}"[\\s\\S]*?(?=<h2|</article>)`))?.[0] || "";
+  const displayRows = (id) => [...section(id).matchAll(/\$\$([\s\S]*?)\$\$/g)]
+    .map((match) => match[1].replace(/\s+/g, " ").trim());
+
+  [["attention-params", 6], ["mlp", 5]].forEach(([id, minimumRows]) => {
+    const rows = displayRows(id);
+    assert.ok(rows.length >= minimumRows, `#${id} must split its formula into short display rows`);
+    rows.forEach((row) => assert.ok(row.length <= 72, `#${id} display row is too long: ${row}`));
+  });
+
+  const staticLines = [...chapter.matchAll(/<pre><code>([\s\S]*?)<\/code><\/pre>/g)]
+    .flatMap((match) => match[1].replaceAll("&gt;", ">").split("\n"));
+  staticLines.forEach((line) => {
+    assert.ok([...line].length <= 36, `static teaching line is too long (${[...line].length}): ${line}`);
+  });
+
+  [
+    ["variants", ["变体", "最小区别", "本节怎么读"]],
+    ["training-heads", ["系统", "任务头常读什么", "输出例子"]],
+  ].forEach(([id, labels]) => {
+    const table = section(id).match(/<table[^>]*>[\s\S]*?<\/table>/)?.[0] || "";
+    assert.match(table, /<table class="f3-mobile-stack">/, `#${id} needs the mobile-stack class`);
+    const cells = [...table.matchAll(/<td([^>]*)>/g)];
+    assert.ok(cells.length > 0, `#${id} table body cells missing`);
+    cells.forEach((cell, index) => {
+      assert.match(cell[1], new RegExp(`data-label="${labels[index % labels.length]}"`), `#${id} cell ${index + 1} needs its column label`);
+    });
+  });
+
+  assert.match(mobile, /\.f3-mobile-stack\s+thead\s*\{[^}]*display:\s*none/);
+  assert.match(mobile, /\.f3-mobile-stack\s+tr\s*\{[^}]*display:\s*block/);
+  assert.match(mobile, /\.f3-mobile-stack\s+td\s*\{[^}]*min-width:\s*0/);
+  assert.match(mobile, /\.f3-mobile-stack\s+td::before\s*\{[^}]*content:\s*attr\(data-label\)/);
+
+  const rules = [...mobile.matchAll(/([^{}]+)\{([^{}]*)\}/g)];
+  ["tbv-tensor-row code", "tbv-row-input code", "tbv-normalized", "tbv-formula", "tbv-route span"]
+    .forEach((target) => {
+      const body = rules.find((rule) => rule[1].includes(target))?.[2] || "";
+      assert.match(body, /white-space:\s*normal/, `${target} must wrap on mobile`);
+      assert.match(body, /overflow-wrap:\s*anywhere/, `${target} must break long values on mobile`);
+    });
+  assert.match(mobile, /\.tbv-norm-row\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/);
+  assert.match(mobile, /\.tbv-axis\s*\{[^}]*grid-column:\s*auto[^}]*grid-row:\s*auto/);
+  assert.match(mobile, /\.tbv-normalized\s*\{[^}]*grid-column:\s*auto[^}]*grid-row:\s*auto/);
+});

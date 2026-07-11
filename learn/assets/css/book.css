@@ -288,6 +288,12 @@ input[type="range"]::-moz-range-thumb { width: 15px; height: 15px; border-radius
 .transformer-block-viz .tbv-normalized { min-width: 0; overflow-x: auto; padding: 6px 8px; background: var(--surface-2); border-radius: 5px; }
 
 @media (max-width: 560px) {
+  .f3-mobile-stack { overflow-x: visible !important; contain: none !important; }
+  .f3-mobile-stack thead { display: none; }
+  .f3-mobile-stack tbody { display: block; }
+  .f3-mobile-stack tr { display: block; padding: 8px 0; border-bottom: 1px solid var(--border); }
+  .f3-mobile-stack td { display: grid; grid-template-columns: minmax(92px, .4fr) minmax(0, 1fr); gap: 10px; min-width: 0; padding: 5px 0; border: 0; }
+  .f3-mobile-stack td::before { content: attr(data-label); color: var(--ink-faint); font-size: .72rem; font-weight: 600; }
   .transformer-block-viz { padding: 12px !important; }
   .transformer-block-viz .tbv-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .transformer-block-viz .tbv-view-head { align-items: flex-start; flex-direction: column; gap: 3px; }
@@ -303,9 +309,14 @@ input[type="range"]::-moz-range-thumb { width: 15px; height: 15px; border-radius
   .transformer-block-viz .tbv-mlp-row { grid-template-columns: minmax(0, 1fr); }
   .transformer-block-viz .tbv-mlp-row > .tbv-arrow { display: none; }
   .transformer-block-viz .tbv-routes { grid-template-columns: 1fr; }
-  .transformer-block-viz .tbv-norm-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-  .transformer-block-viz .tbv-axis { grid-column: 1 / -1; grid-row: 2; }
-  .transformer-block-viz .tbv-normalized { grid-column: 2; grid-row: 1; }
+  .transformer-block-viz .tbv-tensor-row code,
+  .transformer-block-viz .tbv-row-input code,
+  .transformer-block-viz .tbv-normalized,
+  .transformer-block-viz .tbv-formula,
+  .transformer-block-viz .tbv-route span { overflow-x: visible; overflow-wrap: anywhere; white-space: normal; }
+  .transformer-block-viz .tbv-norm-row { grid-template-columns: minmax(0, 1fr); }
+  .transformer-block-viz .tbv-axis { grid-column: auto; grid-row: auto; }
+  .transformer-block-viz .tbv-normalized { grid-column: auto; grid-row: auto; }
 }
 
 /* ---------- prev/next ---------- */
