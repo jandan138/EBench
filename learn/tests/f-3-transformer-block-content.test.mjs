@@ -105,7 +105,7 @@ test("F-3 keeps narrow-mobile teaching artifacts readable", () => {
   const staticLines = [...chapter.matchAll(/<pre><code>([\s\S]*?)<\/code><\/pre>/g)]
     .flatMap((match) => match[1].replaceAll("&gt;", ">").split("\n"));
   staticLines.forEach((line) => {
-    assert.ok([...line].length <= 36, `static teaching line is too long (${[...line].length}): ${line}`);
+    assert.ok([...line].length <= 30, `static teaching line is too long (${[...line].length}): ${line}`);
   });
 
   [

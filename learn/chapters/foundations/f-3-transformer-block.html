@@ -71,8 +71,12 @@ $$W_2\in\mathbb{R}^{d_{ff}\times d}$$</div>
 
         <h2 id="residual-ln" data-answers="5,6,7">Residual：原表示加上分支更新</h2>
         <p>对任一子层，写作 $y=x+F(x)$。$F(x)$ 在加法中扮演 Delta，即“这一步给 residual stream 的更新”；它<b>不能保证</b>数值很小，也不能保证人能把它解释成一句话。identity route 提供直接传递路径，但不等于整个 Block 可逆或绝不丢信息。</p>
-        <div class="code" data-lang="text"><div class="code-h"><span class="fn">Residual 的两条前向路径</span><button class="cp">复制</button></div><pre><code>x ──────────────┐
-└─&gt; F(x) ───────+ ──&gt; y = x + F(x)</code></pre></div>
+        <div class="code" data-lang="text"><div class="code-h"><span class="fn">Residual 的两条前向路径</span><button class="cp">复制</button></div><pre><code>x ───────────────┐
+x ──&gt; F(x) ──────+
+                  │
+                  y
+
+y = x + F(x)</code></pre></div>
         <p>这条静态旁路图画的是绕过计算分支的路径。它让分支学习“改什么”，同时让旧表示可以直接抵达后续加法。</p>
 
         <h2 id="residual-gradient" data-answers="8">前向路径和梯度路径不是同一句话</h2>
