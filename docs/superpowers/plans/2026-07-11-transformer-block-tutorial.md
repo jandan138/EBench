@@ -4,7 +4,7 @@
 
 **Goal:** Turn F-3 into a beginner-complete Transformer Block tutorial that answers all 15 MLP/Residual/LayerNorm questions and reinforces the explanation with one accessible interactive trace.
 
-**Architecture:** Keep F-3 as one chapter and preserve its incoming fragment links. First establish a tested static explanation and metadata, then add a zero-dependency widget that reuses one toy tensor across four views. All new styles are scoped to the widget; shared site runtime remains unchanged.
+**Architecture:** Keep F-3 as one chapter and preserve its incoming fragment links. First establish a tested static explanation and metadata, then add a zero-dependency widget that reuses one toy tensor across four views. Widget styles are scoped to the widget; static F-3 mobile adaptations are page-scoped to F-3; shared site runtime remains unchanged.
 
 **Tech Stack:** Static HTML/CSS/vanilla JavaScript, KaTeX through the existing runtime, Node 24 built-in test runner, Playwright from the environment for browser QA.
 
@@ -17,8 +17,9 @@
 - Normalize `[B,n,d]` independently over `d` for every `(b,i)` pair.
 - Essential explanations and the Residual bypass drawing must exist in static HTML without JavaScript.
 - Do not modify `learn/assets/js/book.js`, `learn/assets/js/widgets/registry.js`, F-2, or F-4.
-- New CSS must be scoped under `.transformer-block-viz` or `.tbv-*`.
-- The widget must work at 320px, expose keyboard focus and selected state, and communicate without color alone.
+- Widget CSS must be scoped under `.transformer-block-viz` or `.tbv-*`.
+- F-3 static-content mobile CSS is allowed only on selectors that begin with `body[data-section="f-3"]` and target `.f3-*`; generic or global selectors are not allowed.
+- The widget and F-3 static teaching artifacts must work at 320px; the widget must expose keyboard focus and selected state, and communicate without color alone.
 
 ---
 
@@ -147,7 +148,7 @@ git commit -m "Expand Transformer Block foundations tutorial"
 
 **Interfaces:**
 - Consumes: `window.EBWidgets`, `window.EBW.el`, lazy mounting by `book.js`, Task 1's `#block-trace`, and the existing `.lab` shell.
-- Produces: Registration key `transformer-block-viz`, four accessible view buttons, one live panel, and `.transformer-block-viz` / `.tbv-*` scoped styles.
+- Produces: Registration key `transformer-block-viz`, four accessible view buttons, one live panel, `.transformer-block-viz` / `.tbv-*` scoped widget styles, and page-scoped F-3 static-table mobile styles.
 
 - [ ] **Step 1: Extend the test before creating the widget**
 
@@ -172,6 +173,8 @@ test("F-3 wires an accessible four-view Transformer Block widget", () => {
 
 Also add `readFileSync` path existence handling with `existsSync` so the expected RED message is `widget file missing`, not an unhandled exception.
 
+For every mobile rule that adapts a static `.f3-mobile-stack` table, require a selector beginning with `body[data-section="f-3"]` and reject an unscoped `.f3-mobile-stack` selector. Keep the cascade and visually hidden-header assertions so the table remains readable at 320px without removing its table headers from the accessibility tree.
+
 - [ ] **Step 2: Run RED and verify the reason**
 
 Run: `node --test learn/tests/f-3-transformer-block-content.test.mjs`
@@ -192,7 +195,7 @@ The widget must:
 - Show two sequential residual sublayers in `block`; the same MLP box on three rows in `mlp`; branch plus bypass in `residual`; and row-wise `[B,n,d]` normalization in `norm`.
 - Avoid animation, timers, canvas, SVG icons, external dependencies, dynamic KaTeX, and changes to the shared registry helper.
 
-Add responsive CSS under `.transformer-block-viz` and `.tbv-*`. Desktop uses compact horizontal stage groups; at 560px each stage and MLP row become vertical or two-column, controls wrap into a stable 2x2 layout, and long formulas use local horizontal scrolling without document overflow. Add `:focus-visible` and dark-theme-compatible variable colors only.
+Add responsive widget CSS under `.transformer-block-viz` and `.tbv-*`. Desktop uses compact horizontal stage groups; at 560px each stage and MLP row become vertical or two-column, controls wrap into a stable 2x2 layout, and long formulas use local horizontal scrolling without document overflow. F-3 static-table mobile adaptation is separately allowed only through selectors beginning with `body[data-section="f-3"]` and targeting `.f3-*`; do not add generic or global selectors. Add `:focus-visible` and dark-theme-compatible variable colors only.
 
 - [ ] **Step 4: Run GREEN and syntax checks**
 
@@ -246,7 +249,7 @@ Fail on document overflow, missing/duplicate selected state, raw `$$`, clipped c
 
 - [ ] **Step 4: Fix regressions through TDD**
 
-For each defect, add or tighten the permanent test when representable, verify RED, make the smallest production correction, then re-run GREEN and the affected browser viewport.
+For each defect, add or tighten the permanent test when representable, verify RED, make the smallest production correction, then re-run GREEN and the affected browser viewport. Widget visual fixes remain under `.transformer-block-viz` / `.tbv-*`; F-3 static-content mobile visual fixes remain only under selectors beginning with `body[data-section="f-3"]` and targeting `.f3-*`, never generic or global selectors.
 
 - [ ] **Step 5: Stop the preview and verify branch state**
 
@@ -258,5 +261,5 @@ Expected: no running preview process, no untracked audit artifacts outside ignor
 
 - Spec coverage: all 15 questions map to exact anchors and test markers; static and interactive explanations are both covered.
 - Placeholder scan: no deferred content, undefined behavior, or optional implementation decisions remain.
-- Interface consistency: the HTML mount, JS registration key, CSS scope, test path, and script order all use `transformer-block-viz`.
-- Scope: F-2 links remain valid; shared runtime and unrelated Foundations chapters remain untouched.
+- Interface consistency: the HTML mount, JS registration key, CSS scope, test path, and script order all use `transformer-block-viz`; static-table mobile rules use the `body[data-section="f-3"]` page scope and `.f3-*` target.
+- Scope: F-2 links remain valid; widget CSS stays under `.transformer-block-viz` / `.tbv-*`; F-3 static-content mobile CSS stays page-scoped under `body[data-section="f-3"]` with `.f3-*` targets; shared runtime and unrelated Foundations chapters remain untouched.

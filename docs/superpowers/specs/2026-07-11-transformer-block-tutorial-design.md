@@ -89,14 +89,14 @@ LayerNorm 对每个 `X[b,i,:]` 计算 mean 和 population variance，`gamma,beta
 - 修改 `learn/chapters/foundations/f-3-transformer-block.html`。
 - 修改 `learn/content.js` 的 F-3 标题和关键词。
 - 新增 `learn/assets/js/widgets/transformer-block-viz.js`。
-- 在 `learn/assets/css/book.css` 中新增且仅新增 `.transformer-block-viz` / `.tbv-*` 作用域样式。
+- 在 `learn/assets/css/book.css` 中，widget 样式仅新增 `.transformer-block-viz` / `.tbv-*` 作用域样式；F-3 静态内容的窄屏适配仅新增以 `body[data-section="f-3"]` 开头、目标为 `.f3-*` 的页面作用域选择器。不得新增通用或全局选择器。
 - 新增 `learn/tests/f-3-transformer-block-content.test.mjs`。
 - 不修改 `learn/assets/js/book.js`、`registry.js`、F-2 或 F-4。
 
 ## 验证标准
 
 1. Node 内容测试检查 15 问映射、唯一 ID、兼容锚点、章节顺序、核心公式/边界、metadata 和本地链接。
-2. Task 2 先扩展测试使其因 widget 缺失而失败，再实现注册、脚本顺序、控件语义和 scoped CSS。
+2. Task 2 先扩展测试使其因 widget 缺失而失败，再实现注册、脚本顺序、控件语义、widget scoped CSS，以及 F-3 静态表格的页面作用域窄屏 CSS。
 3. 全量 JS 通过 `node --check`；全书本地链接和 fragment 可解析；`git diff --check` 通过。
 4. Playwright 在 1440x900、834x1112、390x844、320x720 检查 light/dark、所有四个视图、键盘、懒加载、KaTeX、console/page/request errors、overflow 和裁切。
 5. 独立 reviewer 按 15 问和数学约定复审，Critical/Important 问题全部修正后才能整合。

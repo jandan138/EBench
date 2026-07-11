@@ -121,9 +121,29 @@ test("F-3 keeps narrow-mobile teaching artifacts readable", () => {
     });
   });
 
-  const tableRule = mobile.match(/\.article\s+table\.f3-mobile-stack\s*\{([^}]*)\}/)?.[1] || "";
-  const cellRule = mobile.match(/\.article\s+table\.f3-mobile-stack\s+td\s*\{([^}]*)\}/)?.[1] || "";
-  const headerRule = mobile.match(/\.article\s+table\.f3-mobile-stack\s+thead\s*\{([^}]*)\}/)?.[1] || "";
+  const staticTableRules = [...mobile.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+    .filter((rule) => rule[1].includes("f3-mobile-stack"));
+  const staticTableScope = 'body[data-section="f-3"] .article table.f3-mobile-stack';
+
+  assert.ok(staticTableRules.length > 0, "mobile static-table rules missing");
+  staticTableRules.forEach(([, selector]) => {
+    assert.match(
+      selector.trim(),
+      /^body\[data-section="f-3"\]\s+\.article\s+table\.f3-mobile-stack(?:\s|:|$)/,
+      `static-table selector must be scoped to F-3: ${selector.trim()}`,
+    );
+  });
+  assert.doesNotMatch(
+    mobile,
+    /^\s*\.f3-mobile-stack(?:\s|:|\{|$)/m,
+    "unscoped .f3-mobile-stack mobile selector is not allowed",
+  );
+
+  const staticTableRule = (suffix) => staticTableRules
+    .find(([, selector]) => selector.trim() === `${staticTableScope}${suffix}`)?.[2] || "";
+  const tableRule = staticTableRule("");
+  const cellRule = staticTableRule(" td");
+  const headerRule = staticTableRule(" thead");
 
   assert.match(tableRule, /overflow-x:\s*visible/, "mobile table override needs cascade-winning specificity");
   assert.match(tableRule, /contain:\s*none/);
@@ -135,8 +155,8 @@ test("F-3 keeps narrow-mobile teaching artifacts readable", () => {
   assert.match(headerRule, /height:\s*1px/);
   assert.match(headerRule, /overflow:\s*hidden/);
   assert.match(headerRule, /(?:clip:\s*rect\(|clip-path:\s*inset\()/);
-  assert.match(mobile, /\.f3-mobile-stack\s+tr\s*\{[^}]*display:\s*block/);
-  assert.match(mobile, /\.f3-mobile-stack\s+td::before\s*\{[^}]*content:\s*attr\(data-label\)/);
+  assert.match(mobile, /body\[data-section="f-3"\]\s+\.article\s+table\.f3-mobile-stack\s+tr\s*\{[^}]*display:\s*block/);
+  assert.match(mobile, /body\[data-section="f-3"\]\s+\.article\s+table\.f3-mobile-stack\s+td::before\s*\{[^}]*content:\s*attr\(data-label\)/);
 
   const rules = [...mobile.matchAll(/([^{}]+)\{([^{}]*)\}/g)];
   ["tbv-tensor-row code", "tbv-row-input code", "tbv-normalized", "tbv-formula", "tbv-route span"]

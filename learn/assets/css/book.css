@@ -288,12 +288,12 @@ input[type="range"]::-moz-range-thumb { width: 15px; height: 15px; border-radius
 .transformer-block-viz .tbv-normalized { min-width: 0; overflow-x: auto; padding: 6px 8px; background: var(--surface-2); border-radius: 5px; }
 
 @media (max-width: 560px) {
-  .article table.f3-mobile-stack { overflow-x: visible; contain: none; }
-  .article table.f3-mobile-stack thead { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); clip-path: inset(50%); white-space: nowrap; border: 0; }
-  .article table.f3-mobile-stack tbody { display: block; }
-  .article table.f3-mobile-stack tr { display: block; padding: 8px 0; border-bottom: 1px solid var(--border); }
-  .article table.f3-mobile-stack td { display: grid; grid-template-columns: minmax(92px, .4fr) minmax(0, 1fr); gap: 10px; min-width: 0; padding: 5px 0; border: 0; }
-  .article table.f3-mobile-stack td::before { content: attr(data-label); color: var(--ink-faint); font-size: .72rem; font-weight: 600; }
+  body[data-section="f-3"] .article table.f3-mobile-stack { overflow-x: visible; contain: none; }
+  body[data-section="f-3"] .article table.f3-mobile-stack thead { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); clip-path: inset(50%); white-space: nowrap; border: 0; }
+  body[data-section="f-3"] .article table.f3-mobile-stack tbody { display: block; }
+  body[data-section="f-3"] .article table.f3-mobile-stack tr { display: block; padding: 8px 0; border-bottom: 1px solid var(--border); }
+  body[data-section="f-3"] .article table.f3-mobile-stack td { display: grid; grid-template-columns: minmax(92px, .4fr) minmax(0, 1fr); gap: 10px; min-width: 0; padding: 5px 0; border: 0; }
+  body[data-section="f-3"] .article table.f3-mobile-stack td::before { content: attr(data-label); color: var(--ink-faint); font-size: .72rem; font-weight: 600; }
   .transformer-block-viz { padding: 12px !important; }
   .transformer-block-viz .tbv-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .transformer-block-viz .tbv-view-head { align-items: flex-start; flex-direction: column; gap: 3px; }
