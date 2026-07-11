@@ -112,16 +112,25 @@
           </tbody>
         </table>
         <p>如果不除以 $\sqrt{d_k}$，raw score 进入 softmax 会更尖，最大项更容易接近 1，其他项接近 0。维度越高，点积方差越大，softmax 越容易饱和，训练梯度也更不稳定。缩放不是语义技巧，而是数值稳定技巧。</p>
+        <p>注意：这一节只算了 Query 和 Key 的匹配分数。<b>Value 还没出场</b>——它会在 softmax 得到权重之后，作为“被取走的内容”参与最后一步混合。先别急着问“为什么不直接混合 Key”，等算完权重再看下一节。</p>
 
         <h2 id="softmax">Softmax：把分数变成可加权的比例</h2>
         <p>Softmax 的输入是一行 scores，输出是一行非负权重：</p>
         <div class="math-block">$$\alpha_{ij}=\frac{\exp(s_{ij})}{\sum_m \exp(s_{im})}$$</div>
         <p>为什么不用“每个 score 直接除以总和”？因为 score 可能是负数，总和也可能接近 0，直接归一化会得到负权重或不稳定比例。指数函数有三个好处：输出永远为正；高分会被放大得更多；整个函数可微，方便反向传播。Softmax 叫“soft max”，是因为它像一个可微的近似最大选择：最高分权重大，但不是硬选唯一一个。</p>
         <p>softmax 后权重一定加起来等于 1，因为分母就是所有指数值的总和。因此这一行权重可以理解成“第 i 个位置从各个位置取信息的比例”。这不是概率的唯一解释，但作为 attention weight 很自然。</p>
+        <p><b>到这里为止，我们只完成了“找谁”</b>：Query 和 Key 点积 → 缩放 → softmax，得到一排权重 α。还记得第二层台阶里的 Value 吗？它在公式 v_i = h_i W_V 里已经出现过，但手算例子里还没用上。<b>权重只是比例，真正要被混合进去的内容，在 Value 里。</b> 下一节回答：为什么混合 Value，而不是 Key。</p>
 
-        <h2 id="value-aggregation">为什么最后加权 Value，而不是 Key</h2>
+        <h2 id="value-aggregation">第四层台阶：用权重混合 Value（为什么不混合 Key）</h2>
+        <p>把 Attention 想成一条四步流水线，到这里你已经走完了前三步：</p>
+        <ol>
+          <li><b>Query</b>：当前位置想问什么（例：“她”指谁？）</li>
+          <li><b>Key</b>：每个位置能被怎么匹配（例：“小红”的 Key 像名牌）</li>
+          <li><b>softmax</b>：把匹配分数变成权重 α（例：小红 ≈ 0.881）</li>
+          <li><b>Value</b>：按权重把各位置的内容取回来（这一步现在才手算）</li>
+        </ol>
         <p>Key 的职责是“被匹配”，Value 的职责是“被取走”。这两件事分开很重要。一个位置可以用某种索引特征让别人找到自己，但真正贡献给别人的内容可以是另一组特征。数据库里也类似：索引用来查找，记录内容才是读出来的数据。</p>
-        <p>假设三个 Value 是：</p>
+        <p>假设三个 Value 是（和上面的 Q/K 一样，也是 hidden state 乘 W_V 得到的；这里直接给出结果方便手算）：</p>
         <table>
           <thead>
             <tr><th>Value</th><th>向量</th></tr>
@@ -136,7 +145,7 @@
         <div class="math-block">$$z_{\text{她}} = \sum_j \alpha_{\text{她},j} v_j$$</div>
         <p>代入上面的权重，得到大约：</p>
         <div class="math-block">$$z_{\text{她}}\approx0.106[1,0]+0.013[0,1]+0.881[3,1]=[2.749,0.894]$$</div>
-        <p>这一步之后，第“她”这个位置的 hidden state 已经混入了“小红”的 Value，所以它开始拥有当前层可见范围内的上下文。后面还会经过输出投影、残差、LayerNorm、MLP，形成下一层 hidden state。</p>
+        <p>这一步之后，第“她”这个位置的 hidden state 已经混入了“小红”的 Value，所以它开始拥有当前层可见范围内的上下文。后面还会经过<b>输出投影、残差、LayerNorm、MLP</b>，形成下一层 hidden state——这些在下一节 <a href="f-3-transformer-block.html#full-flow">F-3</a> 会完整展开（见 <a href="f-3-transformer-block.html#attention-params">输出投影</a>、<a href="f-3-transformer-block.html#residual-ln">残差与 LayerNorm</a>、<a href="f-3-transformer-block.html#mlp">MLP</a>）。</p>
 
         <h2 id="matrix">矩阵公式：把所有 Query 一次算完</h2>
         <p>如果序列里有 $n$ 个 token，每个 token 都要当一次 Query。逐个写太慢，所以用矩阵一次性写完：</p>
