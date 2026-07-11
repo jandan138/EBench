@@ -121,9 +121,21 @@ test("F-3 keeps narrow-mobile teaching artifacts readable", () => {
     });
   });
 
-  assert.match(mobile, /\.f3-mobile-stack\s+thead\s*\{[^}]*display:\s*none/);
+  const tableRule = mobile.match(/\.article\s+table\.f3-mobile-stack\s*\{([^}]*)\}/)?.[1] || "";
+  const cellRule = mobile.match(/\.article\s+table\.f3-mobile-stack\s+td\s*\{([^}]*)\}/)?.[1] || "";
+  const headerRule = mobile.match(/\.article\s+table\.f3-mobile-stack\s+thead\s*\{([^}]*)\}/)?.[1] || "";
+
+  assert.match(tableRule, /overflow-x:\s*visible/, "mobile table override needs cascade-winning specificity");
+  assert.match(tableRule, /contain:\s*none/);
+  assert.doesNotMatch(tableRule, /!important/, "mobile table override must win without !important");
+  assert.match(cellRule, /min-width:\s*0/, "mobile cells must beat later global cell minimums");
+  assert.doesNotMatch(headerRule, /display:\s*none/, "mobile headers must remain in the accessibility tree");
+  assert.match(headerRule, /position:\s*absolute/);
+  assert.match(headerRule, /width:\s*1px/);
+  assert.match(headerRule, /height:\s*1px/);
+  assert.match(headerRule, /overflow:\s*hidden/);
+  assert.match(headerRule, /(?:clip:\s*rect\(|clip-path:\s*inset\()/);
   assert.match(mobile, /\.f3-mobile-stack\s+tr\s*\{[^}]*display:\s*block/);
-  assert.match(mobile, /\.f3-mobile-stack\s+td\s*\{[^}]*min-width:\s*0/);
   assert.match(mobile, /\.f3-mobile-stack\s+td::before\s*\{[^}]*content:\s*attr\(data-label\)/);
 
   const rules = [...mobile.matchAll(/([^{}]+)\{([^{}]*)\}/g)];
