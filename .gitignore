@@ -55,6 +55,7 @@ outputs/
 results/
 runs/
 tmp/
+.worktrees/
 wandb/
 mlruns/
 checkpoints/
