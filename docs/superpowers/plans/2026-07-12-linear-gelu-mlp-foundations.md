@@ -2,593 +2,341 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a zero-prerequisite F-2.5 chapter that teaches functions, Linear, GELU, and Transformer MLPs before F-3, then simplify F-3 so it assembles already-understood pieces into a Transformer Block.
+**Goal:** Insert a zero-prerequisite F-2.5 chapter that teaches function, Linear, GELU, and a standard dense Transformer MLP before F-3, then make F-3 assemble those understood pieces into a complete Block.
 
-**Architecture:** Keep the existing F-3 URL and IDs stable. Insert `f-2-5` in `content.js`, implement the new chapter as static-first HTML plus one lazily initialized `EBWidgets` lab, and scope all new visual rules to `.mlp-basics-viz` / `.mbv-*` or `body[data-section="f-2-5"]`. TDD contracts enforce the pedagogical order, exact toy calculation, navigation, widget accessibility, and 320px behavior.
+**Architecture:** Keep F-3 through F-8 IDs and URLs stable. Add a static-first F-2.5 chapter, a small executable math core shared by tests and one `EBWidgets` visualization, section-scoped outcome tests, a `content.js`-driven navigation integrity test, and a permanent Playwright audit that starts its own random-port server or targets Pages.
 
-**Tech Stack:** Static HTML, existing `book.css`, vanilla JavaScript `EBWidgets`, KaTeX 0.16.9, Node `node:test`, Playwright Chromium.
+**Tech Stack:** Static HTML, existing `book.css`, vanilla JavaScript/UMD, `EBWidgets`, KaTeX 0.16.9, Node `node:test`, Playwright Chromium 1.61.1 already available at `/tmp/ebench-playwright` in this environment.
 
 ## Global Constraints
 
 - Assume only basic addition, subtraction, and multiplication; define function, Linear, GELU, MLP, `W`, `b`, `d`, and `d_ff` before relying on them.
-- Use `f-2-5` and `learn/chapters/foundations/f-2-5-linear-gelu-mlp.html`; do not renumber F-3 through F-8.
-- Preserve F-3 public URL and compatibility anchors `#attention-params`, `#mlp`, `#residual-ln`, and `#full-flow`.
-- Use the deterministic `2 -> 4 -> 2` calculation from the design spec; static text and widget numbers must agree to three decimals.
-- Static HTML must remain sufficient when JavaScript is unavailable; the widget supplements rather than replaces the derivation.
-- Do not modify `learn/assets/js/book.js` or `learn/assets/js/widgets/registry.js`.
-- Do not add dependencies, generated image assets, global CSS selectors, or unscoped mobile rules.
-- Every behavior/content change starts with a failing test and ends with a focused commit.
+- Use ID `f-2-5` and file `learn/chapters/foundations/f-2-5-linear-gelu-mlp.html`; do not renumber F-3 through F-8.
+- Preserve F-3 public URL and semantic compatibility of `#attention-params`, `#mlp`, `#residual-ln`, and `#full-flow`.
+- Use row-vector notation. A library `Linear` with bias is mathematically affine: `y=xW+b`, `W in R^(d_in x d_out)`, `b in R^d_out`.
+- State that two affine transforms combine as `W*=W_1W_2`, `b*=b_1W_2+b_2`; GELU usually prevents a general affine collapse, while special parameters can still yield an affine mapping.
+- Distinguish exact GELU `x Phi(x)`, numerical evaluation, and the common tanh approximation; mention possible negative outputs and local non-monotonicity on the negative axis.
+- Scope parameter-sharing claims to a standard dense MLP within one layer. Different inputs can, but need not, produce different outputs; MoE is an explicit exception.
+- State that backpropagation computes gradients and the optimizer updates only present, trainable parameters. Fine-tuning may start from a checkpoint and frozen parameters do not update.
+- Use the deterministic `2 -> 4 -> 2` parameters and values from the design spec; static and rendered values must agree within `0.001`.
+- Static HTML and `<noscript>` must remain sufficient without widget JavaScript.
+- Do not modify `learn/assets/js/book.js` or `learn/assets/js/widgets/registry.js`, add dependencies, or add unscoped `.f25-*` CSS.
+- Every behavior/content change follows RED, observed expected failure, minimal GREEN, and regression verification.
+
+## Execution Preflight
+
+- [ ] Record `BASE_SHA=$(git rev-parse HEAD)`, `git status --short --branch`, `git branch --list`, and `git worktree list`.
+- [ ] Use `superpowers:using-git-worktrees`. Verify `.worktrees` exists and is ignored, then create only `.worktrees/f25-mlp-foundations` on branch `feature/f25-mlp-foundations` from `BASE_SHA`.
+- [ ] In the isolated worktree, run `node --test learn/tests/f-3-transformer-block-content.test.mjs`; expected baseline is 7 passing, 0 failing.
+- [ ] Create `.superpowers/sdd/progress.md` in the feature worktree and record Task 1, Task 2, Task 3 as pending.
 
 ---
 
-### Task 1: F-2.5 Static Lesson, Navigation, and F-3 Entry
+### Task 1: Static Learning Path, Navigation Integrity, and F-3 Bridge
 
 **Files:**
 - Create: `learn/tests/f-2-5-mlp-basics-content.test.mjs`
+- Create: `learn/tests/foundations-navigation-integrity.test.mjs`
 - Create: `learn/chapters/foundations/f-2-5-linear-gelu-mlp.html`
-- Modify: `learn/content.js:16-31`
-- Modify: `learn/chapters/foundations/f-2-attention.html:148,194`
-- Modify: `learn/chapters/foundations/f-3-transformer-block.html:27-70`
-- Modify: `learn/tests/f-3-transformer-block-content.test.mjs:9-39`
+- Modify: `learn/content.js`
+- Modify: `learn/chapters/foundations/f-2-attention.html`
+- Modify: `learn/chapters/foundations/f-3-transformer-block.html`
+- Modify: `learn/tests/f-3-transformer-block-content.test.mjs`
 
 **Interfaces:**
-- Consumes: `window.EBOOK` metadata and the standard chapter shell used by F-2/F-3.
-- Produces: navigation ID `f-2-5`, chapter section IDs listed below, F-2/F-3 links, and the static `.f25-*` teaching artifacts used by Task 2.
+- Consumes: `window.EBOOK.flat`, the standard chapter shell, existing F-2/F-3 anchors.
+- Produces: F-2.5 section IDs, exact F-2 -> F-2.5 -> F-3 navigation, static toy derivation, and semantically stable F-3 anchors.
 
-- [ ] **Step 1: Write the failing F-2.5 content and navigation tests**
+- [ ] **Step 1: Write section-scoped outcome tests**
 
-Create `learn/tests/f-2-5-mlp-basics-content.test.mjs` with these contracts:
-
-```js
-import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
-import { test } from "node:test";
-import vm from "node:vm";
-
-const chapterUrl = new URL("../chapters/foundations/f-2-5-linear-gelu-mlp.html", import.meta.url);
-const contentSource = readFileSync(new URL("../content.js", import.meta.url), "utf8");
-const f2 = readFileSync(new URL("../chapters/foundations/f-2-attention.html", import.meta.url), "utf8");
-const f3 = readFileSync(new URL("../chapters/foundations/f-3-transformer-block.html", import.meta.url), "utf8");
-const requiredIds = [
-  "start", "function", "scalar-linear", "vector-linear", "linear-boundaries",
-  "gelu", "why-nonlinearity", "mlp-trace", "shared-mlp", "attention-bridge",
-  "training", "checkpoint", "recap",
-];
-
-test("F-2.5 exists between F-2 and F-3 in navigation", () => {
-  assert.ok(existsSync(chapterUrl), "F-2.5 chapter missing");
-  const sandbox = { window: {} };
-  vm.runInNewContext(contentSource, sandbox);
-  const ids = sandbox.window.EBOOK.flat.map((section) => section.id);
-  assert.equal(ids.indexOf("f-2-5"), ids.indexOf("f-2") + 1);
-  assert.equal(ids.indexOf("f-3"), ids.indexOf("f-2-5") + 1);
-  const entry = sandbox.window.EBOOK.flat.find((section) => section.id === "f-2-5");
-  assert.equal(entry.file, "chapters/foundations/f-2-5-linear-gelu-mlp.html");
-  ["linear", "gelu", "mlp", "ffn", "weight", "bias", "activation", "hidden state"]
-    .forEach((keyword) => assert.ok(entry.keywords.toLowerCase().includes(keyword), `missing keyword: ${keyword}`));
-});
-
-test("F-2.5 follows a zero-prerequisite teaching order", () => {
-  const chapter = readFileSync(chapterUrl, "utf8");
-  const ids = [...chapter.matchAll(/\sid="([^"]+)"/g)].map((match) => match[1]);
-  assert.equal(new Set(ids).size, ids.length);
-  requiredIds.forEach((id) => assert.ok(ids.includes(id), `missing #${id}`));
-  const positions = requiredIds.map((id) => chapter.indexOf(`id="${id}"`));
-  assert.deepEqual([...positions].sort((a, b) => a - b), positions);
-  assert.ok(chapter.indexOf("y = wx + b") < chapter.indexOf("y = xW + b"));
-  assert.ok(chapter.indexOf("逐项手算") < chapter.indexOf("矩阵写法"));
-});
-
-test("F-2.5 defines every MLP prerequisite and its boundaries", () => {
-  const compact = readFileSync(chapterUrl, "utf8").replace(/\s+/g, " ");
-  [
-    "只需要加减乘法", "同一条规则", "输入", "权重", "偏置", "输出",
-    "仿射变换", "逐元素", "没有可学习参数", "不能跨 token", "可以合并",
-    "d_ff", "相同参数", "不同输入", "Attention 负责", "MLP 负责",
-    "不是绝对能力边界", "反向传播", "不是人工指定",
-  ].forEach((marker) => assert.ok(compact.includes(marker), `missing marker: ${marker}`));
-});
-
-test("F-2.5 preserves one exact 2-to-4-to-2 calculation", () => {
-  const compact = readFileSync(chapterUrl, "utf8").replace(/\s+/g, " ");
-  [
-    "[2, -1]", "[3, -2, 0.5, 1]", "[2.996, -0.046, 0.346, 0.841]",
-    "[0.614, 1.529]", "2 → 4 → 2", "GELU(x)=x\\Phi(x)",
-  ].forEach((marker) => assert.ok(compact.includes(marker), `missing calculation marker: ${marker}`));
-});
-
-test("F-2 and F-3 bridge through F-2.5", () => {
-  assert.match(f2, /f-2-5-linear-gelu-mlp\.html/);
-  assert.match(f3, /f-2-5-linear-gelu-mlp\.html/);
-  assert.ok(f3.indexOf('id="block-scene"') < f3.indexOf('id="attention-params"'));
-  const intro = f3.slice(0, f3.indexOf('id="residual-ln"'));
-  assert.doesNotMatch(intro, /Q=XW_Q|QK\^T|W_1\\in/);
-});
-```
-
-- [ ] **Step 2: Tighten the existing F-3 test before changing F-3**
-
-In `learn/tests/f-3-transformer-block-content.test.mjs`, prepend `"block-scene"` to `requiredIds`, move `"mainline"` before `"attention-params"`, and add:
+Create a helper that extracts one section without reading later sections:
 
 ```js
-test("F-3 starts from the F-2.5 bridge before formulas", () => {
-  const intro = chapter.slice(0, chapter.indexOf('id="residual-ln"'));
-  assert.match(intro, /f-2-5-linear-gelu-mlp\.html/);
-  assert.match(intro, /跨位置通信/);
-  assert.match(intro, /每个位置内部计算/);
-  assert.doesNotMatch(intro, /Q=XW_Q|QK\^T|W_1\\in/);
-});
+const section = (id) => chapter.match(
+  new RegExp(`<h2[^>]*id="${id}"[^>]*>[\\s\\S]*?(?=<h2|</article>)`),
+)?.[0].replace(/\s+/g, " ") || "";
 ```
 
-- [ ] **Step 3: Run the tests and verify the RED state**
+Add one named test for each outcome rather than one whole-page keyword loop:
+
+1. `#function` contains `f(x)=2x+1`, at least two different substituted inputs/outputs, `同一条规则`, and checkpoint item `data-check="outcome-1"`.
+2. `#vector-linear` contains four full equations in which both input terms and one bias appear; it then introduces `y = xW + b` after the phrase `矩阵写法`.
+3. `#vector-linear` contains an axis table and exact shapes `W:[d_in,d_out]`, `b:[d_out]`; prose maps rows to input features and columns to output features.
+4. `#gelu` contains `GELU(x)=x\\Phi(x)`, `逐元素`, no learned matrix, no token communication, possible negative output, not `[0,1]`, and the non-monotone boundary.
+5. `#why-nonlinearity` contains `W_*=W_1W_2`, `b_*=b_1W_2+b_2`, `通常不再是 affine`, and `特殊参数`.
+6. `#mlp-trace` contains the deterministic four stage values and `2 → 4 → 2`; executable numeric correctness belongs to Task 2.
+7. `#shared-mlp` states same parameters, different inputs can differ, deterministic same-input caveat, standard dense layer scope, and MoE exception.
+8. `#attention-bridge` states cross-position communication versus within-position computation, explicitly says this is not an exclusive boundary, and says Attention may structurally connect directly to a head.
+9. `#training` distinguishes backpropagation from optimizer updates; names `W_1,b_1,W_2,b_2`, initialization versus checkpoint, trainable/frozen parameters, optional bias, and manually assigned roles.
+
+Require checkpoint items `data-check="outcome-1"` through `data-check="outcome-9"` exactly once.
+
+- [ ] **Step 2: Write the permanent navigation integrity test**
+
+`learn/tests/foundations-navigation-integrity.test.mjs` must evaluate `learn/content.js` in `vm`, use `window.EBOOK.flat` as the only formal-page source, and assert:
+
+```text
+flat.length === 62
+all section IDs unique
+all registered files unique and present under learn/
+f-2 index + 1 === f-2-5 index
+f-2-5 index + 1 === f-3 index
+every local href/src in registered HTML resolves
+every local HTML fragment resolves to id/name
+F-2 next-learning link is f-2-5-linear-gelu-mlp.html#start
+F-2 deep links retain exact F-3 destinations for #attention-params, #residual-ln, #full-flow
+F-3 links back to f-2-5-linear-gelu-mlp.html#mlp-trace
+```
+
+Keep F-3 internal order/semantics out of this navigation test.
+
+- [ ] **Step 3: Tighten F-3-owned compatibility tests**
+
+In `f-3-transformer-block-content.test.mjs` add `#block-scene` before `#mainline`, then assert section-local semantics:
+
+```text
+#attention-params mentions W_O and return to width d
+#mlp links F-2.5 and recaps Linear 1, GELU, Linear 2, d_ff, return to d
+#residual-ln still contains y=x+F(x) and the bypass diagram
+#full-flow still contains LN_1 -> Attention -> + -> LN_2 -> MLP -> +
+intro before #residual-ln contains no Q=XW_Q, QK^T, or W_1 dimension derivation
+```
+
+Remove `#shared-mlp` and `#mlp-expressivity` from required teaching-order IDs. Require compatibility anchors for those two old fragments without requiring duplicate sections.
+
+- [ ] **Step 4: Verify RED**
 
 Run:
 
 ```bash
-node --test learn/tests/f-2-5-mlp-basics-content.test.mjs learn/tests/f-3-transformer-block-content.test.mjs
+node --test learn/tests/f-2-5-mlp-basics-content.test.mjs learn/tests/foundations-navigation-integrity.test.mjs learn/tests/f-3-transformer-block-content.test.mjs
 ```
 
-Expected: FAIL because the F-2.5 file/metadata and `#block-scene` do not exist.
+Expected: F-2.5 file/metadata missing, formal count still 61, F-3 `#block-scene` and bridge semantics missing.
 
-- [ ] **Step 4: Add F-2.5 metadata and navigation links**
+- [ ] **Step 5: Implement metadata and static F-2.5**
 
-Insert this object between `f-2` and `f-3` in `learn/content.js`:
+Insert exactly this metadata between F-2 and F-3:
 
 ```js
 { id: "f-2-5", title: "Linear、GELU 与 MLP 从零开始", file: "chapters/foundations/f-2-5-linear-gelu-mlp.html",
   keywords: "linear gelu mlp ffn weight bias activation function hidden state d_ff affine nonlinearity 参数共享" },
 ```
 
-Change the F-2 recap so its next chapter is F-2.5. In the Value aggregation paragraph, link MLP to F-2.5 while retaining F-3 links for Residual and the complete Block.
+Create the standard HTML shell with required IDs in this order:
 
-- [ ] **Step 5: Write the complete static F-2.5 chapter**
+```text
+start, function, scalar-linear, vector-linear, linear-boundaries, gelu,
+why-nonlinearity, mlp-trace, shared-mlp, attention-bridge, training,
+checkpoint, recap
+```
 
-Create the standard chapter shell with `body data-section="f-2-5"`, the required section IDs in exact test order, KaTeX assets, `content.js`, `registry.js`, and `book.js`. The static body must include:
+Use four grouped flow stages, not seven loose grid children:
 
 ```html
 <div class="f25-flow" aria-label="MLP 数据流">
-  <span>[2, -1]</span><b>Linear 1</b><span>[3, -2, 0.5, 1]</span>
-  <b>GELU</b><span>[2.996, -0.046, 0.346, 0.841]</span>
-  <b>Linear 2</b><span>[0.614, 1.529]</span>
+  <div class="f25-stage"><b>输入</b><code>[2, -1]</code></div>
+  <div class="f25-stage"><b>Linear 1</b><code>[3, -2, 0.5, 1]</code></div>
+  <div class="f25-stage"><b>GELU</b><code>[2.996, -0.046, 0.346, 0.841]</code></div>
+  <div class="f25-stage"><b>Linear 2</b><code>[0.614, 1.529]</code></div>
 </div>
 ```
 
-Use the spec's deterministic `W1/W2/b1/b2`. Before `y=xW+b`, show scalar `y=wx+b` and this explicit vector calculation:
+Every static table uses `class="f25-mobile-stack"` and `data-label` on body cells. Split display math into one short equation per KaTeX block. Include all nine checkpoint IDs.
 
-```text
-y1 = 2 × 1 + (-1) × (-1) + 0 = 3
-y2 = 2 × 0 + (-1) × 2 + 0 = -2
-y3 = 2 × 0.5 + (-1) × 0.5 + 0 = 0.5
-y4 = 2 × 0.25 + (-1) × (-0.5) + 0 = 1
-```
+- [ ] **Step 6: Update F-2 and rebuild F-3's opening**
 
-Explain `Linear` library naming versus affine mathematics, GELU's exact formula and boundary behavior, the scalar affine-composition proof, shared parameters across three token rows, GPU batching only after the row-wise account, training, checkpoint questions, and the three-chapter bridge.
+F-2 routes MLP prerequisites to `f-2-5-linear-gelu-mlp.html#start`; its W_O/Residual/full-flow deep links retain exact F-3 fragments.
 
-- [ ] **Step 6: Rewrite the F-3 entry without re-teaching QKV or MLP algebra**
+F-3 begins with a concrete “她 / 小红” contextual-state scene, then the no-formula four-role mainline. `#attention-params` is a short W_O/width-d recap. `#mlp` is a short three-stage recap linked to `f-2-5-linear-gelu-mlp.html#mlp-trace`. Preserve old `#shared-mlp` and `#mlp-expressivity` as zero-height scroll-margin-aware anchor aliases adjacent to `#mlp`, not duplicate teaching sections.
 
-Place `#block-scene` first, then `#mainline`, then compatibility anchors `#attention-params` and `#mlp`. Use this conceptual flow before any display formula:
+- [ ] **Step 7: Verify GREEN and commit**
 
-```text
-Attention：跨位置通信，把别处的信息带到当前行。
-MLP：每个位置内部计算，逐行加工当前 hidden state。
-Residual：把分支更新加回原 stream。
-LayerNorm：稳定送入计算分支的数值尺度。
-```
-
-Link `Linear / GELU / MLP` to F-2.5, keep only a three-sentence MLP recap, and move the first detailed display formula to the Residual section. Preserve all later mathematical boundaries and the existing Transformer Block widget.
-
-- [ ] **Step 7: Run tests and verify GREEN**
-
-Run:
+Run the three tests from Step 4 and the existing F-3 suite. Expected: all pass.
 
 ```bash
-node --test learn/tests/f-2-5-mlp-basics-content.test.mjs learn/tests/f-3-transformer-block-content.test.mjs
-```
-
-Expected: all static/navigation tests pass; widget-specific F-2.5 tests are not added until Task 2.
-
-- [ ] **Step 8: Commit the static lesson**
-
-```bash
-git add learn/content.js learn/chapters/foundations/f-2-attention.html learn/chapters/foundations/f-2-5-linear-gelu-mlp.html learn/chapters/foundations/f-3-transformer-block.html learn/tests/f-2-5-mlp-basics-content.test.mjs learn/tests/f-3-transformer-block-content.test.mjs
+git add learn/content.js learn/chapters/foundations/f-2-attention.html learn/chapters/foundations/f-2-5-linear-gelu-mlp.html learn/chapters/foundations/f-3-transformer-block.html learn/tests/f-2-5-mlp-basics-content.test.mjs learn/tests/foundations-navigation-integrity.test.mjs learn/tests/f-3-transformer-block-content.test.mjs
 git commit -m "Add zero-prerequisite Linear GELU MLP chapter"
 ```
 
+Record Task 1 commit range and test command in `.superpowers/sdd/progress.md` after task review is clean.
+
 ---
 
-### Task 2: Accessible MLP Basics Experiment
+### Task 2: Complete MLP Experiment Vertical Slice
 
 **Files:**
+- Create: `learn/assets/js/widgets/mlp-basics-core.js`
 - Create: `learn/assets/js/widgets/mlp-basics-viz.js`
+- Create: `learn/tests/f-2-5-mlp-basics-math.test.mjs`
+- Create: `learn/tests/f-2-5-browser-audit.mjs`
+- Modify: `learn/tests/f-2-5-mlp-basics-content.test.mjs`
 - Modify: `learn/chapters/foundations/f-2-5-linear-gelu-mlp.html`
-- Modify: `learn/tests/f-2-5-mlp-basics-content.test.mjs`
-
-**Interfaces:**
-- Consumes: `window.EBWidgets`, `window.EBW.el/svg/clamp`, the deterministic matrices from Task 1, and lazy initialization from `book.js`.
-- Produces: `EBWidgets["mlp-basics-viz"](root)`, four `data-view` modes (`linear`, `gelu`, `mlp`, `shared`), and `.mbv-*` DOM hooks for Task 3.
-
-- [ ] **Step 1: Add failing widget contract tests**
-
-Append to the F-2.5 test:
-
-```js
-test("F-2.5 wires an accessible four-view MLP basics widget", () => {
-  const chapter = readFileSync(chapterUrl, "utf8");
-  const widgetUrl = new URL("../assets/js/widgets/mlp-basics-viz.js", import.meta.url);
-  assert.ok(existsSync(widgetUrl), "MLP basics widget missing");
-  const widget = readFileSync(widgetUrl, "utf8");
-  assert.match(chapter, /data-widget="mlp-basics-viz"/);
-  assert.ok(chapter.indexOf("mlp-basics-viz.js") < chapter.indexOf("book.js"));
-  assert.match(widget, /EBWidgets\["mlp-basics-viz"\]/);
-  ["linear", "gelu", "mlp", "shared"].forEach((view) => {
-    assert.ok(widget.includes(`data-view: "${view}"`), `missing ${view} view`);
-  });
-  assert.match(widget, /aria-pressed/);
-  assert.match(widget, /aria-live/);
-  assert.match(widget, /keydown/);
-  assert.match(widget, /Home/);
-  assert.match(widget, /End/);
-  ["2.995950", "-0.045500", "0.614225", "1.529030"]
-    .forEach((value) => assert.ok(widget.includes(value), `missing deterministic value: ${value}`));
-});
-```
-
-- [ ] **Step 2: Run the test and verify RED**
-
-Run:
-
-```bash
-node --test learn/tests/f-2-5-mlp-basics-content.test.mjs
-```
-
-Expected: FAIL because `mlp-basics-viz.js` and its script/data-widget hooks are absent.
-
-- [ ] **Step 3: Implement deterministic math helpers and widget shell**
-
-Create `learn/assets/js/widgets/mlp-basics-viz.js` as an IIFE. Its deterministic math block is:
-
-```js
-(function () {
-  const EBW = window.EBW;
-  const views = [
-    { label: "Linear 手算", view: "linear" }, // data-view: "linear"
-    { label: "GELU 曲线", view: "gelu" }, // data-view: "gelu"
-    { label: "完整 MLP", view: "mlp" }, // data-view: "mlp"
-    { label: "参数共享", view: "shared" }, // data-view: "shared"
-  ];
-  const inputs = [
-    { label: "她", value: [2, -1] },
-    { label: "喜欢", value: [0.5, 1.5] },
-    { label: "苹果", value: [-1, 2] },
-  ];
-  const W1 = [[1, 0, 0.5, 0.25], [-1, 2, 0.5, -0.5]];
-  const B1 = [0, 0, 0, 0];
-  const W2 = [[0.2, 0.4], [0.1, -0.2], [0.3, 0.2], [-0.1, 0.3]];
-  const B2 = [0, 0];
-  const erf = (x) => {
-    const sign = x < 0 ? -1 : 1;
-    const absolute = Math.abs(x);
-    const t = 1 / (1 + 0.3275911 * absolute);
-    const polynomial = (((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t
-      - 0.284496736) * t + 0.254829592) * t);
-    return sign * (1 - polynomial * Math.exp(-absolute * absolute));
-  };
-  const gelu = (x) => x * 0.5 * (1 + erf(x / Math.sqrt(2)));
-  const affine = (row, weights, bias) => bias.map((b, column) =>
-    row.reduce((sum, value, index) => sum + value * weights[index][column], b));
-  const trace = (row) => {
-    const hidden = affine(row, W1, B1);
-    const activated = hidden.map(gelu);
-    return { input: row, hidden, activated, output: affine(activated, W2, B2) };
-  };
-  const reference = Object.freeze({
-    geluThree: 2.995950,
-    geluMinusTwo: -0.045500,
-    outputZero: 0.614225,
-    outputOne: 1.529030,
-  });
-  const format = (value) => Math.abs(value) < 0.0005 ? "0.000" : value.toFixed(3);
-})();
-```
-
-Keep `reference` in the implementation as an executable consistency check against `trace(inputs[0].value)`, and throw a descriptive error when a value differs by more than `1e-5`. Display values with `format`.
-
-- [ ] **Step 4: Implement four views and accessible controls**
-
-Inside `initMlpBasics`:
-
-- Create a four-button `.mbv-view-controls` segmented control.
-- Keep one `activeView`; set exactly one `aria-pressed="true"`.
-- Support ArrowLeft/ArrowRight/ArrowUp/ArrowDown, Home, and End.
-- Re-render one `.mbv-stage[aria-live="polite"]` without recreating the outer lab.
-- `linear`: show four equations and let four output buttons select the highlighted column.
-- `gelu`: render an SVG plot from `x=-3` through `x=3`, a range input with `step="0.1"`, a current input/output marker, and the five-row preset table.
-- `mlp`: render four stable bands for input, Linear 1, GELU, and Linear 2; a checkbox labeled `显示去掉 GELU 的对比` reveals the collapsed-affine explanation.
-- `shared`: render three rows with identical parameter label and different traced outputs; token buttons select the expanded row.
-
-Use text labels and numeric equations so the SVG/colour is never the sole source of meaning.
-
-- [ ] **Step 5: Wire the chapter and verify GREEN**
-
-Add this lab after the full static MLP trace:
-
-```html
-<div class="lab">
-  <div class="lab-h"><span class="lab-tag">interactive</span><span class="lab-t">MLP 拆解实验台</span></div>
-  <div class="lab-body mlp-basics-viz" data-widget="mlp-basics-viz"></div>
-  <div class="lab-cap">四个视图复用同一组参数；先逐项算，再观察 GELU、完整流水线和逐位置共享。</div>
-</div>
-```
-
-Load `../../assets/js/widgets/mlp-basics-viz.js` after `registry.js` and before `book.js`. Run:
-
-```bash
-node --check learn/assets/js/widgets/mlp-basics-viz.js
-node --test learn/tests/f-2-5-mlp-basics-content.test.mjs
-```
-
-Expected: syntax check and all F-2.5 tests pass.
-
-- [ ] **Step 6: Commit the widget**
-
-```bash
-git add learn/assets/js/widgets/mlp-basics-viz.js learn/chapters/foundations/f-2-5-linear-gelu-mlp.html learn/tests/f-2-5-mlp-basics-content.test.mjs
-git commit -m "Add interactive MLP basics trace"
-```
-
----
-
-### Task 3: Scoped Responsive Styling
-
-**Files:**
 - Modify: `learn/assets/css/book.css`
-- Modify: `learn/tests/f-2-5-mlp-basics-content.test.mjs`
 
 **Interfaces:**
-- Consumes: `.f25-*` static hooks and `.mlp-basics-viz` / `.mbv-*` widget hooks from Tasks 1-2.
-- Produces: desktop, tablet, 390px, and 320px layouts without document overflow or global style changes.
+- `mlp-basics-core.js` exports in Node and sets `window.EBMLPBasics` in browsers: `erf(number)`, `gelu(number)`, `affine(number[],number[][],number[])`, `trace(number[])`, `format(number)` and frozen `inputs/W1/B1/W2/B2`.
+- `mlp-basics-viz.js` registers `EBWidgets["mlp-basics-viz"]`, consumes `window.EBMLPBasics`, and renders four views: `linear`, `gelu`, `mlp`, `shared`.
+- `f-2-5-browser-audit.mjs` accepts optional `EBENCH_BASE_URL`; without it, starts and closes a Node static server on port 0 in `finally`.
 
-- [ ] **Step 1: Add failing CSS scope and mobile tests**
+- [ ] **Step 1: Write executable math tests**
 
-Append:
+Require the UMD core with `createRequire`. Test with numeric tolerances, not source literals:
 
 ```js
-test("F-2.5 visual rules are scoped and become one column on mobile", () => {
-  const css = readFileSync(new URL("../assets/css/book.css", import.meta.url), "utf8");
-  assert.match(css, /\.mlp-basics-viz/);
-  ["mbv-view-controls", "mbv-stage", "mbv-flow", "mbv-linear-equations", "mbv-gelu-layout", "mbv-shared-grid"]
-    .forEach((className) => assert.match(css, new RegExp(`\\.${className}`), `missing .${className}`));
-  const mobile = css.match(/@media \(max-width: 560px\) \{([\s\S]*?)\n\}/)?.[1] || "";
-  ["f25-flow", "mbv-flow", "mbv-gelu-layout", "mbv-shared-grid"].forEach((className) => {
-    assert.match(mobile, new RegExp(`\\.${className}\\s*\\{[^}]*grid-template-columns:\\s*minmax\\(0,\\s*1fr\\)`));
-  });
-  ["mbv-vector", "mbv-equation", "mbv-matrix", "mbv-result"]
-    .forEach((className) => assert.match(mobile, new RegExp(`\\.${className}[^}]*overflow-wrap:\\s*anywhere`)));
-  const unscopedStatic = [...css.matchAll(/([^{}]+)\{[^{}]*\}/g)]
-    .map((match) => match[1].trim())
-    .filter((selector) => selector.includes(".f25-") && !selector.includes('body[data-section="f-2-5"]'));
-  assert.deepEqual(unscopedStatic, []);
-});
+assert.deepEqual(core.affine([2, -1], core.W1, core.B1), [3, -2, 0.5, 1]);
+assert.ok(Math.abs(core.gelu(3) - 2.995950098) < 1e-6);
+assert.ok(Math.abs(core.gelu(-2) + 0.045500126) < 1e-6);
+const first = core.trace([2, -1]);
+assert.ok(Math.abs(first.output[0] - 0.614224903) < 1e-6);
+assert.ok(Math.abs(first.output[1] - 1.529029732) < 1e-6);
+assert.equal(core.format(0.00001), "0.000");
+assert.equal(core.format(-0.045500126), "-0.046");
 ```
 
-- [ ] **Step 2: Run the test and verify RED**
+Trace all three declared inputs, assert shape `2 -> 4 -> 4 -> 2`, finite values, same frozen parameter object, and at least two distinct outputs. Parse static `data-value` attributes from F-2.5 and assert they match `trace(inputs[0])` within `0.001`.
+
+- [ ] **Step 2: Add wiring/accessibility source tests**
+
+Only assert stable wiring that behavior tests cannot load without:
+
+```text
+registry.js < mlp-basics-core.js < mlp-basics-viz.js < book.js
+data-widget="mlp-basics-viz"
+<noscript> contains the complete four-stage numeric trace
+core and widget files exist
+no unscoped selector containing .f25-
+```
+
+Do not assert comments, duplicated constants, or regex-extracted media blocks.
+
+- [ ] **Step 3: Write the permanent Playwright audit before implementation**
+
+The script uses `createRequire` to load `/tmp/ebench-playwright/node_modules/playwright`, starts a minimal static server from `learn/` on `127.0.0.1:0` when `EBENCH_BASE_URL` is absent, and always closes browser/server in `finally`.
+
+For `1440x900`, `834x1112`, `390x844`, `320x720`, and light/dark:
+
+```text
+load F-2.5 and F-3 with HTTP 200
+capture console errors, page errors, failed local requests
+assert KaTeX rendered and no reader-visible raw math
+assert document, article, static tables/formulas, and widget have no incoherent overflow/clipping
+assert F-2.5 widget is unmounted before intersection, mounted after scroll, and still has exactly four top-level view buttons after leaving/re-entering
+activate four views; exactly one aria-pressed=true and focus stays in the selected control
+exercise Arrow keys, Home, End, Enter, Space
+select every Linear output and shared token; each named group has exactly one selected item
+move labeled GELU range; rendered input/output changes and concise live region updates
+toggle labeled no-GELU checkbox
+assert SVG has an accessible label or is explicitly decorative with equivalent text
+assert 320px computed grids are one column and view controls are two columns
+assert visible focus outline has non-zero width and selected/focus contrast is visibly distinct in both themes
+direct-load F-3 compatibility fragments; target exists, hash remains, and target top is below sticky header
+```
+
+Add two special contexts: JavaScript disabled, which must show the full static/noscript trace; and an init script setting `window.IntersectionObserver=undefined`, which must mount exactly once eagerly.
+
+Rendered deterministic values after selecting “她” must equal the core/static values to three decimals. Save screenshots under `EBENCH_AUDIT_DIR` or `/tmp/ebench-f25-audit`.
+
+- [ ] **Step 4: Verify RED**
 
 Run:
 
 ```bash
-node --test learn/tests/f-2-5-mlp-basics-content.test.mjs
+node --test learn/tests/f-2-5-mlp-basics-math.test.mjs learn/tests/f-2-5-mlp-basics-content.test.mjs
+node learn/tests/f-2-5-browser-audit.mjs
 ```
 
-Expected: FAIL on missing `.mlp-basics-viz` and mobile selectors.
+Expected: missing core/widget files and missing rendered controls/styles.
 
-- [ ] **Step 3: Add desktop/tablet styles with existing tokens**
+- [ ] **Step 5: Implement the pure UMD math core**
 
-Append one scoped block using only existing CSS variables:
+Use the exact matrices from the design spec. Implement `erf` with Abramowitz-Stegun 7.1.26 coefficients, define exact GELU as `x * 0.5 * (1 + erf(x/sqrt(2)))`, and freeze public arrays/objects. The static text calls resulting decimals numerical approximations, not exact values.
 
-```css
-.mlp-basics-viz { color: var(--text); }
-.mlp-basics-viz .mbv-view-controls { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:6px; }
-.mlp-basics-viz .mbv-stage { min-height:360px; margin-top:14px; border-top:1px solid var(--border); }
-.mlp-basics-viz .mbv-flow { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); }
-.mlp-basics-viz .mbv-gelu-layout { display:grid; grid-template-columns:minmax(0,1.4fr) minmax(220px,.8fr); }
-.mlp-basics-viz .mbv-shared-grid { display:grid; grid-template-columns:minmax(150px,.7fr) minmax(0,1.3fr); }
-```
+- [ ] **Step 6: Implement all four widget views and semantics**
 
-Add these interaction and content rules in the same scoped block; declarations may be expanded for spacing and typography but selectors and color roles must remain:
+Use a four-button named view group with `type="button"`, `aria-pressed`, ArrowLeft/Right/Up/Down, Home, End, and focus retention. Render into one stable `.mbv-stage[aria-live="polite"]`.
 
-```css
-.mlp-basics-viz .mbv-view-button { min-height:42px; border:1px solid var(--border); background:var(--surface); color:var(--muted); }
-.mlp-basics-viz .mbv-view-button[aria-pressed="true"] { border-color:var(--interactive); background:color-mix(in srgb,var(--interactive) 12%,var(--surface)); color:var(--text); }
-.mlp-basics-viz .mbv-view-button:focus-visible,
-.mlp-basics-viz .mbv-output-button:focus-visible,
-.mlp-basics-viz .mbv-token-button:focus-visible { outline:2px solid var(--interactive); outline-offset:2px; }
-.mlp-basics-viz .mbv-stage-band { padding:12px 0; border-bottom:1px solid var(--border); }
-.mlp-basics-viz .mbv-equation,
-.mlp-basics-viz .mbv-vector,
-.mlp-basics-viz .mbv-matrix,
-.mlp-basics-viz .mbv-result { font-family:var(--mono); }
-.mlp-basics-viz .mbv-chart { width:100%; aspect-ratio:16/10; min-width:0; }
-.mlp-basics-viz .mbv-axis { stroke:var(--muted); }
-.mlp-basics-viz .mbv-curve { fill:none; stroke:var(--interactive); stroke-width:3; }
-.mlp-basics-viz .mbv-point { fill:var(--warn); stroke:var(--surface); stroke-width:2; }
-.mlp-basics-viz .mbv-shared-row[aria-current="true"] { border-left:3px solid var(--accent); }
-body[data-section="f-2-5"] .article .f25-flow { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; }
-body[data-section="f-2-5"] .article .f25-equation { font-family:var(--mono); overflow-wrap:anywhere; }
-body[data-section="f-2-5"] .article .f25-boundary { border-left:3px solid var(--warn); padding-left:14px; }
-```
+- `linear`: four selectable output columns, each full weighted-sum equation, exactly one `aria-pressed` output.
+- `gelu`: labeled range `-3..3 step 0.1`, accessible SVG curve/point, exact-definition note, five-value table, negative-output/non-monotone boundary.
+- `mlp`: four flat bands, shape labels, labeled no-GELU checkbox, and qualified affine-collapse comparison.
+- `shared`: named token selector, identical parameter display, three traces, dense-layer/MoE caveat, vectorized `[B,n,d]` implementation note.
 
-Using existing variables makes the same rules work in light and dark themes. Do not create cards inside the `.lab`.
+- [ ] **Step 7: Add complete scoped desktop/mobile CSS in the same task**
 
-Add static rules only under `body[data-section="f-2-5"] .article .f25-*` selectors. The static flow may break out to the article's existing wide teaching width on desktop but must remain inside the document grid.
+Desktop widget rules begin with `.mlp-basics-viz` or `.mlp-basics-viz .mbv-*`. Static rules begin with `body[data-section="f-2-5"] .article .f25-*`. Use existing text/surface/border/accent/interactive/warn variables and explicit `:focus-visible` outlines for every control, including range and checkbox.
 
-- [ ] **Step 4: Add exact narrow-screen behavior**
+Within the existing `@media (max-width:560px)` cascade, make `.f25-flow`, `.mbv-flow`, `.mbv-gelu-layout`, `.mbv-shared-grid`, and weighted-sum equations one column; make `.mbv-view-controls` two columns; make every F-2.5 table a scoped stacked table with accessible visually-hidden headers and `data-label`; allow code/formula/value wrapping; set SVG `width:100%; aspect-ratio:16/10; min-width:0`.
 
-Inside the existing `@media (max-width: 560px)` block:
-
-```css
-body[data-section="f-2-5"] .article .f25-flow,
-.mlp-basics-viz .mbv-flow,
-.mlp-basics-viz .mbv-gelu-layout,
-.mlp-basics-viz .mbv-shared-grid { grid-template-columns:minmax(0,1fr); }
-
-.mlp-basics-viz .mbv-vector,
-.mlp-basics-viz .mbv-equation,
-.mlp-basics-viz .mbv-matrix,
-.mlp-basics-viz .mbv-result { white-space:normal; overflow-wrap:anywhere; }
-
-.mlp-basics-viz .mbv-view-controls { grid-template-columns:repeat(2,minmax(0,1fr)); }
-.mlp-basics-viz .mbv-stage { min-height:520px; }
-.mlp-basics-viz .mbv-linear-equations { display:grid; grid-template-columns:minmax(0,1fr); }
-.mlp-basics-viz .mbv-weighted-term { display:block; }
-.mlp-basics-viz .mbv-chart { width:100%; aspect-ratio:16/10; min-width:0; }
-```
-
-- [ ] **Step 5: Run tests and commit**
+- [ ] **Step 8: Verify GREEN and commit the complete component**
 
 Run:
 
 ```bash
-node --test learn/tests/f-2-5-mlp-basics-content.test.mjs learn/tests/f-3-transformer-block-content.test.mjs
-git diff --check
+node --test learn/tests/f-2-5-mlp-basics-content.test.mjs learn/tests/f-2-5-mlp-basics-math.test.mjs learn/tests/foundations-navigation-integrity.test.mjs learn/tests/f-3-transformer-block-content.test.mjs
+node --check learn/assets/js/widgets/mlp-basics-core.js
+node --check learn/assets/js/widgets/mlp-basics-viz.js
+node learn/tests/f-2-5-browser-audit.mjs
+git diff --check HEAD
 ```
 
-Expected: all tests pass and no whitespace errors.
+Expected: all tests/audits pass, screenshots exist for every route/theme/viewport, no whitespace errors.
 
 ```bash
-git add learn/assets/css/book.css learn/tests/f-2-5-mlp-basics-content.test.mjs
-git commit -m "Make MLP foundations readable on narrow screens"
+git add learn/assets/css/book.css learn/assets/js/widgets/mlp-basics-core.js learn/assets/js/widgets/mlp-basics-viz.js learn/chapters/foundations/f-2-5-linear-gelu-mlp.html learn/tests/f-2-5-mlp-basics-content.test.mjs learn/tests/f-2-5-mlp-basics-math.test.mjs learn/tests/f-2-5-browser-audit.mjs
+git commit -m "Add interactive Linear GELU MLP experiment"
 ```
+
+Record Task 2 commit range and exact tests in `.superpowers/sdd/progress.md` after task review is clean.
 
 ---
 
-### Task 4: Full Verification, Browser Audit, and Integration
+### Task 3: Whole-Branch Review, Integration, Pages, and Task-Owned Cleanup
 
 **Files:**
-- Verify: `learn/chapters/foundations/f-2-5-linear-gelu-mlp.html`
-- Verify: `learn/chapters/foundations/f-3-transformer-block.html`
-- Verify: all files changed in Tasks 1-3
-- Modify only when a failing check identifies a concrete defect.
+- Verify all Task 1/2 files.
+- Modify only after an observed failing test or review finding.
 
 **Interfaces:**
-- Consumes: complete static chapter, widget, scoped CSS, and metadata.
-- Produces: reproducible test/browser evidence, clean feature history, merged `main`, successful Pages deployment, and clean worktree.
+- Consumes: complete feature commits and permanent local/remote audit.
+- Produces: reviewed mainline commits, exact-HEAD successful Pages deployment, and removal only of the feature branch/worktree/processes created by this task.
 
-- [ ] **Step 1: Run permanent tests and all JavaScript syntax checks**
+- [ ] **Step 1: Run fresh full verification over the committed range**
 
 ```bash
-node --test learn/tests/f-2-5-mlp-basics-content.test.mjs learn/tests/f-3-transformer-block-content.test.mjs
+node --test learn/tests/f-2-5-mlp-basics-content.test.mjs learn/tests/f-2-5-mlp-basics-math.test.mjs learn/tests/foundations-navigation-integrity.test.mjs learn/tests/f-3-transformer-block-content.test.mjs
 rg --files learn -g '*.js' | sort | xargs -n1 node --check
-git diff --check
+node learn/tests/f-2-5-browser-audit.mjs
+git diff --check "$BASE_SHA"..HEAD
 ```
 
-Expected: every test and syntax check passes; `git diff --check` prints nothing.
+- [ ] **Step 2: Run independent whole-branch review**
 
-- [ ] **Step 2: Check every formal chapter's local links**
+Create a review package for `BASE_SHA..HEAD`. Ask a read-only reviewer to check all nine outcomes, mathematical boundaries, semantic anchors, executable math, static/no-JS path, accessibility, four viewports, and unrelated changes. Resolve every Critical/Important finding with a new failing regression test, expected RED, scoped fix, GREEN, and re-review. Do not create an empty polish commit.
 
-Run:
+- [ ] **Step 3: Integrate without touching unrelated repository state**
+
+Return to the primary checkout. Re-record branch/worktree lists and compare them with the preflight snapshot. Fast-forward `main` to the feature branch only if `main` is still at `BASE_SHA`; otherwise fetch and reconcile without rewriting either history. Remove only `.worktrees/f25-mlp-foundations` and `feature/f25-mlp-foundations` after integration. Do not delete branches/worktrees/processes not created by this task.
+
+- [ ] **Step 4: Push and verify the exact remote SHA**
+
+Use `superpowers:using-github-proxy` with one-shot environment variables and the existing `gh auth git-credential`; never write persistent proxy config. Push `main`, then verify `git ls-remote origin refs/heads/main` equals `git rev-parse HEAD`.
+
+- [ ] **Step 5: Wait for the exact Pages workflow**
+
+Run `gh run list --workflow "Deploy Learning Site" --limit 10 --json databaseId,headSha,status,conclusion,url`, select the run whose `headSha` exactly equals local HEAD into shell variable `RUN_ID`, and wait with `gh run watch "$RUN_ID" --exit-status`. Require successful upload and deploy steps.
+
+- [ ] **Step 6: Re-run the permanent audit against Pages**
+
+With `SHORT_SHA=$(git rev-parse --short HEAD)`, run:
 
 ```bash
-node - <<'NODE'
-const fs = require("fs");
-const path = require("path");
-const root = path.resolve("learn/chapters");
-const pages = fs.readdirSync(root, { recursive: true })
-  .filter((name) => name.endsWith(".html"))
-  .map((name) => path.join(root, name));
-const failures = [];
-const escape = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-for (const page of pages) {
-  const source = fs.readFileSync(page, "utf8");
-  for (const match of source.matchAll(/\b(?:href|src)=["']([^"'<>]+)["']/g)) {
-    const raw = match[1];
-    if (/^(?:https?:|mailto:|tel:|data:|javascript:)/i.test(raw)) continue;
-    const [pathAndQuery, fragment] = raw.split("#", 2);
-    const clean = pathAndQuery.split("?")[0];
-    let target = clean ? path.resolve(path.dirname(page), clean) : page;
-    if (target.endsWith(path.sep)) target = path.join(target, "index.html");
-    if (!fs.existsSync(target)) {
-      failures.push(`${path.relative(root, page)} -> missing ${raw}`);
-      continue;
-    }
-    if (fragment && target.endsWith(".html")) {
-      const targetSource = fs.readFileSync(target, "utf8");
-      const decoded = decodeURIComponent(fragment);
-      if (!new RegExp(`(?:id|name)=["']${escape(decoded)}["']`).test(targetSource)) {
-        failures.push(`${path.relative(root, page)} -> missing fragment ${raw}`);
-      }
-    }
-  }
-}
-console.log(JSON.stringify({ pages: pages.length, failures }, null, 2));
-if (pages.length !== 62 || failures.length) process.exit(1);
-NODE
+EBENCH_BASE_URL="https://jandan138.github.io/EBench" EBENCH_CACHE_BUST="$SHORT_SHA" EBENCH_AUDIT_DIR="/tmp/ebench-f25-pages-$SHORT_SHA" node learn/tests/f-2-5-browser-audit.mjs
 ```
 
-Expected: `pages` is `62` and `failures` is empty.
+Require both F-2.5 and F-3 200 responses, deployed deterministic values, compatibility fragments, four-view interactions, desktop/mobile layouts, and zero runtime failures.
 
-- [ ] **Step 3: Start an isolated local preview**
+- [ ] **Step 7: Final task-owned cleanup and evidence**
 
-Use an unused loopback port:
+Confirm no local preview/Playwright process started by the audit remains. Confirm no persistent Git proxy config was added. Final state must show `main` tracking `origin/main` with `0 0` left/right count and no file changes. Branch/worktree state must equal the preflight snapshot except that the task-created feature branch/worktree are absent.
 
-```bash
-python3 -m http.server 8765 --directory learn
-```
-
-Preview routes:
-
-```text
-http://127.0.0.1:8765/chapters/foundations/f-2-5-linear-gelu-mlp.html
-http://127.0.0.1:8765/chapters/foundations/f-3-transformer-block.html
-```
-
-- [ ] **Step 4: Run Playwright checks across four viewports**
-
-Audit `1440x900`, `834x1112`, `390x844`, and `320x720`. For F-2.5, scroll the lazy widget into view before waiting for controls, activate all four views, verify exactly one `aria-pressed="true"`, exercise keyboard navigation, move the GELU slider, toggle the no-GELU comparison, and switch all three shared token inputs. For both chapters, verify:
-
-```text
-HTTP 200
-KaTeX nodes > 0
-no raw $$ / \[ / \begin{...} reader text
-no document or component horizontal overflow
-no clipped formula, table, code, or control text
-no console error, pageerror, failed local request, or init failure
-light and dark theme both render
-```
-
-Capture top/content/widget screenshots under `/tmp/ebench-f25-audit/` and inspect them at original resolution.
-
-- [ ] **Step 5: Fix only evidence-backed browser defects and re-run the full audit**
-
-For any failure, add or tighten a permanent content/CSS regression test first, confirm RED, make the smallest scoped fix, confirm GREEN, and repeat all affected viewports. Do not accept a source-only fix.
-
-- [ ] **Step 6: Stop preview and verify process cleanup**
-
-Terminate the exact HTTP server process and close the Playwright browser. Confirm no process associated with the chosen port or `/tmp/ebench-playwright` remains.
-
-- [ ] **Step 7: Request independent final review**
-
-Ask one read-only reviewer to verify the nine success criteria, mathematical boundaries, navigation, 320px behavior, and screenshots. Resolve all Critical/Important findings with the RED/GREEN loop.
-
-- [ ] **Step 8: Commit final evidence-backed fixes**
-
-If Task 4 produced changes:
-
-```bash
-git add learn/content.js learn/assets/css/book.css learn/assets/js/widgets/mlp-basics-viz.js learn/chapters/foundations/f-2-attention.html learn/chapters/foundations/f-2-5-linear-gelu-mlp.html learn/chapters/foundations/f-3-transformer-block.html learn/tests/f-2-5-mlp-basics-content.test.mjs learn/tests/f-3-transformer-block-content.test.mjs
-git commit -m "Polish Linear GELU MLP tutorial verification"
-```
-
-If Task 4 produced no changes, do not create an empty commit.
-
-- [ ] **Step 9: Integrate, push, deploy, and clean**
-
-Merge the feature branch into `main` without rewriting unrelated history. Push `main`, wait for the exact-HEAD `Deploy Learning Site` workflow, verify the deployed F-2.5 and F-3 URLs with cache-busting SHA query parameters, and repeat desktop/mobile smoke checks against Pages. Finish with:
-
-```text
-git status --short --branch: main tracks origin/main with no file entries
-git rev-list --left-right --count origin/main...main: 0 0
-git worktree list: only the primary main worktree
-git branch --list: only main
-```
-
-Do not use `git clean` on ignored user data and do not leave persistent proxy settings.
+Record final commit SHA, workflow run URL, deployed F-2.5 URL, test counts, screenshot directory, and clean-state commands in the final response.
