@@ -10,19 +10,25 @@
     ];
     let active = "linear";
 
-    root.innerHTML = `<div class="mbv-view-controls" role="group" aria-label="实验视图">${views.map(([id, label]) => `<button type="button" class="mbv-view-button" data-view="${id}" aria-pressed="${id === active}">${label}</button>`).join("")}</div><div class="mbv-stage" aria-live="polite"></div>`;
+    root.innerHTML = `<div class="mbv-view-controls" role="group" aria-label="实验视图">${views.map(([id, label]) => `<button type="button" class="mbv-view-button" data-view="${id}" aria-pressed="${id === active}">${label}</button>`).join("")}</div><div class="mbv-stage"></div><div class="mbv-status" role="status" aria-live="polite" aria-atomic="true"></div>`;
     const stage = root.querySelector(".mbv-stage");
+    const status = root.querySelector(".mbv-status");
     const buttons = [...root.querySelectorAll(".mbv-view-button")];
     const vector = (items) => `[${items.map(core.format).join(", ")}]`;
+    const announce = (message) => { status.textContent = message; };
     const equations = [
       "2(1)+(-1)(-1)+0=3", "2(0)+(-1)(2)+0=-2", "2(0.5)+(-1)(0.5)+0=0.5", "2(0.25)+(-1)(-0.50)+0=1",
     ];
 
     function linear() {
+      const trace = core.trace(core.inputs[0]);
       stage.innerHTML = `<div class="mbv-view"><div class="mbv-view-head"><b>Linear 1：选择输出列</b><span>输入 [2, -1]，W1 的列决定输出</span></div><div class="mbv-output-group" role="group" aria-label="Linear 1 输出列">${equations.map((equation, index) => `<button type="button" class="mbv-output" aria-pressed="${index === 0}" data-index="${index}"><b>y${index + 1}</b><code>${equation}</code></button>`).join("")}</div><p class="mbv-note">每一列都读取两个输入 feature，再加自己的 bias。</p></div>`;
       stage.querySelectorAll(".mbv-output").forEach((button) => button.addEventListener("click", () => {
         stage.querySelectorAll(".mbv-output").forEach((item) => item.setAttribute("aria-pressed", String(item === button)));
+        const index = Number(button.dataset.index);
+        announce(`Linear 1：y${index + 1} 输出 ${core.format(trace.linear1[index])}。`);
       }));
+      announce(`Linear 1 视图：y1 输出 ${core.format(trace.linear1[0])}。`);
     }
 
     function curvePath() {
@@ -41,17 +47,26 @@
         const point = stage.querySelector(".mbv-gelu-point");
         point.setAttribute("cx", 40 + (x + 3) * 70);
         point.setAttribute("cy", 120 - y * 30);
-        stage.setAttribute("aria-label", `GELU 输入 ${core.format(x)}，输出 ${core.format(y)}`);
+        announce(`GELU 输入 ${core.format(x)}，输出 ${core.format(y)}。`);
       });
+      announce("GELU 视图：输入 0.000，输出 0.000。");
     }
 
     function mlp() {
       const trace = core.trace(core.inputs[0]);
-      stage.innerHTML = `<div class="mbv-view"><div class="mbv-view-head"><b>完整 MLP：2 → 4 → 4 → 2</b><span>同一条向量逐阶段移动</span></div><label class="mbv-check"><input type="checkbox" class="mbv-no-gelu"> 去掉 GELU，比较 affine collapse</label><div class="mbv-flow"><div class="mbv-band"><b>输入 · [2]</b><code>${vector(trace.input)}</code></div><div class="mbv-band"><b>Linear 1 · [4]</b><code>${vector(trace.linear1)}</code></div><div class="mbv-band mbv-activation"><b>GELU · [4]</b><code>${vector(trace.activated)}</code></div><div class="mbv-band"><b>Linear 2 · [2]</b><code>${vector(trace.output)}</code></div></div><p class="mbv-note">去掉 GELU 后，两次 affine 总能合并；保留 GELU 时通常不能。特殊参数仍可能碰巧得到 affine。</p></div>`;
+      const withoutActivation = core.traceWithoutActivation(core.inputs[0]);
+      stage.innerHTML = `<div class="mbv-view"><div class="mbv-view-head"><b>完整 MLP：2 → 4 → 4 → 2</b><span>同一条向量逐阶段移动</span></div><label class="mbv-check"><input type="checkbox" class="mbv-no-gelu"> 去掉 GELU，比较 affine collapse</label><div class="mbv-flow"><div class="mbv-band"><b>输入 · [2]</b><code>${vector(trace.input)}</code></div><div class="mbv-band"><b>Linear 1 · [4]</b><code>${vector(trace.linear1)}</code></div><div class="mbv-band mbv-activation"><b>GELU · [4]</b><code>${vector(trace.activated)}</code></div><div class="mbv-band"><b>Linear 2 · [2]</b><code class="mbv-mlp-output">${vector(trace.output)}</code></div></div><p class="mbv-note mbv-mlp-note">保留 GELU 时，本例输出 ${vector(trace.output)}；整体通常不能合并为一次 affine，特殊参数仍可能碰巧得到 affine。</p></div>`;
       stage.querySelector(".mbv-no-gelu").addEventListener("change", (event) => {
-        stage.querySelector(".mbv-activation").classList.toggle("mbv-disabled", event.target.checked);
-        stage.setAttribute("aria-label", event.target.checked ? "已去掉 GELU" : "已保留 GELU");
+        const disabled = event.target.checked;
+        const output = disabled ? withoutActivation.output : trace.output;
+        stage.querySelector(".mbv-activation").classList.toggle("mbv-disabled", disabled);
+        stage.querySelector(".mbv-mlp-output").textContent = vector(output);
+        stage.querySelector(".mbv-mlp-note").textContent = disabled
+          ? `去掉 GELU 后，本例输出 ${vector(output)}；两次 affine 总能合并为一次。`
+          : `保留 GELU 时，本例输出 ${vector(output)}；整体通常不能合并为一次 affine，特殊参数仍可能碰巧得到 affine。`;
+        announce(`${disabled ? "去掉" : "保留"} GELU，输出 ${vector(output)}。`);
       });
+      announce(`完整 MLP 视图：保留 GELU，输出 ${vector(trace.output)}。`);
     }
 
     function shared() {
@@ -62,7 +77,7 @@
         tokens.forEach((item, itemIndex) => item.setAttribute("aria-pressed", String(itemIndex === index)));
         const trace = core.trace(core.inputs[index]);
         stage.querySelector(".mbv-token-trace").innerHTML = `<b>${names[index]}</b><div class="mbv-flow"><code>${vector(trace.input)}</code><span>→</span><code>${vector(trace.linear1)}</code><span>→</span><code>${vector(trace.activated)}</code><span>→</span><code class="mbv-shared-output">${vector(trace.output)}</code></div>`;
-        stage.setAttribute("aria-label", `${names[index]} 输出 ${vector(trace.output)}`);
+        announce(`参数共享：${names[index]} 输出 ${vector(trace.output)}。`);
       };
       tokens.forEach((button, index) => button.addEventListener("click", () => renderToken(index)));
       renderToken(0);

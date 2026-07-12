@@ -9,6 +9,14 @@ const corePath = new URL("../assets/js/widgets/mlp-basics-core.js", import.meta.
 const coreFile = fileURLToPath(corePath);
 const chapterPath = new URL("../chapters/foundations/f-2-5-linear-gelu-mlp.html", import.meta.url);
 
+test("requiring the core in Node does not assign a browser global", () => {
+  delete globalThis.EBMLPBasics;
+  delete require.cache[require.resolve(coreFile)];
+  const core = require(coreFile);
+  assert.equal(globalThis.EBMLPBasics, undefined);
+  assert.equal(typeof core.trace, "function");
+});
+
 test("MLP math core exists and exposes deterministic exact-GELU arithmetic", () => {
   assert.ok(existsSync(corePath), "missing mlp-basics-core.js");
   const core = require(coreFile);
@@ -20,6 +28,13 @@ test("MLP math core exists and exposes deterministic exact-GELU arithmetic", () 
   assert.ok(Math.abs(first.output[1] - 1.529029732) < 1e-6);
   assert.equal(core.format(0.00001), "0.000");
   assert.equal(core.format(-0.045500126), "-0.046");
+});
+
+test("no-activation trace composes the two affine layers", () => {
+  const core = require(coreFile);
+  const trace = core.traceWithoutActivation([2, -1]);
+  assert.deepEqual(trace.linear1, [3, -2, 0.5, 1]);
+  assert.deepEqual(trace.output.map(core.format), ["0.450", "2.000"]);
 });
 
 test("public inputs, parameters, and traces are frozen and shape-safe", () => {
@@ -49,4 +64,13 @@ test("static trace data values agree with the executable core", () => {
     assert.equal(values[index].length, expected.length);
     expected.forEach((number, item) => assert.ok(Math.abs(values[index][item] - number) <= 0.001));
   });
+});
+
+test("static GELU table values agree with the executable core", () => {
+  const core = require(coreFile);
+  const chapter = readFileSync(chapterPath, "utf8");
+  const rows = [...chapter.matchAll(/data-gelu-input="([^"]+)" data-gelu-value="([^"]+)"/g)]
+    .map((match) => ({ input: Number(match[1]), output: match[2] }));
+  assert.deepEqual(rows.map(({ input }) => input), [-2, -1, 0, 1, 2]);
+  assert.deepEqual(rows.map(({ output }) => output), rows.map(({ input }) => core.format(core.gelu(input))));
 });

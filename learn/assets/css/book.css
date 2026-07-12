@@ -292,6 +292,14 @@ body[data-section="f-2-5"] .article .f25-parameters { margin: 1em 0; padding: 10
 body[data-section="f-2-5"] .article .f25-parameters p { margin: 4px 0; min-width: 0; }
 body[data-section="f-2-5"] .article .f25-weighted-sums { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; margin: 1em 0; }
 body[data-section="f-2-5"] .article .f25-weighted-sums code { display: block; min-width: 0; padding: 8px; overflow-wrap: anywhere; }
+body[data-section="f-2-5"] .article .f25-gelu-static { display: grid; grid-template-columns: minmax(180px, .75fr) minmax(0, 1.25fr); gap: 14px; align-items: center; margin: 1.1em 0; }
+body[data-section="f-2-5"] .article .f25-gelu-values { margin: 0; }
+body[data-section="f-2-5"] .article .f25-gelu-figure { min-width: 0; margin: 0; }
+body[data-section="f-2-5"] .article .f25-gelu-figure svg { display: block; width: 100%; aspect-ratio: 25/11; min-width: 0; border: 1px solid var(--border); background: var(--surface-2); }
+body[data-section="f-2-5"] .article .f25-gelu-figure line { stroke: var(--border-strong); }
+body[data-section="f-2-5"] .article .f25-gelu-figure polyline { stroke: var(--interactive); stroke-width: 4; }
+body[data-section="f-2-5"] .article .f25-gelu-figure circle { fill: var(--warn); stroke: var(--surface); stroke-width: 2; }
+body[data-section="f-2-5"] .article .f25-gelu-figure figcaption { margin-top: 6px; color: var(--ink-soft); font-size: .76rem; line-height: 1.5; }
 body[data-section="f-2-5"] .article .f25-flow { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; margin: 1.2em 0; }
 body[data-section="f-2-5"] .article .f25-stage { display: flex; min-width: 0; flex-direction: column; gap: 5px; padding: 9px; border-top: 3px solid var(--accent); background: var(--surface-2); }
 body[data-section="f-2-5"] .article .f25-stage code { min-width: 0; overflow-wrap: anywhere; white-space: normal; }
@@ -306,6 +314,7 @@ body[data-section="f-3"] .article p, body[data-section="f-3"] .article li { over
 .mlp-basics-viz .mbv-view-button[aria-pressed="true"], .mlp-basics-viz .mbv-output[aria-pressed="true"], .mlp-basics-viz .mbv-token[aria-pressed="true"] { border: 2px solid var(--interactive); background: var(--interactive-soft); color: var(--ink); }
 .mlp-basics-viz .mbv-view-button:focus-visible, .mlp-basics-viz .mbv-output:focus-visible, .mlp-basics-viz .mbv-token:focus-visible, .mlp-basics-viz input[type="range"]:focus-visible, .mlp-basics-viz input[type="checkbox"]:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 .mlp-basics-viz .mbv-stage, .mlp-basics-viz .mbv-view { min-width: 0; }
+.mlp-basics-viz .mbv-status { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .mlp-basics-viz .mbv-view { display: grid; gap: 12px; }
 .mlp-basics-viz .mbv-view-head { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
 .mlp-basics-viz .mbv-view-head span { color: var(--ink-faint); font: .72rem/1.4 var(--mono); text-align: right; }
@@ -332,7 +341,7 @@ body[data-section="f-3"] .article p, body[data-section="f-3"] .article li { over
 .mlp-basics-viz .mbv-token-trace .mbv-flow { display: flex; flex-wrap: wrap; align-items: center; }
 
 @media (max-width: 560px) {
-  body[data-section="f-2-5"] .article .f25-flow, body[data-section="f-2-5"] .article .f25-weighted-sums { grid-template-columns: minmax(0, 1fr); }
+  body[data-section="f-2-5"] .article .f25-flow, body[data-section="f-2-5"] .article .f25-weighted-sums, body[data-section="f-2-5"] .article .f25-gelu-static { grid-template-columns: minmax(0, 1fr); }
   body[data-section="f-2-5"] .article table.f25-mobile-stack, body[data-section="f-2-5"] .article table.mbv-gelu-table { overflow-x: visible; contain: none; }
   body[data-section="f-2-5"] .article table.f25-mobile-stack thead, body[data-section="f-2-5"] .article table.mbv-gelu-table thead { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   body[data-section="f-2-5"] .article table.f25-mobile-stack th, body[data-section="f-2-5"] .article table.mbv-gelu-table th { min-width: 0; }

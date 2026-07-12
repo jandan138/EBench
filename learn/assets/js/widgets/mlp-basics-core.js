@@ -1,8 +1,11 @@
-(function (root, factory) {
+(function (factory) {
   const api = factory();
-  if (typeof module === "object" && module.exports) module.exports = api;
-  if (root) root.EBMLPBasics = api;
-})(typeof window !== "undefined" ? window : globalThis, function () {
+  if (typeof module === "object" && module.exports) {
+    module.exports = api;
+  } else if (typeof window === "object" && window.window === window) {
+    window.EBMLPBasics = api;
+  }
+})(function () {
   "use strict";
 
   const freezeMatrix = (rows) => Object.freeze(rows.map((row) => Object.freeze(row.slice())));
@@ -37,10 +40,17 @@
     return Object.freeze({ input, linear1, activated, output, parameters });
   }
 
+  function traceWithoutActivation(vector) {
+    const input = Object.freeze(vector.slice());
+    const linear1 = Object.freeze(affine(input, W1, B1));
+    const output = Object.freeze(affine(linear1, W2, B2));
+    return Object.freeze({ input, linear1, output, parameters });
+  }
+
   function format(value) {
     const rounded = Math.abs(value) < 0.0005 ? 0 : value;
     return rounded.toFixed(3);
   }
 
-  return Object.freeze({ erf, gelu, affine, trace, format, inputs, W1, B1, W2, B2 });
+  return Object.freeze({ erf, gelu, affine, trace, traceWithoutActivation, format, inputs, W1, B1, W2, B2 });
 });

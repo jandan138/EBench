@@ -10,6 +10,8 @@ const { chromium } = require("/tmp/ebench-playwright/node_modules/playwright");
 const learnRoot = fileURLToPath(new URL("..", import.meta.url));
 const auditDir = process.env.EBENCH_AUDIT_DIR || "/tmp/ebench-f25-audit";
 const remoteBase = process.env.EBENCH_BASE_URL;
+const cacheBust = (process.env.EBENCH_CACHE_BUST || "").trim();
+const cacheBustParam = "ebench-cache-bust";
 const sizes = [[1440, 900], [834, 1112], [390, 844], [320, 720]];
 const themes = ["light", "dark"];
 const mime = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".woff2": "font/woff2" };
@@ -17,6 +19,7 @@ const f25Path = "/chapters/foundations/f-2-5-linear-gelu-mlp.html";
 const f3Path = "/chapters/foundations/f-3-transformer-block.html";
 let server;
 let browser;
+const routedRequests = new WeakMap();
 
 async function localServer() {
   server = createServer(async (request, response) => {
@@ -43,6 +46,13 @@ function isSameOrigin(url, baseOrigin) {
   } catch {
     return false;
   }
+}
+
+function withCacheBust(rawUrl, baseOrigin, value = cacheBust) {
+  if (!value || !isSameOrigin(rawUrl, baseOrigin)) return rawUrl;
+  const url = new URL(rawUrl);
+  url.searchParams.set(cacheBustParam, value);
+  return url.toString();
 }
 
 function watch(page, baseOrigin) {
@@ -87,6 +97,25 @@ async function provideLocalKatex(context, cacheDir) {
     if (!entry) return route.fulfill({ contentType: "font/woff2", body: Buffer.alloc(0) });
     await route.fulfill({ contentType: entry[0], body: await readFile(entry[1]) });
   });
+}
+
+async function installCacheBust(context, baseOrigin) {
+  const routed = [];
+  routedRequests.set(context, routed);
+  if (!cacheBust) return;
+  await context.route("**/*", (route) => {
+    const request = route.request();
+    const originalUrl = request.url();
+    const eligible = ["GET", "HEAD"].includes(request.method()) && isSameOrigin(originalUrl, baseOrigin);
+    const url = eligible ? withCacheBust(originalUrl, baseOrigin) : originalUrl;
+    routed.push({ url, originalUrl, method: request.method(), type: request.resourceType() });
+    return route.fallback(eligible ? { url } : undefined);
+  });
+}
+
+async function prepareContext(context, baseOrigin, cacheDir) {
+  await provideLocalKatex(context, cacheDir);
+  await installCacheBust(context, baseOrigin);
 }
 
 async function collectLayoutFailures(page) {
@@ -221,6 +250,16 @@ async function assertFocused(page, locator, label) {
   assert.ok(style.width > 0 && style.style !== "none" && !/rgba?\(0, 0, 0, 0\)/.test(style.color), `${label}: no visible focus ${JSON.stringify(style)}`);
 }
 
+async function assertStatusChange(status, action, expected, label) {
+  const before = (await status.textContent()).trim();
+  await action();
+  const after = (await status.textContent()).trim();
+  assert.notEqual(after, before, `${label}: status did not change`);
+  assert.match(after, expected, `${label}: unexpected status`);
+  assert.ok(after.length > 0 && after.length < 80, `${label}: status is not concise (${after.length})`);
+  return after;
+}
+
 async function assertButtonStateDifference(page, selectedSelector, normalSelector, label) {
   const states = await page.evaluate(([selected, normal]) => {
     const snapshot = (element) => {
@@ -260,6 +299,15 @@ async function auditF25(page, width, label) {
   assert.equal(await page.locator('.mbv-view-controls[data-audit-identity="original"] > .mbv-view-button').count(), 4, `${label}: widget remounted after re-entry`);
 
   const viewButtons = page.locator(".mbv-view-button");
+  const status = page.locator('.mbv-status[role="status"]');
+  assert.equal(await status.count(), 1, `${label}: dedicated status count`);
+  assert.equal(await status.getAttribute("aria-live"), "polite", `${label}: status politeness`);
+  assert.equal(await status.getAttribute("aria-atomic"), "true", `${label}: status atomicity`);
+  assert.equal(await page.locator(".mbv-stage").getAttribute("aria-live"), null, `${label}: stage must not be live`);
+  await assertStatusChange(status, () => viewButtons.nth(1).click(), /GELU.*视图/, `${label} view status`);
+  await viewButtons.nth(0).click();
+  await assertStatusChange(status, () => page.locator(".mbv-output").nth(1).click(), /Linear 1.*y2.*-2\.000/, `${label} Linear output status`);
+
   for (let index = 0; index < 4; index += 1) {
     await viewButtons.nth(index).click();
     await assertSelectedAndFocused(page, viewButtons.nth(index), '.mbv-view-button[aria-pressed="true"]', `${label} view ${index}`);
@@ -294,20 +342,25 @@ async function auditF25(page, width, label) {
   await assertFocused(page, range, `${label} range`);
   assert.notEqual(await page.locator("#mbv-gelu-output").textContent(), before, `${label}: range did not update output`);
   assert.equal(Buffer.compare(rangeNormal, await range.screenshot()) === 0, false, `${label}: range value has no visible state change`);
-  await range.fill("1.5");
+  await assertStatusChange(status, () => range.fill("1.5"), /GELU.*1\.500.*1\.400/, `${label} GELU status`);
   assert.match(await page.locator("#mbv-gelu-input").textContent(), /1\.500/);
-  assert.ok((await page.locator(".mbv-stage").getAttribute("aria-label"))?.length < 80, `${label}: live region is not concise`);
   assert.ok(await page.locator(".mbv-gelu-svg[aria-label]").count(), `${label}: SVG lacks accessible label`);
   if (width === 320) await assertGrid(page, ".mbv-gelu-layout", 1, label);
 
   await viewButtons.nth(2).click();
   const checkbox = page.locator(".mbv-no-gelu");
+  const mlpOutput = page.locator(".mbv-flow .mbv-band:last-child code");
+  assert.equal((await mlpOutput.textContent()).trim(), "[0.614, 1.529]", `${label}: initial GELU output`);
   await checkbox.focus();
   const unchecked = await checkbox.screenshot();
-  await page.keyboard.press("Space");
+  await assertStatusChange(status, () => page.keyboard.press("Space"), /去掉 GELU.*\[0\.450, 2\.000\]/, `${label} no-GELU status`);
   assert.equal(await checkbox.isChecked(), true, `${label}: checkbox did not toggle`);
+  assert.equal((await mlpOutput.textContent()).trim(), "[0.450, 2.000]", `${label}: no-GELU output`);
   await assertFocused(page, checkbox, `${label} checkbox`);
   assert.equal(Buffer.compare(unchecked, await checkbox.screenshot()) === 0, false, `${label}: checkbox states look identical`);
+  await assertStatusChange(status, () => page.keyboard.press("Space"), /保留 GELU.*\[0\.614, 1\.529\]/, `${label} restored GELU status`);
+  assert.equal(await checkbox.isChecked(), false, `${label}: checkbox did not toggle off`);
+  assert.equal((await mlpOutput.textContent()).trim(), "[0.614, 1.529]", `${label}: restored GELU output`);
   if (width === 320) await assertGrid(page, ".mbv-flow", 1, label);
 
   await viewButtons.nth(3).click();
@@ -316,6 +369,7 @@ async function auditF25(page, width, label) {
   for (let index = 0; index < await tokens.count(); index += 1) {
     await activateNative(page, tokens.nth(index), index % 2 ? "Space" : "Enter", '.mbv-token[aria-pressed="true"]', `${label} token ${index + 1}`);
   }
+  await assertStatusChange(status, () => tokens.nth(1).click(), /喜欢.*\[0\.805, -0\.634\]/, `${label} token status`);
   await assertButtonStateDifference(page, '.mbv-token[aria-pressed="true"]', '.mbv-token[aria-pressed="false"]', `${label} tokens`);
   await tokens.nth(0).click();
   assert.match(await page.locator(".mbv-shared-output").textContent(), /\[0\.614, 1\.529\]/);
@@ -353,7 +407,25 @@ async function auditF3(page, width, label) {
 
 async function newAuditedPage(context, baseOrigin) {
   const page = await context.newPage();
-  return { page, errors: watch(page, baseOrigin) };
+  const requests = [];
+  page.on("request", (request) => requests.push({ url: request.url(), method: request.method(), type: request.resourceType() }));
+  return { page, errors: watch(page, baseOrigin), requests, routed: routedRequests.get(context) || requests };
+}
+
+function assertCacheBustCoverage(requests, baseOrigin, label) {
+  if (!cacheBust) return;
+  const sameOrigin = requests.filter(({ url, method }) => ["GET", "HEAD"].includes(method) && isSameOrigin(url, baseOrigin));
+  assert.ok(sameOrigin.some(({ type }) => type === "document"), `${label}: no document request observed`);
+  assert.ok(sameOrigin.some(({ type }) => type === "stylesheet"), `${label}: no same-origin stylesheet observed`);
+  assert.ok(sameOrigin.some(({ type }) => type === "script"), `${label}: no same-origin script observed`);
+  for (const request of sameOrigin) {
+    assert.equal(new URL(request.url).searchParams.get(cacheBustParam), cacheBust, `${label}: missing cache key on ${request.type} ${request.url}`);
+  }
+  const cdn = requests.filter(({ url }) => new URL(url).hostname === "cdn.jsdelivr.net");
+  assert.ok(cdn.length, `${label}: no jsDelivr request observed`);
+  for (const request of cdn) {
+    assert.equal(new URL(request.url).searchParams.has(cacheBustParam), false, `${label}: rewrote cross-origin CDN ${request.url}`);
+  }
 }
 
 async function controlledAssertions(baseOrigin) {
@@ -362,6 +434,12 @@ async function controlledAssertions(baseOrigin) {
   assert.equal(isSameOrigin("https://other.example/asset.js", "https://audit.example"), false);
   assert.equal(isSameOrigin("https://cdn.jsdelivr.net/asset.js", baseOrigin), false);
   assert.equal(isSameOrigin("not a url", baseOrigin), false);
+  const controlledValue = "controlled-key";
+  const localUrl = new URL(withCacheBust(`${baseOrigin}/asset.js?lang=zh#part`, baseOrigin, controlledValue));
+  assert.equal(localUrl.searchParams.get("lang"), "zh");
+  assert.equal(localUrl.searchParams.get(cacheBustParam), controlledValue);
+  assert.equal(localUrl.hash, "#part");
+  assert.equal(withCacheBust("https://cdn.jsdelivr.net/asset.js", baseOrigin, controlledValue), "https://cdn.jsdelivr.net/asset.js");
   const context = await browser.newContext({ viewport: { width: 320, height: 720 } });
   const page = await context.newPage();
   await page.setContent('<article><div class="math-block" style="width:100px;overflow-x:auto"><code style="display:block;width:300px">allowed overflow</code></div><table style="display:block;width:100px;overflow-x:hidden"><tbody><tr><td style="display:block;width:300px">clipped</td></tr></tbody></table></article>');
@@ -402,11 +480,12 @@ try {
   for (const [width, height] of sizes) {
     for (const theme of themes) {
       const context = await browser.newContext({ viewport: { width, height }, ignoreHTTPSErrors: true });
-      await provideLocalKatex(context, cacheDir);
+      await prepareContext(context, baseOrigin, cacheDir);
       await context.addInitScript((value) => localStorage.setItem("ebook-theme", value), theme);
 
       const f25 = await newAuditedPage(context, baseOrigin);
       await assertHttp200(f25.page, `${base}${f25Path}`);
+      assertCacheBustCoverage(f25.routed, baseOrigin, `F-2.5 ${width}x${height} ${theme}`);
       await auditF25(f25.page, width, `F-2.5 ${width}x${height} ${theme}`);
       await f25.page.screenshot({ path: join(auditDir, `f25-${width}x${height}-${theme}.png`), fullPage: true });
       assert.deepEqual(f25.errors, [], `F-2.5 ${width}x${height} ${theme} runtime/request failures`);
@@ -423,7 +502,7 @@ try {
 
   for (const hash of ["attention-params", "mlp", "residual-ln", "full-flow", "shared-mlp", "mlp-expressivity"]) {
     const context = await browser.newContext();
-    await provideLocalKatex(context, cacheDir);
+    await prepareContext(context, baseOrigin, cacheDir);
     const { page, errors } = await newAuditedPage(context, baseOrigin);
     await assertHttp200(page, `${base}${f3Path}#${hash}`);
     assert.equal(await page.locator(`#${hash}`).count(), 1);
@@ -434,7 +513,7 @@ try {
   }
 
   const noJs = await browser.newContext({ javaScriptEnabled: false, viewport: { width: 320, height: 720 } });
-  await provideLocalKatex(noJs, cacheDir);
+  await prepareContext(noJs, baseOrigin, cacheDir);
   for (const [path, label] of [[f25Path, "no-JS F-2.5"], [f3Path, "no-JS F-3"]]) {
     const { page, errors } = await newAuditedPage(noJs, baseOrigin);
     await assertHttp200(page, `${base}${path}`);
@@ -449,7 +528,7 @@ try {
   await noJs.close();
 
   const eager = await browser.newContext({ viewport: { width: 320, height: 720 } });
-  await provideLocalKatex(eager, cacheDir);
+  await prepareContext(eager, baseOrigin, cacheDir);
   await eager.addInitScript(() => {
     delete window.IntersectionObserver;
     window.__mlpMountCalls = 0;

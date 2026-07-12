@@ -34,7 +34,8 @@
         <p>函数把输入交给<b>同一条规则</b>。例如 $f(x)=2x+1$：$f(0)=1$，$f(2)=5$，$f(-1)=-1$。输入可以不同，规则没有变，所以输出也会随输入而变。</p>
 
         <h2 id="scalar-linear">一个数字的 Linear</h2>
-        <p>最小的 Linear 写成 $y=wx+b$。$x$ 是输入，$w$ 是权重，$b$ 是偏置；先乘权重再加偏置。严格数学上有偏置时它是 affine transform，但深度学习库仍常把这个模块叫 Linear。训练会调整 $w,b$，不是人工给它们指定语法角色。</p>
+        <p>先代入具体数字：取 $x=3$、$w=2$、$b=1$，按“先乘再加”计算 $2(3)+1=7$，所以输出 $y=7$。</p>
+        <p>把同一规则写成字母就是 $y=wx+b$。$x$ 是输入，$w$ 是权重，$b$ 是偏置。严格数学上有偏置时它是 affine transform，但深度学习库仍常把这个模块叫 Linear。训练会调整 $w,b$，不是人工给它们指定语法角色。</p>
 
         <h2 id="vector-linear">一条向量的 Linear</h2>
         <p>若输入是 $x=[x_1,x_2]$，每一个输出 feature 都会读取两个输入 feature，再加自己的 bias。W 是把这些权重排成的矩阵：</p>
@@ -56,6 +57,30 @@
         <p>Linear 会对 feature 加权组合，却没有自己在 token 位置之间传消息的步骤。它也不是把数字限制到某个固定区间；是否有 bias、输入和输出维度是多少，都是具体层的设计。</p>
 
         <h2 id="gelu">GELU：逐元素的平滑非线性</h2>
+        <p>先看具体数值。输入从负数走到正数时，GELU 让较大的正数接近原样通过，把较大的负数压到接近 0，中间则平滑变化。</p>
+        <div class="f25-gelu-static">
+          <table class="f25-mobile-stack f25-gelu-values">
+            <thead><tr><th>输入 x</th><th>GELU(x) 近似值</th></tr></thead>
+            <tbody>
+              <tr data-gelu-input="-2" data-gelu-value="-0.046"><td data-label="输入 x">-2</td><td data-label="GELU(x) 近似值">-0.046</td></tr>
+              <tr data-gelu-input="-1" data-gelu-value="-0.159"><td data-label="输入 x">-1</td><td data-label="GELU(x) 近似值">-0.159</td></tr>
+              <tr data-gelu-input="0" data-gelu-value="0.000"><td data-label="输入 x">0</td><td data-label="GELU(x) 近似值">0.000</td></tr>
+              <tr data-gelu-input="1" data-gelu-value="0.841"><td data-label="输入 x">1</td><td data-label="GELU(x) 近似值">0.841</td></tr>
+              <tr data-gelu-input="2" data-gelu-value="1.954"><td data-label="输入 x">2</td><td data-label="GELU(x) 近似值">1.954</td></tr>
+            </tbody>
+          </table>
+          <figure class="f25-gelu-figure">
+            <svg viewBox="0 0 500 220" role="img" aria-labelledby="f25-gelu-curve-title f25-gelu-curve-desc">
+              <title id="f25-gelu-curve-title">GELU 从负三到三的静态曲线</title>
+              <desc id="f25-gelu-curve-desc">曲线在负输入区略低于零，经过原点后随正输入平滑上升。</desc>
+              <line x1="40" y1="120" x2="470" y2="120"></line>
+              <line x1="250" y1="20" x2="250" y2="185"></line>
+              <polyline points="40,120 110,121.4 180,124.8 250,120 320,94.8 390,61.4 460,30.1" fill="none"></polyline>
+              <g><circle cx="110" cy="121.4" r="4"></circle><circle cx="180" cy="124.8" r="4"></circle><circle cx="250" cy="120" r="4"></circle><circle cx="320" cy="94.8" r="4"></circle><circle cx="390" cy="61.4" r="4"></circle></g>
+            </svg>
+            <figcaption>横轴是输入，纵轴是 GELU 输出；表中五个点落在这条平滑曲线上。</figcaption>
+          </figure>
+        </div>
         <p>精确定义是 $GELU(x)=x\Phi(x)$，其中 $\Phi$ 是标准正态分布的累积分布函数。它对向量中的每个数字<b>逐元素</b>计算：没有可学习矩阵，也不在 token 位置之间通信。</p>
         <p>较大的正数接近原样通过，较大的负数被压向 0；GELU 可以得到负输出，输出不被限制在 [0,1]。负半轴的一小段曲线并非单调，这正是平滑曲线的数值边界，不该把它说成阈值开关。</p>
         <p>后文 trace 中的 GELU 数字是按这个精确定义做<b>数值求值</b>后显示到三位小数的结果，不是新的符号定义。</p>

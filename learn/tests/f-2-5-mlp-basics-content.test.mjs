@@ -7,6 +7,8 @@ const chapter = existsSync(chapterPath) ? readFileSync(chapterPath, "utf8") : ""
 const corePath = new URL("../assets/js/widgets/mlp-basics-core.js", import.meta.url);
 const widgetPath = new URL("../assets/js/widgets/mlp-basics-viz.js", import.meta.url);
 const cssPath = new URL("../assets/css/book.css", import.meta.url);
+const widgetSource = existsSync(widgetPath) ? readFileSync(widgetPath, "utf8") : "";
+const cssSource = readFileSync(cssPath, "utf8");
 const section = (id) => chapter.match(
   new RegExp(`<h2[^>]*id="${id}"[^>]*>[\\s\\S]*?(?=<h2|</article>)`),
 )?.[0].replace(/\s+/g, " ") || "";
@@ -22,6 +24,11 @@ test("F-2.5 function section teaches one rule through multiple substitutions", (
   const body = requireMarkers("function", ["f(x)=2x+1", "同一条规则"]);
   assert.match(body, /f\(0\)=1/);
   assert.match(body, /f\(2\)=5/);
+});
+
+test("F-2.5 scalar Linear substitutes numbers before relying on symbolic notation", () => {
+  const body = requireMarkers("scalar-linear", ["x=3", "w=2", "b=1", "2(3)+1=7", "y=wx+b"]);
+  assert.ok(body.indexOf("2(3)+1=7") < body.indexOf("y=wx+b"));
 });
 
 test("F-2.5 vector Linear derives four biased outputs before matrix notation", () => {
@@ -47,6 +54,20 @@ test("F-2.5 GELU separates its exact definition, displayed-decimal evaluation, a
   const body = requireMarkers("gelu", ["精确定义", "GELU(x)=x\\Phi(x)", "数值求值", "显示到三位小数", "常见的 tanh 近似", "\\operatorname{GELU}_{\\tanh}"]);
   assert.ok(body.indexOf("精确定义") < body.indexOf("数值求值"));
   assert.ok(body.indexOf("数值求值") < body.indexOf("常见的 tanh 近似"));
+});
+
+test("F-2.5 GELU teaches static values and an accessible curve before Phi", () => {
+  const body = requireMarkers("gelu", ["先看具体数值", "f25-gelu-values", "f25-gelu-figure", "GELU(x)=x\\Phi(x)"]);
+  const formula = body.indexOf("GELU(x)=x\\Phi(x)");
+  assert.ok(body.indexOf("先看具体数值") < body.indexOf("f25-gelu-values"));
+  assert.ok(body.indexOf("f25-gelu-values") < formula);
+  assert.ok(body.indexOf("f25-gelu-figure") < formula);
+  for (const [input, output] of [["-2", "-0.046"], ["-1", "-0.159"], ["0", "0.000"], ["1", "0.841"], ["2", "1.954"]]) {
+    assert.match(body, new RegExp(`data-gelu-input="${input}" data-gelu-value="${output}"`));
+  }
+  assert.match(body, /<svg[^>]*role="img"[^>]*aria-labelledby="f25-gelu-curve-title f25-gelu-curve-desc"/);
+  assert.match(body, /<title id="f25-gelu-curve-title">/);
+  assert.match(body, /<desc id="f25-gelu-curve-desc">/);
 });
 
 test("F-2.5 defines MLP, W, d, and d_ff before relying on each term", () => {
@@ -117,9 +138,14 @@ test("F-2.5 math core stays independent of browser mounting APIs", () => {
   assert.doesNotMatch(core, /IntersectionObserver/);
 });
 
+test("F-2.5 widget uses a dedicated concise live status instead of the stage", () => {
+  assert.match(widgetSource, /class="mbv-status" role="status" aria-live="polite" aria-atomic="true"/);
+  assert.doesNotMatch(widgetSource, /class="mbv-stage"[^>]*aria-live/);
+  assert.match(cssSource, /\.mlp-basics-viz \.mbv-status\s*\{[^}]*position:\s*absolute[^}]*width:\s*1px[^}]*height:\s*1px[^}]*clip-path:\s*inset\(50%\)/s);
+});
+
 test("F-2.5 static selectors remain section scoped", () => {
-  const css = readFileSync(cssPath, "utf8");
-  for (const rule of css.matchAll(/([^{}]+)\{/g)) {
+  for (const rule of cssSource.matchAll(/([^{}]+)\{/g)) {
     if (rule[1].includes(".f25-")) assert.match(rule[1], /body\[data-section="f-2-5"\] \.article/);
   }
 });
