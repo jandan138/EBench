@@ -71,13 +71,31 @@
         <h2 id="mlp-trace">把一条 hidden state 走完 MLP</h2>
         <p>固定输入 $x=[2,-1]$。第一层先扩宽，中间逐元素 GELU，第二层再投回原宽度；这就是 $2 → 4 → 2$。</p>
         <p>实际模型里，d 是每条 hidden state 的输入和输出 feature 个数，也叫模型宽度；d_ff 是 Linear 1 之后的中间 feature 个数，也叫中间宽度。</p>
+        <div class="f25-parameters" aria-label="MLP 固定参数">
+          <p><b>W1</b> = <code>[[1, 0, 0.5, 0.25], [-1, 2, 0.5, -0.50]]</code></p>
+          <p><b>B1</b> = <code>[0, 0, 0, 0]</code></p>
+          <p><b>W2</b> = <code>[[0.2, 0.4], [0.1, -0.2], [0.3, 0.2], [-0.1, 0.3]]</code></p>
+          <p><b>B2</b> = <code>[0, 0]</code></p>
+        </div>
+        <div class="f25-weighted-sums" aria-label="Linear 1 四个输出的乘加过程">
+          <code>2(1)+(-1)(-1)+0=3</code>
+          <code>2(0)+(-1)(2)+0=-2</code>
+          <code>2(0.5)+(-1)(0.5)+0=0.5</code>
+          <code>2(0.25)+(-1)(-0.50)+0=1</code>
+        </div>
         <div class="f25-flow" aria-label="MLP 数据流">
-  <div class="f25-stage"><b>输入</b><code>[2, -1]</code></div>
-  <div class="f25-stage"><b>Linear 1</b><code>[3, -2, 0.5, 1]</code></div>
-  <div class="f25-stage"><b>GELU</b><code>[2.996, -0.046, 0.346, 0.841]</code></div>
-  <div class="f25-stage"><b>Linear 2</b><code>[0.614, 1.529]</code></div>
+  <div class="f25-stage" data-value="2,-1"><b>输入</b><code>[2, -1]</code></div>
+  <div class="f25-stage" data-value="3,-2,0.5,1"><b>Linear 1</b><code>[3, -2, 0.5, 1]</code></div>
+  <div class="f25-stage" data-value="2.996,-0.046,0.346,0.841"><b>GELU</b><code>[2.996, -0.046, 0.346, 0.841]</code></div>
+  <div class="f25-stage" data-value="0.614,1.529"><b>Linear 2</b><code>[0.614, 1.529]</code></div>
 </div>
         <p>例如最终第一维来自 GELU 后四个数的加权和：$2.996(0.2)+(-0.046)(0.1)+0.346(0.3)+0.841(-0.1)\approx0.614$。实际模型的 $d$ 和 $d_ff$ 更大，机制相同。</p>
+
+        <div class="lab">
+          <div class="lab-h"><span class="lab-tag">Experiment</span><span class="lab-t">一条向量怎样穿过 MLP</span></div>
+          <div class="lab-body mlp-basics-viz" data-widget="mlp-basics-viz"></div>
+          <noscript><div class="f25-noscript"><b>完整静态 trace</b><p>输入 [2, -1] → Linear 1 [3, -2, 0.5, 1] → GELU [2.996, -0.046, 0.346, 0.841] → Linear 2 [0.614, 1.529]</p><p>参数：W1 [[1, 0, 0.5, 0.25], [-1, 2, 0.5, -0.50]]；B1 [0, 0, 0, 0]；W2 [[0.2, 0.4], [0.1, -0.2], [0.3, 0.2], [-0.1, 0.3]]；B2 [0, 0]。</p></div></noscript>
+        </div>
 
         <h2 id="shared-mlp">同一 MLP，为什么输出仍可不同</h2>
         <p>标准 dense Transformer 同一层的每个 token 都使用同一组 W_1,b_1,W_2,b_2。不同输入可以得到不同输出；在没有 dropout 等随机性的确定性条件下，相同输入经过同一参数也会得到相同输出。</p>
@@ -122,6 +140,8 @@ F-3: Residual + LayerNorm 组装 Block</code></pre></div>
 
   <script src="../../content.js"></script>
   <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/mlp-basics-core.js"></script>
+  <script src="../../assets/js/widgets/mlp-basics-viz.js"></script>
   <script src="../../assets/js/book.js"></script>
 </body>
 </html>

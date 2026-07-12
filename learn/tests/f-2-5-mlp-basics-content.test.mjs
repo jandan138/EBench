@@ -4,6 +4,9 @@ import { test } from "node:test";
 
 const chapterPath = new URL("../chapters/foundations/f-2-5-linear-gelu-mlp.html", import.meta.url);
 const chapter = existsSync(chapterPath) ? readFileSync(chapterPath, "utf8") : "";
+const corePath = new URL("../assets/js/widgets/mlp-basics-core.js", import.meta.url);
+const widgetPath = new URL("../assets/js/widgets/mlp-basics-viz.js", import.meta.url);
+const cssPath = new URL("../assets/css/book.css", import.meta.url);
 const section = (id) => chapter.match(
   new RegExp(`<h2[^>]*id="${id}"[^>]*>[\\s\\S]*?(?=<h2|</article>)`),
 )?.[0].replace(/\s+/g, " ") || "";
@@ -68,6 +71,16 @@ test("F-2.5 MLP trace contains the deterministic four-stage values", () => {
   assert.equal((body.match(/class="f25-stage"/g) || []).length, 4);
 });
 
+test("F-2.5 static trace exposes parameters and all four Linear 1 weighted sums", () => {
+  const body = requireMarkers("mlp-trace", ["W1", "B1", "W2", "B2"]);
+  [
+    "2(1)+(-1)(-1)+0=3",
+    "2(0)+(-1)(2)+0=-2",
+    "2(0.5)+(-1)(0.5)+0=0.5",
+    "2(0.25)+(-1)(-0.50)+0=1",
+  ].forEach((equation) => assert.ok(body.includes(equation), `missing static weighted sum ${equation}`));
+});
+
 test("F-2.5 shared MLP section separates parameter sharing from output equality", () => {
   requireMarkers("shared-mlp", ["同一组 W_1,b_1,W_2,b_2", "不同输入可以", "相同输入", "确定性", "standard dense", "MoE"]);
 });
@@ -86,5 +99,22 @@ test("F-2.5 preserves the ordered static teaching path and checkpoints", () => {
   assert.deepEqual(ids.filter((id) => requiredIds.includes(id)), requiredIds);
   for (let outcome = 1; outcome <= 9; outcome += 1) {
     assert.equal((chapter.match(new RegExp(`data-check="outcome-${outcome}"`, "g")) || []).length, 1, `outcome-${outcome} must appear once`);
+  }
+});
+
+test("F-2.5 wires the core and widget before book runtime", () => {
+  assert.ok(existsSync(corePath), "core file missing");
+  assert.ok(existsSync(widgetPath), "widget file missing");
+  const order = ["widgets/registry.js", "widgets/mlp-basics-core.js", "widgets/mlp-basics-viz.js", "assets/js/book.js"].map((source) => chapter.indexOf(source));
+  assert.ok(order.every((index) => index >= 0));
+  assert.deepEqual(order, order.slice().sort((a, b) => a - b));
+  assert.match(chapter, /data-widget="mlp-basics-viz"/);
+  assert.match(chapter.match(/<noscript>[\s\S]*?<\/noscript>/)?.[0] || "", /输入 \[2, -1\][\s\S]*Linear 1 \[3, -2, 0.5, 1\][\s\S]*GELU \[2.996, -0.046, 0.346, 0.841\][\s\S]*Linear 2 \[0.614, 1.529\]/);
+});
+
+test("F-2.5 static selectors remain section scoped", () => {
+  const css = readFileSync(cssPath, "utf8");
+  for (const rule of css.matchAll(/([^{}]+)\{/g)) {
+    if (rule[1].includes(".f25-")) assert.match(rule[1], /body\[data-section="f-2-5"\] \.article/);
   }
 });
