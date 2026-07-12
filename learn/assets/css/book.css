@@ -342,6 +342,7 @@ body[data-section="f-3"] .article p, body[data-section="f-3"] .article li { over
   body[data-section="f-2-5"] .article table.f25-mobile-stack td::before, body[data-section="f-2-5"] .article table.mbv-gelu-table td::before { content: attr(data-label); color: var(--ink-faint); font-size: .72rem; font-weight: 600; }
   .mlp-basics-viz .mbv-view-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .mlp-basics-viz .mbv-output-group, .mlp-basics-viz .mbv-flow, .mlp-basics-viz .mbv-gelu-layout, .mlp-basics-viz .mbv-shared-grid { grid-template-columns: minmax(0, 1fr); }
+  .mlp-basics-viz .mbv-token-trace .mbv-flow { flex-direction: column; flex-wrap: nowrap; }
   .mlp-basics-viz .mbv-view-head { flex-direction: column; align-items: flex-start; }
   .mlp-basics-viz .mbv-view-head span { text-align: left; }
   body[data-section="f-3"] .article table.f3-mobile-stack { overflow-x: visible; contain: none; }

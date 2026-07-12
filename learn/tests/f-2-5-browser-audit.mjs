@@ -160,6 +160,18 @@ async function assertGrid(page, selector, expected, label) {
   assert.deepEqual(tracks, tracks.map(() => expected), `${label}: ${selector} tracks`);
 }
 
+async function assertSingleColumnFlex(page, selector, label) {
+  const layouts = await page.locator(selector).evaluateAll((elements) => elements.filter((element) => {
+    const style = getComputedStyle(element);
+    return style.display !== "none" && style.visibility !== "hidden";
+  }).map((element) => {
+    const style = getComputedStyle(element);
+    return { display: style.display, direction: style.flexDirection, wrap: style.flexWrap };
+  }));
+  assert.ok(layouts.length, `${label}: no visible ${selector}`);
+  assert.deepEqual(layouts, layouts.map(() => ({ display: "flex", direction: "column", wrap: "nowrap" })), `${label}: ${selector} must be a one-column flex flow`);
+}
+
 async function assertHttp200(page, url) {
   const response = await page.goto(url, { waitUntil: "networkidle" });
   assert.ok(response, `no navigation response for ${url}`);
@@ -169,6 +181,35 @@ async function assertHttp200(page, url) {
 async function assertMath(page, label) {
   assert.ok(await page.locator(".katex").count(), `${label}: KaTeX did not render`);
   assert.equal(await page.locator(".math-block").count(), await page.locator(".math-block:has(.katex)").count(), `${label}: reader-visible math remained raw`);
+}
+
+async function collectRawMathDelimiters(page) {
+  return page.locator("article").evaluate((article) => {
+    const ignored = "script, style, code, pre, .katex";
+    const delimiter = /(?:\$\$|\\\\\[|\\\\\]|\\\\\(|\\\\\)|(?<!\\\\)\$(?!\$))/g;
+    const isVisible = (element) => {
+      for (let node = element; node; node = node.parentElement) {
+        const style = getComputedStyle(node);
+        if (style.display === "none" || style.visibility === "hidden" || style.visibility === "collapse") return false;
+      }
+      return element.getClientRects().length > 0;
+    };
+    const walker = document.createTreeWalker(article, NodeFilter.SHOW_TEXT);
+    const failures = [];
+    let node;
+    while ((node = walker.nextNode())) {
+      const parent = node.parentElement;
+      if (!parent || parent.closest(ignored) || !isVisible(parent)) continue;
+      for (const match of node.textContent.matchAll(delimiter)) {
+        failures.push(`${match[0]} in ${parent.tagName.toLowerCase()}: ${node.textContent.trim().slice(0, 100)}`);
+      }
+    }
+    return failures;
+  });
+}
+
+async function assertNoRawMath(page, label) {
+  assert.deepEqual(await collectRawMathDelimiters(page), [], `${label}: reader-visible raw math delimiters`);
 }
 
 async function assertFocused(page, locator, label) {
@@ -206,6 +247,7 @@ async function activateNative(page, locator, key, selectedSelector, label) {
 
 async function auditF25(page, width, label) {
   await assertMath(page, label);
+  await assertNoRawMath(page, label);
   const widget = page.locator('[data-widget="mlp-basics-viz"]');
   assert.equal(await widget.getAttribute("data-mounted"), null, `${label}: widget mounted before intersection`);
   await assertLayout(page, `${label} static`);
@@ -269,6 +311,7 @@ async function auditF25(page, width, label) {
   if (width === 320) await assertGrid(page, ".mbv-flow", 1, label);
 
   await viewButtons.nth(3).click();
+  if (width === 320) await assertSingleColumnFlex(page, ".mbv-token-trace .mbv-flow", label);
   const tokens = page.locator(".mbv-token");
   for (let index = 0; index < await tokens.count(); index += 1) {
     await activateNative(page, tokens.nth(index), index % 2 ? "Space" : "Enter", '.mbv-token[aria-pressed="true"]', `${label} token ${index + 1}`);
@@ -288,6 +331,7 @@ async function auditF25(page, width, label) {
 
 async function auditF3(page, width, label) {
   await assertMath(page, label);
+  await assertNoRawMath(page, label);
   const widget = page.locator('[data-widget="transformer-block-viz"]');
   await widget.scrollIntoViewIfNeeded();
   await page.locator('[data-widget="transformer-block-viz"][data-mounted="1"]').waitFor();
@@ -324,6 +368,11 @@ async function controlledAssertions(baseOrigin) {
   const failures = await collectLayoutFailures(page);
   assert.ok(failures.some((failure) => failure.includes("table") && failure.includes("overflow")), "controlled layout check missed clipped overflow");
   assert.equal(failures.some((failure) => failure.includes("math-block") && failure.includes("overflow")), false, "controlled layout check rejected explicit scrolling");
+  await page.setContent('<article><p>Rendered prose</p><pre>Intentional source $x$</pre><code>Intentional source $$x$$</code><script>const source = "\\\\(x\\\\)";</script><style>.source::before { content: "\\\\[x\\\\]"; }</style></article>');
+  await page.locator("article").evaluate((article) => article.insertAdjacentHTML("beforeend", '<p data-audit-raw-inline>Visible raw $x+y$ fixture</p>'));
+  await assert.rejects(() => assertNoRawMath(page, "controlled raw inline fixture"), /reader-visible raw math delimiters/, "controlled raw inline fixture did not fail closed");
+  await page.locator("[data-audit-raw-inline]").evaluate((element) => element.remove());
+  await assertNoRawMath(page, "controlled raw-inline fixture removed");
   await context.close();
 }
 
