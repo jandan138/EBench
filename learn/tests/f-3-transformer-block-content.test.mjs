@@ -23,9 +23,28 @@ test("F-3 has stable unique sections in teaching order", () => {
   assert.deepEqual([...positions].sort((a, b) => a - b), positions);
 });
 
-test("F-3 keeps old MLP fragments as compatibility anchors without duplicate lessons", () => {
+test("F-3 keeps old MLP fragments immediately before the visible MLP section", () => {
   ["shared-mlp", "mlp-expressivity"].forEach((id) => {
     assert.match(chapter, new RegExp(`<a id="${id}"[^>]*aria-hidden="true"`), `missing compatibility #${id}`);
+  });
+  const firstAlias = chapter.indexOf('id="shared-mlp"');
+  const secondAlias = chapter.indexOf('id="mlp-expressivity"');
+  const mlpHeading = chapter.indexOf('<h2 id="mlp"');
+  assert.ok(firstAlias < secondAlias && secondAlias < mlpHeading, "compatibility aliases must precede #mlp");
+  assert.ok(mlpHeading - secondAlias < 200, "compatibility aliases must stay immediately before #mlp");
+});
+
+test("F-3 recap exposes the corresponding F-2.5 sections", () => {
+  const recap = section("recap");
+  [
+    ["shared-mlp", "F-2.5 shared MLP"],
+    ["why-nonlinearity", "F-2.5 nonlinearity"],
+  ].forEach(([fragment, label]) => {
+    assert.match(
+      recap,
+      new RegExp(`<a href="f-2-5-linear-gelu-mlp\\.html#${fragment}">[^<]+</a>`),
+      `${label} link missing`,
+    );
   });
 });
 

@@ -45,11 +45,11 @@
         <h2 id="attention-params" data-answers="1">Attention 的短回顾：W_O 回到宽度 d</h2>
         <p>F-2 的 Attention 先在可见位置之间通信。各 head 的结果随后经过 $W_O$ 混合并<b>回到模型宽度 d</b>，因此可以和 residual stream 相加。这里不重做 Q/K/V 推导。</p>
 
+        <a id="shared-mlp" aria-hidden="true" style="display:block;height:0;overflow:hidden;scroll-margin-top:5rem"></a>
+        <a id="mlp-expressivity" aria-hidden="true" style="display:block;height:0;overflow:hidden;scroll-margin-top:5rem"></a>
         <h2 id="mlp" data-answers="1,2,3,4">MLP 的短回顾：三步后回到 d</h2>
         <p>完整的零基础手算在 <a href="f-2-5-linear-gelu-mlp.html#mlp-trace">F-2.5 的 MLP trace</a>。这里先用 <b>Linear 1</b> 把宽度 $d$ 扩到中间宽度 $d_ff$，再让 <b>GELU</b> 对每个 feature 逐元素提供非线性，最后由 <b>Linear 2</b> 投回 d。</p>
         <p>同一层对每个位置使用同一个逐位置 MLP；不同 contextual state 可以得到不同结果。不同层通常有不同参数。它是标准 dense Transformer 的简化，MoE 等变体会选择不同专家。</p>
-        <a id="shared-mlp" aria-hidden="true" style="display:block;height:0;overflow:hidden;scroll-margin-top:5rem"></a>
-        <a id="mlp-expressivity" aria-hidden="true" style="display:block;height:0;overflow:hidden;scroll-margin-top:5rem"></a>
 
         <h2 id="residual-ln" data-answers="5,6,7">Residual：原表示加上分支更新</h2>
         <p>对任一子层，写作 $y=x+F(x)$。$F(x)$ 在加法中扮演 Delta，即“这一步给 residual stream 的更新”；它<b>不能保证</b>数值很小，也不能保证人能把它解释成一句话。identity route 提供直接传递路径，但不等于整个 Block 可逆或绝不丢信息。</p>
@@ -143,6 +143,7 @@ $$H^{\ell+1} = A^\ell + \operatorname{MLP}^\ell\!\left(\operatorname{LN}_2^\ell(
 
         <h2 id="recap" data-answers="15">带走这条可复述的链路</h2>
         <p>Attention 负责通信；MLP 负责每个位置的非线性计算；Residual 传递原表示并叠加更新；LayerNorm 稳定进入分支的数值。多个 Block 保持 $[B,n,d]$，反复更新 hidden state，任务头再把它读成 GPT、BERT、VLM 或 VLA 所需的输出。</p>
+        <p>想复习细节，可回到 <a href="f-2-5-linear-gelu-mlp.html#shared-mlp">F-2.5 shared MLP</a> 或 <a href="f-2-5-linear-gelu-mlp.html#why-nonlinearity">F-2.5 非线性解释</a>。</p>
         <div class="callout note">
           <div class="c-h">五篇一手资料</div>
           <ul>

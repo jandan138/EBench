@@ -507,7 +507,20 @@ try {
     await assertHttp200(page, `${base}${f3Path}#${hash}`);
     assert.equal(await page.locator(`#${hash}`).count(), 1);
     assert.equal(new URL(page.url()).hash, `#${hash}`);
-    assert.ok(await page.locator(`#${hash}`).evaluate((element) => element.getBoundingClientRect().top >= 50), `${hash}: target hidden by sticky header`);
+    if (["shared-mlp", "mlp-expressivity"].includes(hash)) {
+      const landing = await page.locator("#mlp").evaluate((heading) => {
+        const headerBottom = document.querySelector(".topbar").getBoundingClientRect().bottom;
+        const content = heading.nextElementSibling.getBoundingClientRect();
+        const residualTop = document.querySelector("#residual-ln").getBoundingClientRect().top;
+        const bounds = heading.getBoundingClientRect();
+        return { headingTop: bounds.top, contentTop: content.top, headerBottom, residualTop };
+      });
+      assert.ok(landing.headingTop >= landing.headerBottom, `${hash}: #mlp heading hidden by sticky header`);
+      assert.ok(landing.contentTop >= landing.headerBottom, `${hash}: #mlp content hidden by sticky header`);
+      assert.ok(landing.headingTop < landing.residualTop, `${hash}: navigation landed on Residual instead of #mlp`);
+    } else {
+      assert.ok(await page.locator(`#${hash}`).evaluate((element) => element.getBoundingClientRect().top >= 50), `${hash}: target hidden by sticky header`);
+    }
     assert.deepEqual(errors, [], `${hash}: runtime/request failures`);
     await context.close();
   }
