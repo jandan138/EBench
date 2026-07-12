@@ -186,7 +186,7 @@ async function assertMath(page, label) {
 async function collectRawMathDelimiters(page) {
   return page.locator("article").evaluate((article) => {
     const ignored = "script, style, code, pre, .katex";
-    const delimiter = /(?:\$\$|\\\\\[|\\\\\]|\\\\\(|\\\\\)|(?<!\\\\)\$(?!\$))/g;
+    const delimiter = /(?:\$\$|\\\[|\\\]|\\\(|\\\)|(?<!\\)\$(?!\$))/g;
     const isVisible = (element) => {
       for (let node = element; node; node = node.parentElement) {
         const style = getComputedStyle(node);
@@ -368,10 +368,25 @@ async function controlledAssertions(baseOrigin) {
   const failures = await collectLayoutFailures(page);
   assert.ok(failures.some((failure) => failure.includes("table") && failure.includes("overflow")), "controlled layout check missed clipped overflow");
   assert.equal(failures.some((failure) => failure.includes("math-block") && failure.includes("overflow")), false, "controlled layout check rejected explicit scrolling");
-  await page.setContent('<article><p>Rendered prose</p><pre>Intentional source $x$</pre><code>Intentional source $$x$$</code><script>const source = "\\\\(x\\\\)";</script><style>.source::before { content: "\\\\[x\\\\]"; }</style></article>');
-  await page.locator("article").evaluate((article) => article.insertAdjacentHTML("beforeend", '<p data-audit-raw-inline>Visible raw $x+y$ fixture</p>'));
-  await assert.rejects(() => assertNoRawMath(page, "controlled raw inline fixture"), /reader-visible raw math delimiters/, "controlled raw inline fixture did not fail closed");
-  await page.locator("[data-audit-raw-inline]").evaluate((element) => element.remove());
+  await page.setContent('<article><p>Rendered prose</p><pre>Intentional source $x$</pre><code>Intentional source $$x$$</code><span class="katex">Rendered KaTeX source \\(x\\)</span><script>const source = "\\\\(x\\\\)";</script><style>.source::before { content: "\\\\[x\\\\]"; }</style></article>');
+  const rawMathFixtures = [
+    { name: "dollar", text: "Visible raw $x+y$ fixture", delimiter: "$" },
+    { name: "display-dollar", text: "Visible raw $$x+y$$ fixture", delimiter: "$$" },
+    { name: "parenthesis", text: String.raw`Visible raw \(x+y\) fixture`, delimiter: String.raw`\(` },
+    { name: "bracket", text: String.raw`Visible raw \[x+y\] fixture`, delimiter: String.raw`\[` },
+  ];
+  await page.locator("article").evaluate((article, fixtures) => {
+    for (const fixture of fixtures) {
+      const element = document.createElement("p");
+      element.dataset.auditRaw = fixture.name;
+      element.textContent = fixture.text;
+      article.append(element);
+    }
+  }, rawMathFixtures);
+  const rawFailures = await collectRawMathDelimiters(page);
+  const missing = rawMathFixtures.filter((fixture) => !rawFailures.some((failure) => failure.startsWith(`${fixture.delimiter} in p`))).map((fixture) => fixture.name);
+  assert.deepEqual(missing, [], `controlled raw math fixtures were not detected: ${missing.join(", ")}`);
+  await page.locator("[data-audit-raw]").evaluateAll((elements) => elements.forEach((element) => element.remove()));
   await assertNoRawMath(page, "controlled raw-inline fixture removed");
   await context.close();
 }
