@@ -508,16 +508,38 @@ try {
     assert.equal(await page.locator(`#${hash}`).count(), 1);
     assert.equal(new URL(page.url()).hash, `#${hash}`);
     if (["shared-mlp", "mlp-expressivity"].includes(hash)) {
-      const landing = await page.locator("#mlp").evaluate((heading) => {
+      const landing = await page.locator(`#${hash}`).evaluate((alias) => {
+        const heading = document.querySelector("#mlp");
+        const paragraph = heading.nextElementSibling;
         const headerBottom = document.querySelector(".topbar").getBoundingClientRect().bottom;
-        const content = heading.nextElementSibling.getBoundingClientRect();
-        const residualTop = document.querySelector("#residual-ln").getBoundingClientRect().top;
+        const aliasBounds = alias.getBoundingClientRect();
         const bounds = heading.getBoundingClientRect();
-        return { headingTop: bounds.top, contentTop: content.top, headerBottom, residualTop };
+        const paragraphBounds = paragraph.getBoundingClientRect();
+        const scrollMarginTop = parseFloat(getComputedStyle(alias).scrollMarginTop);
+        return {
+          aliasTop: aliasBounds.top,
+          aliasBottom: aliasBounds.bottom,
+          headingTop: bounds.top,
+          headingBottom: bounds.bottom,
+          paragraphTag: paragraph.tagName,
+          paragraphTop: paragraphBounds.top,
+          paragraphBottom: paragraphBounds.bottom,
+          headerBottom,
+          viewportBottom: window.innerHeight,
+          scrollMarginTop,
+          headingMarginTop: parseFloat(getComputedStyle(heading).marginTop),
+        };
       });
+      assert.equal(landing.paragraphTag, "P", `${hash}: #mlp first explanatory sibling is not a paragraph`);
+      assert.ok(Math.abs(landing.aliasTop - landing.scrollMarginTop) <= 2, `${hash}: alias missed its scroll-margin-top destination`);
+      assert.ok(landing.aliasTop >= landing.headerBottom && landing.aliasTop < landing.headingTop, `${hash}: alias is not immediately before visible #mlp heading`);
+      assert.ok(Math.abs((landing.headingTop - landing.aliasBottom) - landing.headingMarginTop) <= 2, `${hash}: alias is not near #mlp heading`);
+      assert.ok(landing.headingBottom > landing.headingTop, `${hash}: #mlp heading has no visible height`);
       assert.ok(landing.headingTop >= landing.headerBottom, `${hash}: #mlp heading hidden by sticky header`);
-      assert.ok(landing.contentTop >= landing.headerBottom, `${hash}: #mlp content hidden by sticky header`);
-      assert.ok(landing.headingTop < landing.residualTop, `${hash}: navigation landed on Residual instead of #mlp`);
+      assert.ok(landing.headingBottom <= landing.viewportBottom, `${hash}: #mlp heading extends below viewport`);
+      assert.ok(landing.paragraphBottom > landing.paragraphTop, `${hash}: #mlp first paragraph has no visible height`);
+      assert.ok(landing.paragraphTop >= landing.headerBottom, `${hash}: #mlp first paragraph hidden by sticky header`);
+      assert.ok(landing.paragraphBottom <= landing.viewportBottom, `${hash}: #mlp first paragraph extends below viewport`);
     } else {
       assert.ok(await page.locator(`#${hash}`).evaluate((element) => element.getBoundingClientRect().top >= 50), `${hash}: target hidden by sticky header`);
     }
