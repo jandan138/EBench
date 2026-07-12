@@ -28,7 +28,7 @@
         <p class="lede">Attention 已经让一个位置从其他位置取得上下文。接下来，这一位置自己的向量怎样被普通神经网络继续加工？本节只从加减乘法出发，走完 Linear 1 -&gt; GELU -&gt; Linear 2。</p>
 
         <h2 id="start">先把任务说清楚</h2>
-        <p>一条 hidden state 是一排数字。MLP 不需要知道它来自“她”还是“小红”：它只对当前这排数字应用同一套参数和规则，输出另一排数字。</p>
+        <p>一条 hidden state 是一排数字。MLP 是依次执行 <b>Linear 1 → GELU → Linear 2</b> 的逐位置网络：它只对当前这排数字应用同一套参数和规则，输出另一排数字。</p>
 
         <h2 id="function">函数：不同输入，同一条规则</h2>
         <p>函数把输入交给<b>同一条规则</b>。例如 $f(x)=2x+1$：$f(0)=1$，$f(2)=5$，$f(-1)=-1$。输入可以不同，规则没有变，所以输出也会随输入而变。</p>
@@ -37,7 +37,7 @@
         <p>最小的 Linear 写成 $y=wx+b$。$x$ 是输入，$w$ 是权重，$b$ 是偏置；先乘权重再加偏置。严格数学上有偏置时它是 affine transform，但深度学习库仍常把这个模块叫 Linear。训练会调整 $w,b$，不是人工给它们指定语法角色。</p>
 
         <h2 id="vector-linear">一条向量的 Linear</h2>
-        <p>若输入是 $x=[x_1,x_2]$，每一个输出 feature 都会读取两个输入 feature，再加自己的 bias：</p>
+        <p>若输入是 $x=[x_1,x_2]$，每一个输出 feature 都会读取两个输入 feature，再加自己的 bias。W 是把这些权重排成的矩阵：</p>
         <div class="math-block">$$y_1=x_1w_{11}+x_2w_{21}+b_1$$</div>
         <div class="math-block">$$y_2=x_1w_{12}+x_2w_{22}+b_2$$</div>
         <div class="math-block">$$y_3=x_1w_{13}+x_2w_{23}+b_3$$</div>
@@ -58,6 +58,9 @@
         <h2 id="gelu">GELU：逐元素的平滑非线性</h2>
         <p>精确定义是 $GELU(x)=x\Phi(x)$，其中 $\Phi$ 是标准正态分布的累积分布函数。它对向量中的每个数字<b>逐元素</b>计算：没有可学习矩阵，也不在 token 位置之间通信。</p>
         <p>较大的正数接近原样通过，较大的负数被压向 0；GELU 可以得到负输出，输出不被限制在 [0,1]。负半轴的一小段曲线并非单调，这正是平滑曲线的数值边界，不该把它说成阈值开关。</p>
+        <p>后文 trace 中的 GELU 数字是按这个精确定义做<b>数值求值</b>后显示到三位小数的结果，不是新的符号定义。</p>
+        <p><b>常见的 tanh 近似</b>可让实现避免直接计算 $\Phi$，但它近似的是精确定义：</p>
+        <div class="math-block">$$\operatorname{GELU}_{\tanh}(x)\approx\frac{x}{2}\left[1+\tanh\!\left(\sqrt{\frac{2}{\pi}}\left(x+0.044715x^3\right)\right)\right]$$</div>
 
         <h2 id="why-nonlinearity">为什么中间需要非线性</h2>
         <p>两个连续 affine transform 没有 GELU 时可以合并：</p>
@@ -67,6 +70,7 @@
 
         <h2 id="mlp-trace">把一条 hidden state 走完 MLP</h2>
         <p>固定输入 $x=[2,-1]$。第一层先扩宽，中间逐元素 GELU，第二层再投回原宽度；这就是 $2 → 4 → 2$。</p>
+        <p>实际模型里，d 是每条 hidden state 的输入和输出 feature 个数，也叫模型宽度；d_ff 是 Linear 1 之后的中间 feature 个数，也叫中间宽度。</p>
         <div class="f25-flow" aria-label="MLP 数据流">
   <div class="f25-stage"><b>输入</b><code>[2, -1]</code></div>
   <div class="f25-stage"><b>Linear 1</b><code>[3, -2, 0.5, 1]</code></div>

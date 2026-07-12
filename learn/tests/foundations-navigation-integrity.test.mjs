@@ -10,7 +10,8 @@ const contentSource = readFileSync(new URL("../content.js", import.meta.url), "u
 const sandbox = { window: {} };
 vm.runInNewContext(contentSource, sandbox);
 const flat = sandbox.window.EBOOK.flat;
-const localReference = /(?:href|src)="([^"]+)"/g;
+const localReference = /(?:href|src)\s*=\s*(["'])(.*?)\1/g;
+const references = (source) => [...source.matchAll(localReference)].map((match) => match[2]);
 
 const resolveReference = (sourceFile, reference) => {
   const url = new URL(reference, `https://ebook.local/${sourceFile}`);
@@ -37,8 +38,7 @@ test("formal navigation registers the unique F-2 -> F-2.5 -> F-3 path", () => {
 test("registered chapters have resolvable local assets, links, and fragments", () => {
   flat.forEach(({ file }) => {
     const source = readFileSync(resolve(learnRoot, file), "utf8");
-    for (const match of source.matchAll(localReference)) {
-      const reference = match[1];
+    for (const reference of references(source)) {
       if (!isLocal(reference)) continue;
       const target = resolveReference(file, reference);
       assert.ok(target.file.startsWith(`${learnRoot}/`), `${file} escapes learn/: ${reference}`);
@@ -50,6 +50,11 @@ test("registered chapters have resolvable local assets, links, and fragments", (
       }
     }
   });
+});
+
+test("navigation parsing accepts single-quoted and double-quoted local attributes", () => {
+  const fixture = '<a href=\'fixtures/single.html#single\'></a><img src="fixtures/double.svg" />';
+  assert.deepEqual(references(fixture), ["fixtures/single.html#single", "fixtures/double.svg"]);
 });
 
 test("F-2 routes prerequisites through F-2.5 without changing F-3 deep links", () => {

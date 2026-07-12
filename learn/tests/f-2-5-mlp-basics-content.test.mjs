@@ -40,6 +40,24 @@ test("F-2.5 GELU section states its elementwise limits and boundary", () => {
   assert.ok(!body.includes("另一套矩阵"));
 });
 
+test("F-2.5 GELU separates its exact definition, displayed-decimal evaluation, and tanh approximation", () => {
+  const body = requireMarkers("gelu", ["精确定义", "GELU(x)=x\\Phi(x)", "数值求值", "显示到三位小数", "常见的 tanh 近似", "\\operatorname{GELU}_{\\tanh}"]);
+  assert.ok(body.indexOf("精确定义") < body.indexOf("数值求值"));
+  assert.ok(body.indexOf("数值求值") < body.indexOf("常见的 tanh 近似"));
+});
+
+test("F-2.5 defines MLP, W, d, and d_ff before relying on each term", () => {
+  const articleBody = chapter.slice(chapter.indexOf("</h1>") + "</h1>".length, chapter.indexOf("</article>"))
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ");
+
+  assert.equal(articleBody.indexOf("MLP"), articleBody.indexOf("MLP 是"), "first MLP use must define the three-stage module");
+  assert.match(section("start"), /MLP 是.*Linear 1 → GELU → Linear 2/);
+  assert.equal(articleBody.indexOf("W"), articleBody.indexOf("W 是把"), "first W use must explain the weight matrix");
+  assert.equal(articleBody.search(/\bd\b/), articleBody.indexOf("d 是"), "first d use must define model width");
+  assert.equal(articleBody.indexOf("d_ff"), articleBody.indexOf("d_ff 是"), "first d_ff use must define intermediate width");
+});
+
 test("F-2.5 nonlinearity section distinguishes usual and special affine cases", () => {
   requireMarkers("why-nonlinearity", ["W_*=W_1W_2", "b_*=b_1W_2+b_2", "通常不再是 affine", "特殊参数"]);
 });

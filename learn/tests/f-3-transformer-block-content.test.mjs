@@ -64,14 +64,16 @@ test("F-3 maps every requested question to teaching content", () => {
   assert.deepEqual([...new Set(answers)], Array.from({ length: 15 }, (_, index) => index + 1));
 });
 
-test("F-3 states the mathematical and conceptual boundaries", () => {
-  const compact = chapter.replace(/\s+/g, " ");
-  [
-    "Attention 负责通信", "MLP 负责", "Residual", "LayerNorm",
-    "可以直接", "相同输入", "不同层", "不能保证", "非可逆",
-    "不跨 batch", "不跨 token", "GPT", "BERT", "VLM", "VLA",
-    "LN_1", "LN_2", "GELU", "gamma", "beta",
-  ].forEach((marker) => assert.ok(compact.includes(marker), `missing boundary marker: ${marker}`));
+test("F-3 keeps mathematical and conceptual boundaries at their owning anchors", () => {
+  ["GELU", "不同层"].forEach((marker) => assert.ok(section("mlp").includes(marker), `#mlp missing ${marker}`));
+  ["可以直接", "相同输入", "不能保证"].forEach((marker) => assert.ok(section("checkpoint").includes(marker), `#checkpoint missing ${marker}`));
+  assert.ok(section("residual-ln").includes("不能保证"), "#residual-ln must retain its forward-path limit");
+  assert.ok(section("residual-gradient").includes("不能保证"), "#residual-gradient must retain its gradient-path limit");
+  ["不跨 batch", "不跨 token"].forEach((marker) => assert.ok(section("layernorm-axis").includes(marker), `#layernorm-axis missing ${marker}`));
+  ["非可逆", "gamma", "beta"].forEach((marker) => assert.ok(section("layernorm-semantics").includes(marker), `#layernorm-semantics missing ${marker}`));
+  ["LN_1", "LN_2"].forEach((marker) => assert.ok(section("full-flow").includes(marker), `#full-flow missing ${marker}`));
+  ["GPT", "BERT", "VLM", "VLA"].forEach((marker) => assert.ok(section("training-heads").includes(marker), `#training-heads missing ${marker}`));
+  ["Attention 负责通信", "MLP 负责", "Residual", "LayerNorm"].forEach((marker) => assert.ok(section("recap").includes(marker), `#recap missing ${marker}`));
 });
 
 test("F-3 metadata supports the expanded concepts", () => {
