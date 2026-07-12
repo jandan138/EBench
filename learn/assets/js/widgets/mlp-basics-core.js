@@ -44,7 +44,3 @@
 
   return Object.freeze({ erf, gelu, affine, trace, format, inputs, W1, B1, W2, B2 });
 });
-
-if (typeof window !== "undefined" && window.IntersectionObserver === undefined) {
-  delete window.IntersectionObserver;
-}

@@ -112,6 +112,11 @@ test("F-2.5 wires the core and widget before book runtime", () => {
   assert.match(chapter.match(/<noscript>[\s\S]*?<\/noscript>/)?.[0] || "", /输入 \[2, -1\][\s\S]*Linear 1 \[3, -2, 0.5, 1\][\s\S]*GELU \[2.996, -0.046, 0.346, 0.841\][\s\S]*Linear 2 \[0.614, 1.529\]/);
 });
 
+test("F-2.5 math core stays independent of browser mounting APIs", () => {
+  const core = readFileSync(corePath, "utf8");
+  assert.doesNotMatch(core, /IntersectionObserver/);
+});
+
 test("F-2.5 static selectors remain section scoped", () => {
   const css = readFileSync(cssPath, "utf8");
   for (const rule of css.matchAll(/([^{}]+)\{/g)) {

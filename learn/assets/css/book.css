@@ -296,6 +296,8 @@ body[data-section="f-2-5"] .article .f25-flow { display: grid; grid-template-col
 body[data-section="f-2-5"] .article .f25-stage { display: flex; min-width: 0; flex-direction: column; gap: 5px; padding: 9px; border-top: 3px solid var(--accent); background: var(--surface-2); }
 body[data-section="f-2-5"] .article .f25-stage code { min-width: 0; overflow-wrap: anywhere; white-space: normal; }
 body[data-section="f-2-5"] .article .f25-noscript { padding: 14px 16px; border-top: 1px solid var(--border); color: var(--ink-soft); }
+body[data-section="f-2-5"] .article p, body[data-section="f-2-5"] .article li,
+body[data-section="f-3"] .article p, body[data-section="f-3"] .article li { overflow-wrap: anywhere; }
 
 .mlp-basics-viz { min-width: 0; overflow: hidden; }
 .mlp-basics-viz .mbv-view-controls { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin-bottom: 14px; }
@@ -333,6 +335,7 @@ body[data-section="f-2-5"] .article .f25-noscript { padding: 14px 16px; border-t
   body[data-section="f-2-5"] .article .f25-flow, body[data-section="f-2-5"] .article .f25-weighted-sums { grid-template-columns: minmax(0, 1fr); }
   body[data-section="f-2-5"] .article table.f25-mobile-stack, body[data-section="f-2-5"] .article table.mbv-gelu-table { overflow-x: visible; contain: none; }
   body[data-section="f-2-5"] .article table.f25-mobile-stack thead, body[data-section="f-2-5"] .article table.mbv-gelu-table thead { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  body[data-section="f-2-5"] .article table.f25-mobile-stack th, body[data-section="f-2-5"] .article table.mbv-gelu-table th { min-width: 0; }
   body[data-section="f-2-5"] .article table.f25-mobile-stack tbody, body[data-section="f-2-5"] .article table.mbv-gelu-table tbody, body[data-section="f-2-5"] .article table.f25-mobile-stack tr, body[data-section="f-2-5"] .article table.mbv-gelu-table tr { display: block; }
   body[data-section="f-2-5"] .article table.f25-mobile-stack tr, body[data-section="f-2-5"] .article table.mbv-gelu-table tr { padding: 7px 0; border-bottom: 1px solid var(--border); }
   body[data-section="f-2-5"] .article table.f25-mobile-stack td, body[data-section="f-2-5"] .article table.mbv-gelu-table td { display: grid; grid-template-columns: minmax(86px, .45fr) minmax(0, 1fr); gap: 8px; min-width: 0; padding: 4px 0; border: 0; }

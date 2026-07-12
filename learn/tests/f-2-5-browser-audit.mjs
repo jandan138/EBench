@@ -1,18 +1,20 @@
 import assert from "node:assert/strict";
+import { access, mkdir, readFile, stat } from "node:fs/promises";
 import { createServer } from "node:http";
-import { readFile, stat } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
-import { mkdir } from "node:fs/promises";
 
 const require = createRequire(import.meta.url);
 const { chromium } = require("/tmp/ebench-playwright/node_modules/playwright");
 const learnRoot = fileURLToPath(new URL("..", import.meta.url));
 const auditDir = process.env.EBENCH_AUDIT_DIR || "/tmp/ebench-f25-audit";
+const remoteBase = process.env.EBENCH_BASE_URL;
 const sizes = [[1440, 900], [834, 1112], [390, 844], [320, 720]];
 const themes = ["light", "dark"];
 const mime = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".woff2": "font/woff2" };
+const f25Path = "/chapters/foundations/f-2-5-linear-gelu-mlp.html";
+const f3Path = "/chapters/foundations/f-3-transformer-block.html";
 let server;
 let browser;
 
@@ -20,36 +22,64 @@ async function localServer() {
   server = createServer(async (request, response) => {
     try {
       const url = new URL(request.url, "http://localhost");
-      let relative = decodeURIComponent(url.pathname).replace(/^\/+/, "") || "index.html";
+      const relative = decodeURIComponent(url.pathname).replace(/^\/+/, "") || "index.html";
       let file = normalize(join(learnRoot, relative));
       assert.ok(file.startsWith(learnRoot));
       if ((await stat(file)).isDirectory()) file = join(file, "index.html");
       response.writeHead(200, { "content-type": mime[extname(file)] || "application/octet-stream" });
       response.end(await readFile(file));
     } catch {
-      response.writeHead(404); response.end("Not found");
+      response.writeHead(404);
+      response.end("Not found");
     }
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   return `http://127.0.0.1:${server.address().port}`;
 }
 
-function watch(page) {
+function isSameOrigin(url, baseOrigin) {
+  try {
+    return new URL(url).origin === baseOrigin;
+  } catch {
+    return false;
+  }
+}
+
+function watch(page, baseOrigin) {
   const errors = [];
   page.on("console", (message) => { if (message.type() === "error") errors.push(`console: ${message.text()}`); });
   page.on("pageerror", (error) => errors.push(`page: ${error.message}`));
-  page.on("requestfailed", (request) => { if (request.url().startsWith("http://127.0.0.1")) errors.push(`request: ${request.url()}`); });
+  page.on("requestfailed", (request) => {
+    if (isSameOrigin(request.url(), baseOrigin)) errors.push(`request: ${request.url()} (${request.failure()?.errorText || "failed"})`);
+  });
+  page.on("response", (response) => {
+    if (isSameOrigin(response.url(), baseOrigin) && response.status() >= 400) errors.push(`response: ${response.status()} ${response.url()}`);
+  });
   return errors;
 }
 
-async function provideLocalKatex(context) {
-  if (process.env.EBENCH_BASE_URL) return;
+async function resolveKatexCache() {
+  const candidates = [process.env.EBENCH_KATEX_CACHE_DIR, "/tmp/ebench-cdn", "/tmp/ebench-katex-cache"].filter(Boolean);
+  const names = ["katex.min.css", "katex.min.js", "auto-render.min.js"];
+  for (const directory of candidates) {
+    try {
+      await Promise.all(names.map((name) => access(join(directory, name))));
+      return directory;
+    } catch {
+      // An incomplete or absent cache is ignored; the audit uses the real CDN.
+    }
+  }
+  return null;
+}
+
+async function provideLocalKatex(context, cacheDir) {
+  if (remoteBase || !cacheDir) return;
   await context.route("https://fonts.googleapis.com/**", (route) => route.fulfill({ contentType: "text/css", body: "" }));
   await context.route("https://fonts.gstatic.com/**", (route) => route.fulfill({ contentType: "font/woff2", body: Buffer.alloc(0) }));
   const files = {
-    "katex.min.css": ["text/css", "/tmp/ebench-cdn/katex.min.css"],
-    "katex.min.js": ["text/javascript", "/tmp/ebench-cdn/katex.min.js"],
-    "auto-render.min.js": ["text/javascript", "/tmp/ebench-cdn/auto-render.min.js"],
+    "katex.min.css": ["text/css", join(cacheDir, "katex.min.css")],
+    "katex.min.js": ["text/javascript", join(cacheDir, "katex.min.js")],
+    "auto-render.min.js": ["text/javascript", join(cacheDir, "auto-render.min.js")],
   };
   await context.route("https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/**", async (route) => {
     const name = new URL(route.request().url()).pathname.split("/").pop();
@@ -59,90 +89,333 @@ async function provideLocalKatex(context) {
   });
 }
 
-async function noOverflow(page) {
+async function collectLayoutFailures(page) {
   return page.evaluate(() => {
-    const selectors = ["html", ".f25-mobile-stack", ".mlp-basics-viz"];
-    const failures = selectors.flatMap((selector) => [...document.querySelectorAll(selector)].filter((el) => el.scrollWidth > el.clientWidth + 2).map(() => selector));
-    const article = document.querySelector(".article").getBoundingClientRect();
-    if (article.left < -2 || article.right > document.documentElement.clientWidth + 2) failures.push(".article-bounds");
-    return failures;
+    const selectors = [
+      "html", "body", "article", "[data-widget]", ".f25-stage", ".mbv-stage", ".mbv-band",
+      ".tbv-panel", ".tbv-stages", ".tbv-op", "table", ".math-block", "code", "pre",
+    ];
+    const viewportWidth = document.documentElement.clientWidth;
+    const failures = [];
+    const visible = (element) => {
+      const style = getComputedStyle(element);
+      return style.display !== "none" && style.visibility !== "hidden" && style.visibility !== "collapse";
+    };
+    const descriptor = (element) => {
+      const id = element.id ? `#${element.id}` : "";
+      const classes = [...element.classList].slice(0, 2).map((name) => `.${name}`).join("");
+      return `${element.tagName.toLowerCase()}${id}${classes}`;
+    };
+    const scrollsX = (element) => ["auto", "scroll"].includes(getComputedStyle(element).overflowX);
+    const protectedByScroller = (element) => {
+      for (let node = element; node && node !== document.documentElement; node = node.parentElement) {
+        if (scrollsX(node) && node.scrollWidth > node.clientWidth + 2) {
+          const bounds = node.getBoundingClientRect();
+          return bounds.left >= -2 && bounds.right <= viewportWidth + 2;
+        }
+      }
+      return false;
+    };
+
+    for (const selector of selectors) {
+      for (const element of document.querySelectorAll(selector)) {
+        if (!visible(element)) continue;
+        const bounds = element.getBoundingClientRect();
+        const hasContent = element === document.documentElement || element === document.body || element.textContent.trim() || element.children.length;
+        if (hasContent && (bounds.width <= 0 || bounds.height <= 0)) failures.push(`${descriptor(element)} zero-size ${bounds.width}x${bounds.height}`);
+        if ((bounds.left < -2 || bounds.right > viewportWidth + 2) && !protectedByScroller(element)) {
+          failures.push(`${descriptor(element)} viewport-bounds ${bounds.left.toFixed(1)}..${bounds.right.toFixed(1)}/${viewportWidth}`);
+        }
+        const overflowX = getComputedStyle(element).overflowX;
+        const leakingChildren = [...element.querySelectorAll("*")].filter((child) => {
+          if (!visible(child)) return false;
+          const boundsTarget = child.closest("svg") || child;
+          const childBounds = boundsTarget.getBoundingClientRect();
+          const childStyle = getComputedStyle(boundsTarget);
+          if (childStyle.position === "fixed" && childStyle.transform !== "none" && (childBounds.right <= 0 || childBounds.left >= viewportWidth)) return false;
+          return (childBounds.left < -2 || childBounds.right > viewportWidth + 2) && !protectedByScroller(boundsTarget);
+        });
+        if (element.scrollWidth > element.clientWidth + 2 && !scrollsX(element)
+          && (["hidden", "clip"].includes(overflowX) || element === document.documentElement || element === document.body || leakingChildren.length)) {
+          const wide = [...element.querySelectorAll("*")].filter((child) => child.scrollWidth > child.clientWidth + 2)
+            .slice(0, 16).map((child) => `${descriptor(child)}:${child.clientWidth}/${child.scrollWidth}`).join(",");
+          failures.push(`${descriptor(element)} overflow ${element.clientWidth}/${element.scrollWidth} overflow-x=${overflowX}${leakingChildren.length ? ` leak=${descriptor(leakingChildren[0])}` : ""}${wide ? ` wide=${wide}` : ""}`);
+        }
+      }
+    }
+    return [...new Set(failures)];
   });
+}
+
+async function assertLayout(page, label) {
+  assert.deepEqual(await collectLayoutFailures(page), [], `${label} layout failures`);
+}
+
+async function assertGrid(page, selector, expected, label) {
+  const tracks = await page.locator(selector).evaluateAll((elements) => elements.filter((element) => {
+    const style = getComputedStyle(element);
+    return style.display === "grid" && style.visibility !== "hidden";
+  }).map((element) => getComputedStyle(element).gridTemplateColumns.trim().split(/\s+/).filter(Boolean).length));
+  assert.ok(tracks.length, `${label}: no visible ${selector} grid`);
+  assert.deepEqual(tracks, tracks.map(() => expected), `${label}: ${selector} tracks`);
+}
+
+async function assertHttp200(page, url) {
+  const response = await page.goto(url, { waitUntil: "networkidle" });
+  assert.ok(response, `no navigation response for ${url}`);
+  assert.equal(response.status(), 200, url);
+}
+
+async function assertMath(page, label) {
+  assert.ok(await page.locator(".katex").count(), `${label}: KaTeX did not render`);
+  assert.equal(await page.locator(".math-block").count(), await page.locator(".math-block:has(.katex)").count(), `${label}: reader-visible math remained raw`);
+}
+
+async function assertFocused(page, locator, label) {
+  assert.equal(await locator.evaluate((element) => element === document.activeElement), true, `${label}: focus moved`);
+  const style = await locator.evaluate((element) => {
+    const computed = getComputedStyle(element);
+    return { width: parseFloat(computed.outlineWidth), style: computed.outlineStyle, color: computed.outlineColor };
+  });
+  assert.ok(style.width > 0 && style.style !== "none" && !/rgba?\(0, 0, 0, 0\)/.test(style.color), `${label}: no visible focus ${JSON.stringify(style)}`);
+}
+
+async function assertButtonStateDifference(page, selectedSelector, normalSelector, label) {
+  const states = await page.evaluate(([selected, normal]) => {
+    const snapshot = (element) => {
+      const style = getComputedStyle(element);
+      return [style.backgroundColor, style.borderColor, style.borderWidth, style.color].join("|");
+    };
+    return [snapshot(document.querySelector(selected)), snapshot(document.querySelector(normal))];
+  }, [selectedSelector, normalSelector]);
+  assert.notEqual(states[0], states[1], `${label}: selected and normal states look identical`);
+}
+
+async function assertSelectedAndFocused(page, locator, selectedSelector, label) {
+  assert.equal(await page.locator(selectedSelector).count(), 1, `${label}: selected count`);
+  assert.equal(await locator.getAttribute("aria-pressed"), "true", `${label}: expected selected control`);
+  assert.equal(await locator.evaluate((element) => element === document.activeElement), true, `${label}: focus moved`);
+}
+
+async function activateNative(page, locator, key, selectedSelector, label) {
+  await locator.focus();
+  await page.keyboard.press(key);
+  await assertSelectedAndFocused(page, locator, selectedSelector, `${label} ${key}`);
+  await assertFocused(page, locator, `${label} ${key}`);
+}
+
+async function auditF25(page, width, label) {
+  await assertMath(page, label);
+  const widget = page.locator('[data-widget="mlp-basics-viz"]');
+  assert.equal(await widget.getAttribute("data-mounted"), null, `${label}: widget mounted before intersection`);
+  await assertLayout(page, `${label} static`);
+  await widget.scrollIntoViewIfNeeded();
+  await page.locator('[data-widget="mlp-basics-viz"][data-mounted="1"]').waitFor();
+  assert.equal(await page.locator(".mbv-view-controls > .mbv-view-button").count(), 4);
+  await page.locator(".mbv-view-controls").evaluate((element) => { element.dataset.auditIdentity = "original"; });
+  await page.evaluate(() => scrollTo(0, 0));
+  await widget.scrollIntoViewIfNeeded();
+  assert.equal(await page.locator('.mbv-view-controls[data-audit-identity="original"] > .mbv-view-button').count(), 4, `${label}: widget remounted after re-entry`);
+
+  const viewButtons = page.locator(".mbv-view-button");
+  for (let index = 0; index < 4; index += 1) {
+    await viewButtons.nth(index).click();
+    await assertSelectedAndFocused(page, viewButtons.nth(index), '.mbv-view-button[aria-pressed="true"]', `${label} view ${index}`);
+    await assertLayout(page, `${label} view ${index}`);
+  }
+  await assertButtonStateDifference(page, '.mbv-view-button[aria-pressed="true"]', '.mbv-view-button[aria-pressed="false"]', `${label} views`);
+
+  const keyCases = [["ArrowRight", 1], ["ArrowDown", 1], ["ArrowLeft", 3], ["ArrowUp", 3], ["Home", 0], ["End", 3]];
+  for (const [key, expected] of keyCases) {
+    await viewButtons.nth(0).click();
+    await page.keyboard.press(key);
+    await assertSelectedAndFocused(page, viewButtons.nth(expected), '.mbv-view-button[aria-pressed="true"]', `${label} ${key}`);
+    await assertFocused(page, viewButtons.nth(expected), `${label} ${key}`);
+  }
+  await activateNative(page, viewButtons.nth(1), "Enter", '.mbv-view-button[aria-pressed="true"]', `${label} view`);
+  await activateNative(page, viewButtons.nth(2), "Space", '.mbv-view-button[aria-pressed="true"]', `${label} view`);
+
+  await viewButtons.nth(0).click();
+  const outputs = page.locator(".mbv-output");
+  for (let index = 0; index < await outputs.count(); index += 1) {
+    await activateNative(page, outputs.nth(index), index % 2 ? "Space" : "Enter", '.mbv-output[aria-pressed="true"]', `${label} output ${index + 1}`);
+  }
+  await assertButtonStateDifference(page, '.mbv-output[aria-pressed="true"]', '.mbv-output[aria-pressed="false"]', `${label} outputs`);
+  if (width === 320) await assertGrid(page, ".mbv-output-group", 1, label);
+
+  await viewButtons.nth(1).click();
+  const range = page.getByRole("slider", { name: "GELU 输入", exact: true });
+  const before = await page.locator("#mbv-gelu-output").textContent();
+  await range.focus();
+  const rangeNormal = await range.screenshot();
+  await page.keyboard.press("ArrowRight");
+  await assertFocused(page, range, `${label} range`);
+  assert.notEqual(await page.locator("#mbv-gelu-output").textContent(), before, `${label}: range did not update output`);
+  assert.equal(Buffer.compare(rangeNormal, await range.screenshot()) === 0, false, `${label}: range value has no visible state change`);
+  await range.fill("1.5");
+  assert.match(await page.locator("#mbv-gelu-input").textContent(), /1\.500/);
+  assert.ok((await page.locator(".mbv-stage").getAttribute("aria-label"))?.length < 80, `${label}: live region is not concise`);
+  assert.ok(await page.locator(".mbv-gelu-svg[aria-label]").count(), `${label}: SVG lacks accessible label`);
+  if (width === 320) await assertGrid(page, ".mbv-gelu-layout", 1, label);
+
+  await viewButtons.nth(2).click();
+  const checkbox = page.locator(".mbv-no-gelu");
+  await checkbox.focus();
+  const unchecked = await checkbox.screenshot();
+  await page.keyboard.press("Space");
+  assert.equal(await checkbox.isChecked(), true, `${label}: checkbox did not toggle`);
+  await assertFocused(page, checkbox, `${label} checkbox`);
+  assert.equal(Buffer.compare(unchecked, await checkbox.screenshot()) === 0, false, `${label}: checkbox states look identical`);
+  if (width === 320) await assertGrid(page, ".mbv-flow", 1, label);
+
+  await viewButtons.nth(3).click();
+  const tokens = page.locator(".mbv-token");
+  for (let index = 0; index < await tokens.count(); index += 1) {
+    await activateNative(page, tokens.nth(index), index % 2 ? "Space" : "Enter", '.mbv-token[aria-pressed="true"]', `${label} token ${index + 1}`);
+  }
+  await assertButtonStateDifference(page, '.mbv-token[aria-pressed="true"]', '.mbv-token[aria-pressed="false"]', `${label} tokens`);
+  await tokens.nth(0).click();
+  assert.match(await page.locator(".mbv-shared-output").textContent(), /\[0\.614, 1\.529\]/);
+  await assertLayout(page, `${label} final`);
+
+  if (width === 320) {
+    await assertGrid(page, ".f25-flow", 1, label);
+    await assertGrid(page, ".f25-weighted-sums", 1, label);
+    await assertGrid(page, ".mbv-view-controls", 2, label);
+    await assertGrid(page, ".mbv-shared-grid", 1, label);
+  }
+}
+
+async function auditF3(page, width, label) {
+  await assertMath(page, label);
+  const widget = page.locator('[data-widget="transformer-block-viz"]');
+  await widget.scrollIntoViewIfNeeded();
+  await page.locator('[data-widget="transformer-block-viz"][data-mounted="1"]').waitFor();
+  const buttons = page.locator(".tbv-view-button");
+  assert.equal(await buttons.count(), 4, `${label}: F-3 view count`);
+  for (let index = 0; index < 4; index += 1) {
+    await buttons.nth(index).click();
+    await assertLayout(page, `${label} view ${index}`);
+    if (width === 320) {
+      await assertGrid(page, ".tbv-controls", 2, label);
+      const oneColumn = [".tbv-stages", ".tbv-bypasses", ".tbv-mlp-row", ".tbv-routes", ".tbv-norm-row"];
+      for (const selector of oneColumn) {
+        if (await page.locator(selector).count()) await assertGrid(page, selector, 1, label);
+      }
+      if (await page.locator(".tbv-tensor").count()) await assertGrid(page, ".tbv-tensor", 2, label);
+    }
+  }
+}
+
+async function newAuditedPage(context, baseOrigin) {
+  const page = await context.newPage();
+  return { page, errors: watch(page, baseOrigin) };
+}
+
+async function controlledAssertions(baseOrigin) {
+  assert.equal(isSameOrigin(`${baseOrigin}/asset.js`, baseOrigin), true);
+  assert.equal(isSameOrigin("https://audit.example/asset.js", "https://audit.example"), true);
+  assert.equal(isSameOrigin("https://other.example/asset.js", "https://audit.example"), false);
+  assert.equal(isSameOrigin("https://cdn.jsdelivr.net/asset.js", baseOrigin), false);
+  assert.equal(isSameOrigin("not a url", baseOrigin), false);
+  const context = await browser.newContext({ viewport: { width: 320, height: 720 } });
+  const page = await context.newPage();
+  await page.setContent('<article><div class="math-block" style="width:100px;overflow-x:auto"><code style="display:block;width:300px">allowed overflow</code></div><table style="display:block;width:100px;overflow-x:hidden"><tbody><tr><td style="display:block;width:300px">clipped</td></tr></tbody></table></article>');
+  const failures = await collectLayoutFailures(page);
+  assert.ok(failures.some((failure) => failure.includes("table") && failure.includes("overflow")), "controlled layout check missed clipped overflow");
+  assert.equal(failures.some((failure) => failure.includes("math-block") && failure.includes("overflow")), false, "controlled layout check rejected explicit scrolling");
+  await context.close();
 }
 
 try {
   await mkdir(auditDir, { recursive: true });
-  const base = (process.env.EBENCH_BASE_URL || await localServer()).replace(/\/$/, "");
+  const base = (remoteBase || await localServer()).replace(/\/$/, "");
+  const baseOrigin = new URL(base).origin;
+  const cacheDir = remoteBase ? null : await resolveKatexCache();
   browser = await chromium.launch({ headless: true });
+  await controlledAssertions(baseOrigin);
+
   for (const [width, height] of sizes) {
     for (const theme of themes) {
       const context = await browser.newContext({ viewport: { width, height }, ignoreHTTPSErrors: true });
-      await provideLocalKatex(context);
+      await provideLocalKatex(context, cacheDir);
       await context.addInitScript((value) => localStorage.setItem("ebook-theme", value), theme);
-      const page = await context.newPage();
-      const errors = watch(page);
-      const response = await page.goto(`${base}/chapters/foundations/f-2-5-linear-gelu-mlp.html`, { waitUntil: "networkidle" });
-      assert.equal(response.status(), 200);
-      assert.ok(await page.locator(".katex").count(), "KaTeX did not render");
-      assert.equal(await page.locator(".math-block").count(), await page.locator(".math-block:has(.katex)").count(), "reader-visible math block remained raw");
-      assert.equal(await page.locator('[data-widget="mlp-basics-viz"]').getAttribute("data-mounted"), null, "widget mounted before intersection");
-      await page.locator('[data-widget="mlp-basics-viz"]').scrollIntoViewIfNeeded();
-      await page.locator('[data-widget="mlp-basics-viz"][data-mounted="1"]').waitFor();
-      assert.equal(await page.locator(".mbv-view-controls > .mbv-view-button").count(), 4);
-      await page.evaluate(() => scrollTo(0, 0));
-      await page.locator('[data-widget="mlp-basics-viz"]').scrollIntoViewIfNeeded();
-      assert.equal(await page.locator(".mbv-view-controls > .mbv-view-button").count(), 4, "widget remounted");
-      const viewButtons = page.locator(".mbv-view-button");
-      for (let index = 0; index < 4; index += 1) {
-        await viewButtons.nth(index).click();
-        assert.equal(await page.locator('.mbv-view-button[aria-pressed="true"]').count(), 1);
-        assert.equal(await viewButtons.nth(index).evaluate((el) => el === document.activeElement), true);
-      }
-      await viewButtons.nth(0).focus();
-      for (const key of ["ArrowRight", "ArrowDown", "ArrowLeft", "ArrowUp", "End", "Home", "Enter", "Space"]) await page.keyboard.press(key);
-      await viewButtons.nth(0).click();
-      for (const output of await page.locator(".mbv-output").all()) { await output.click(); assert.equal(await page.locator('.mbv-output[aria-pressed="true"]').count(), 1); }
-      await viewButtons.nth(1).click();
-      const range = page.getByLabel("GELU 输入");
-      const before = await page.locator("#mbv-gelu-output").textContent();
-      await range.fill("1.5");
-      assert.notEqual(await page.locator("#mbv-gelu-output").textContent(), before);
-      assert.ok((await page.locator(".mbv-stage").getAttribute("aria-label"))?.length < 80);
-      assert.ok(await page.locator(".mbv-gelu-svg[aria-label]").count());
-      await viewButtons.nth(2).click(); await page.getByLabel("去掉 GELU").check();
-      await viewButtons.nth(3).click();
-      for (const token of await page.locator(".mbv-token").all()) { await token.click(); assert.equal(await page.locator('.mbv-token[aria-pressed="true"]').count(), 1); }
-      await page.getByRole("button", { name: "她", exact: true }).click();
-      assert.match(await page.locator(".mbv-shared-output").textContent(), /\[0\.614, 1\.529\]/);
-      assert.deepEqual(await noOverflow(page), []);
-      if (width === 320) {
-        assert.equal(await page.locator(".mbv-view-controls").evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(" ").length), 2);
-        assert.equal(await page.locator(".mbv-shared-grid").evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(" ").length), 1);
-      }
-      await viewButtons.nth(0).focus();
-      const focusStyle = await page.evaluate(() => ({ width: getComputedStyle(document.querySelector(".mbv-view-button:focus")).outlineWidth, selected: getComputedStyle(document.querySelector('.mbv-view-button[aria-pressed="true"]')).backgroundColor, normal: getComputedStyle(document.querySelector('.mbv-view-button[aria-pressed="false"]')).backgroundColor }));
-      assert.notEqual(focusStyle.width, "0px"); assert.notEqual(focusStyle.selected, focusStyle.normal);
-      await page.screenshot({ path: join(auditDir, `f25-${width}x${height}-${theme}.png`), fullPage: true });
-      const f3 = await page.goto(`${base}/chapters/foundations/f-3-transformer-block.html`, { waitUntil: "networkidle" });
-      assert.equal(f3.status(), 200); assert.ok(await page.locator(".katex").count());
-      await page.screenshot({ path: join(auditDir, `f3-${width}x${height}-${theme}.png`), fullPage: true });
-      assert.deepEqual(errors, []);
+
+      const f25 = await newAuditedPage(context, baseOrigin);
+      await assertHttp200(f25.page, `${base}${f25Path}`);
+      await auditF25(f25.page, width, `F-2.5 ${width}x${height} ${theme}`);
+      await f25.page.screenshot({ path: join(auditDir, `f25-${width}x${height}-${theme}.png`), fullPage: true });
+      assert.deepEqual(f25.errors, [], `F-2.5 ${width}x${height} ${theme} runtime/request failures`);
+      await f25.page.close();
+
+      const f3 = await newAuditedPage(context, baseOrigin);
+      await assertHttp200(f3.page, `${base}${f3Path}`);
+      await auditF3(f3.page, width, `F-3 ${width}x${height} ${theme}`);
+      await f3.page.screenshot({ path: join(auditDir, `f3-${width}x${height}-${theme}.png`), fullPage: true });
+      assert.deepEqual(f3.errors, [], `F-3 ${width}x${height} ${theme} runtime/request failures`);
       await context.close();
     }
   }
+
   for (const hash of ["attention-params", "mlp", "residual-ln", "full-flow", "shared-mlp", "mlp-expressivity"]) {
-    const page = await browser.newPage(); await page.goto(`${base}/chapters/foundations/f-3-transformer-block.html#${hash}`);
-    assert.equal(await page.locator(`#${hash}`).count(), 1); assert.equal(new URL(page.url()).hash, `#${hash}`);
-    assert.ok(await page.locator(`#${hash}`).evaluate((el) => el.getBoundingClientRect().top >= 50)); await page.close();
+    const context = await browser.newContext();
+    await provideLocalKatex(context, cacheDir);
+    const { page, errors } = await newAuditedPage(context, baseOrigin);
+    await assertHttp200(page, `${base}${f3Path}#${hash}`);
+    assert.equal(await page.locator(`#${hash}`).count(), 1);
+    assert.equal(new URL(page.url()).hash, `#${hash}`);
+    assert.ok(await page.locator(`#${hash}`).evaluate((element) => element.getBoundingClientRect().top >= 50), `${hash}: target hidden by sticky header`);
+    assert.deepEqual(errors, [], `${hash}: runtime/request failures`);
+    await context.close();
   }
-  const noJs = await browser.newContext({ javaScriptEnabled: false });
-  const noJsPage = await noJs.newPage(); await noJsPage.goto(`${base}/chapters/foundations/f-2-5-linear-gelu-mlp.html`);
-  const fallback = await noJsPage.locator(".f25-noscript").textContent();
-  for (const marker of ["Linear 1", "GELU", "Linear 2", "W1", "B1", "W2", "B2"]) assert.ok(fallback.includes(marker));
+
+  const noJs = await browser.newContext({ javaScriptEnabled: false, viewport: { width: 320, height: 720 } });
+  await provideLocalKatex(noJs, cacheDir);
+  for (const [path, label] of [[f25Path, "no-JS F-2.5"], [f3Path, "no-JS F-3"]]) {
+    const { page, errors } = await newAuditedPage(noJs, baseOrigin);
+    await assertHttp200(page, `${base}${path}`);
+    await assertLayout(page, label);
+    if (path === f25Path) {
+      const fallback = await page.locator(".f25-noscript").textContent();
+      for (const marker of ["Linear 1", "GELU", "Linear 2", "W1", "B1", "W2", "B2"]) assert.ok(fallback.includes(marker), `${label}: missing ${marker}`);
+    }
+    assert.deepEqual(errors, [], `${label}: runtime/request failures`);
+    await page.close();
+  }
   await noJs.close();
-  const eager = await browser.newContext(); await eager.addInitScript(() => { window.IntersectionObserver = undefined; });
-  const eagerPage = await eager.newPage(); await eagerPage.goto(`${base}/chapters/foundations/f-2-5-linear-gelu-mlp.html`);
-  await eagerPage.locator('[data-widget="mlp-basics-viz"][data-mounted="1"]').waitFor(); assert.equal(await eagerPage.locator(".mbv-view-controls").count(), 1); await eager.close();
-  console.log(`F-2.5 browser audit passed; screenshots: ${auditDir}`);
+
+  const eager = await browser.newContext({ viewport: { width: 320, height: 720 } });
+  await provideLocalKatex(eager, cacheDir);
+  await eager.addInitScript(() => {
+    delete window.IntersectionObserver;
+    window.__mlpMountCalls = 0;
+    window.EBWidgets = new Proxy({}, {
+      set(target, property, value) {
+        target[property] = property === "mlp-basics-viz" ? function (...args) {
+          window.__mlpMountCalls += 1;
+          return value(...args);
+        } : value;
+        return true;
+      },
+    });
+  });
+  const eagerAudit = await newAuditedPage(eager, baseOrigin);
+  await assertHttp200(eagerAudit.page, `${base}${f25Path}`);
+  await eagerAudit.page.locator('[data-widget="mlp-basics-viz"][data-mounted="1"]').waitFor();
+  assert.equal(await eagerAudit.page.evaluate(() => window.__mlpMountCalls), 1, "eager mount count after load");
+  assert.equal(await eagerAudit.page.locator(".mbv-view-controls").count(), 1, "eager controls after load");
+  await assertMath(eagerAudit.page, "eager F-2.5");
+  await assertLayout(eagerAudit.page, "eager F-2.5");
+  await eagerAudit.page.locator(".mbv-view-controls").evaluate((element) => { element.dataset.auditIdentity = "eager-original"; });
+  await eagerAudit.page.evaluate(() => scrollTo(0, document.body.scrollHeight));
+  await eagerAudit.page.evaluate(() => scrollTo(0, 0));
+  await eagerAudit.page.locator('[data-widget="mlp-basics-viz"]').scrollIntoViewIfNeeded();
+  assert.equal(await eagerAudit.page.evaluate(() => window.__mlpMountCalls), 1, "eager widget mounted again after re-entry");
+  assert.equal(await eagerAudit.page.locator('.mbv-view-controls[data-audit-identity="eager-original"]').count(), 1, "eager controls replaced after re-entry");
+  assert.deepEqual(eagerAudit.errors, [], "eager F-2.5 runtime/request failures");
+  await eager.close();
+
+  console.log(`F-2.5/F-3 browser audit passed; screenshots: ${auditDir}; KaTeX: ${cacheDir ? `cache ${cacheDir}` : "network"}`);
 } finally {
   if (browser) await browser.close();
   if (server) await new Promise((resolve) => server.close(resolve));
