@@ -11,6 +11,7 @@ const learnRoot = fileURLToPath(new URL("..", import.meta.url));
 const auditDir = process.env.EBENCH_AUDIT_DIR || "/tmp/ebench-f25-audit";
 const remoteBase = process.env.EBENCH_BASE_URL;
 const cacheBust = (process.env.EBENCH_CACHE_BUST || "").trim();
+const browserProxyUrl = (process.env.EBENCH_BROWSER_PROXY || "").trim();
 const cacheBustParam = "ebench-cache-bust";
 const sizes = [[1440, 900], [834, 1112], [390, 844], [320, 720]];
 const themes = ["light", "dark"];
@@ -20,6 +21,16 @@ const f3Path = "/chapters/foundations/f-3-transformer-block.html";
 let server;
 let browser;
 const routedRequests = new WeakMap();
+
+function browserProxy(rawUrl) {
+  if (!rawUrl) return undefined;
+  const parsed = new URL(rawUrl);
+  assert.ok(["http:", "https:"].includes(parsed.protocol), "browser proxy must use HTTP(S)");
+  const proxy = { server: `${parsed.protocol}//${parsed.hostname}${parsed.port ? `:${parsed.port}` : ""}` };
+  if (parsed.username) proxy.username = decodeURIComponent(parsed.username);
+  if (parsed.password) proxy.password = decodeURIComponent(parsed.password);
+  return proxy;
+}
 
 async function localServer() {
   server = createServer(async (request, response) => {
@@ -474,7 +485,7 @@ try {
   const base = (remoteBase || await localServer()).replace(/\/$/, "");
   const baseOrigin = new URL(base).origin;
   const cacheDir = remoteBase ? null : await resolveKatexCache();
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({ headless: true, proxy: browserProxy(browserProxyUrl) });
   await controlledAssertions(baseOrigin);
 
   for (const [width, height] of sizes) {
