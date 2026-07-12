@@ -7,17 +7,53 @@ const chapter = readFileSync(new URL("../chapters/foundations/f-3-transformer-bl
 const contentSource = readFileSync(new URL("../content.js", import.meta.url), "utf8");
 const ids = [...chapter.matchAll(/\sid="([^"]+)"/g)].map((match) => match[1]);
 const requiredIds = [
-  "attention-params", "mainline", "mlp", "shared-mlp", "mlp-expressivity",
+  "block-scene", "mainline", "attention-params", "mlp",
   "residual-ln", "residual-gradient", "layernorm", "layernorm-axis",
   "layernorm-semantics", "full-flow", "block-trace", "variants",
   "deep-stack", "training-heads", "checkpoint", "recap",
 ];
+const section = (id) => chapter.match(
+  new RegExp(`<h2[^>]*id="${id}"[^>]*>[\\s\\S]*?(?=<h2|</article>)`),
+)?.[0].replace(/\s+/g, " ") || "";
 
 test("F-3 has stable unique sections in teaching order", () => {
   assert.equal(new Set(ids).size, ids.length);
   requiredIds.forEach((id) => assert.ok(ids.includes(id), `missing #${id}`));
   const positions = requiredIds.map((id) => chapter.indexOf(`id="${id}"`));
   assert.deepEqual([...positions].sort((a, b) => a - b), positions);
+});
+
+test("F-3 keeps old MLP fragments as compatibility anchors without duplicate lessons", () => {
+  ["shared-mlp", "mlp-expressivity"].forEach((id) => {
+    assert.match(chapter, new RegExp(`<a id="${id}"[^>]*aria-hidden="true"`), `missing compatibility #${id}`);
+  });
+});
+
+test("F-3 opens with a contextual scene and formula-free four-role mainline", () => {
+  assert.ok(chapter.indexOf('id="block-scene"') < chapter.indexOf('id="mainline"'));
+  assert.match(section("block-scene"), /她/);
+  assert.match(section("block-scene"), /小红/);
+  const mainline = section("mainline");
+  ["Attention", "MLP", "Residual", "LayerNorm"].forEach((role) => assert.ok(mainline.includes(role), `#mainline missing ${role}`));
+  const intro = chapter.slice(0, chapter.indexOf('id="residual-ln"'));
+  ["Q=XW_Q", "QK^T", "W_1\\in"].forEach((formula) => assert.ok(!intro.includes(formula), `intro repeats ${formula}`));
+});
+
+test("F-3 preserves concise bridge semantics at stable anchors", () => {
+  const attention = section("attention-params");
+  assert.ok(attention.includes("W_O"));
+  assert.match(attention, /回到.*宽度.*d/);
+
+  const mlp = section("mlp");
+  assert.match(mlp, /f-2-5-linear-gelu-mlp\.html#mlp-trace/);
+  ["Linear 1", "GELU", "Linear 2", "d_ff", "回到 d"].forEach((marker) => assert.ok(mlp.includes(marker), `#mlp missing ${marker}`));
+
+  const residual = section("residual-ln");
+  assert.ok(residual.includes("y=x+F(x)"));
+  assert.match(residual, /x ───────────────┐/);
+
+  const fullFlow = section("full-flow");
+  assert.ok(fullFlow.includes("LN_1 -&gt; Attention -&gt; + -&gt; LN_2 -&gt; MLP -&gt; +"));
 });
 
 test("F-3 maps every requested question to teaching content", () => {
@@ -96,7 +132,7 @@ test("F-3 keeps narrow-mobile teaching artifacts readable", () => {
   const displayRows = (id) => [...section(id).matchAll(/\$\$([\s\S]*?)\$\$/g)]
     .map((match) => match[1].replace(/\s+/g, " ").trim());
 
-  [["attention-params", 6], ["mlp", 5]].forEach(([id, minimumRows]) => {
+  [["attention-params", 0], ["mlp", 0]].forEach(([id, minimumRows]) => {
     const rows = displayRows(id);
     assert.ok(rows.length >= minimumRows, `#${id} must split its formula into short display rows`);
     rows.forEach((row) => assert.ok(row.length <= 72, `#${id} display row is too long: ${row}`));

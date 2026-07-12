@@ -145,7 +145,7 @@
         <div class="math-block">$$z_{\text{她}} = \sum_j \alpha_{\text{她},j} v_j$$</div>
         <p>代入上面的权重，得到大约：</p>
         <div class="math-block">$$z_{\text{她}}\approx0.106[1,0]+0.013[0,1]+0.881[3,1]=[2.749,0.894]$$</div>
-        <p>这一步之后，第“她”这个位置的 hidden state 已经混入了“小红”的 Value，所以它开始拥有当前层可见范围内的上下文。后面还会经过<b>输出投影、残差、LayerNorm、MLP</b>，形成下一层 hidden state——这些在下一节 <a href="f-3-transformer-block.html#full-flow">F-3</a> 会完整展开（见 <a href="f-3-transformer-block.html#attention-params">输出投影</a>、<a href="f-3-transformer-block.html#residual-ln">残差与 LayerNorm</a>、<a href="f-3-transformer-block.html#mlp">MLP</a>）。</p>
+        <p>这一步之后，第“她”这个位置的 hidden state 已经混入了“小红”的 Value，所以它开始拥有当前层可见范围内的上下文。后面还会经过<b>输出投影、残差、LayerNorm、MLP</b>，形成下一层 hidden state——这些在下一节 <a href="f-3-transformer-block.html#full-flow">F-3</a> 会完整展开（见 <a href="f-3-transformer-block.html#attention-params">输出投影</a>、<a href="f-3-transformer-block.html#residual-ln">残差与 LayerNorm</a>、<a href="f-2-5-linear-gelu-mlp.html#start">MLP 前置章</a>）。</p>
 
         <h2 id="matrix">矩阵公式：把所有 Query 一次算完</h2>
         <p>如果序列里有 $n$ 个 token，每个 token 都要当一次 Query。逐个写太慢，所以用矩阵一次性写完：</p>
@@ -191,7 +191,7 @@
         </div>
 
         <h2 id="recap">这一节你需要带走的</h2>
-        <p>Attention 的本质不是公式，而是“按相关性取信息”。你现在应该能把 $QK^T$ 看成一张 $n \times n$ 的关系表：每一行是一个 Query 看所有 Key 的分数。下一节 <a href="f-3-transformer-block.html">F-3</a> 会把 Attention 放回完整 Transformer Block，看看除了 Q/K/V，模型里还有哪些参数。</p>
+        <p>Attention 的本质不是公式，而是“按相关性取信息”。你现在应该能把 $QK^T$ 看成一张 $n \times n$ 的关系表：每一行是一个 Query 看所有 Key 的分数。下一节先到 <a href="f-2-5-linear-gelu-mlp.html#start">F-2.5</a> 补齐 Linear、GELU 与 MLP，再进入 F-3 的完整 Transformer Block。</p>
       </article>
     </main>
     <aside class="rail" id="rail"></aside>
