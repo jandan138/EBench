@@ -15,9 +15,9 @@
   const W2 = freezeMatrix([[0.2, 0.4], [0.1, -0.2], [0.3, 0.2], [-0.1, 0.3]]);
   const B2 = Object.freeze([0, 0]);
   const parameters = Object.freeze({ W1, B1, W2, B2 });
-  const CHANNEL_INPUT = Object.freeze([2, -1]);
-  const CHANNEL_W = freezeMatrix([[1, -0.5, 0.75, -1], [-0.1, 0.3, 0.2, 1.2]]);
-  const CHANNEL_B = Object.freeze([0, 0.6, 0, 0]);
+  const CHANNEL_INPUT = Object.freeze([1, 1]);
+  const CHANNEL_W = freezeMatrix([[1, -1, 0.5, -2], [1.1, 0.3, 0.8, -1.2]]);
+  const CHANNEL_B = Object.freeze([0, 0, 0, 0]);
 
   function erf(value) {
     const sign = value < 0 ? -1 : 1;

@@ -56,17 +56,17 @@
         <h2 id="linear-boundaries">Linear 做什么，不做什么</h2>
         <p>Linear 会对 feature 加权组合，却没有自己在 token 位置之间传消息的步骤。它也不是把数字限制到某个固定区间；是否有 bias、输入和输出维度是多少，都是具体层的设计。</p>
 
-        <h2 id="preactivation" data-answers="1,2,3,4">先看激活前：z 是什么</h2>
+        <h2 id="preactivation" data-answers="1,24">先看激活前：z 是什么</h2>
         <p>每个通道先算 <b>pre-activation</b>：$z=w^T x+b$。它是对当前 hidden state 的 affine score，不是对某个词义做唯一的投影；一个数字还不足以说明“这个 feature 表示什么”。激活后的数值来自后续 gate，而不是 z 自己已经带有语义标签。</p>
-        <p>对冻结的 $x=[2,-1]$、W 和 b，四个通道通过同一条 affine 计算得到 $[2.1,-0.7,1.3,-3.2]$。这些 score 说明模型学习到了一些方向和位置的组合，但不能把 affine 的限制误说成单个、可解释的概念检测器。</p>
+        <p>冻结算例是 <code>CHANNEL_INPUT=[1,1]</code>、<code>CHANNEL_W=[[1,-1,0.5,-2],[1.1,0.3,0.8,-1.2]]</code>、<code>CHANNEL_B=[0,0,0,0]</code>。四个通道通过 affine 计算得到 $[2.1,-0.7,1.3,-3.2]$。这些 score 说明模型学习到了一些方向和位置的组合，但不能把 affine 的限制误说成单个、可解释的概念检测器。</p>
 
-        <h2 id="sign-is-not-meaning" data-answers="5,6,7">正负号不是“有用”与“无用”</h2>
+        <h2 id="sign-is-not-meaning" data-answers="2,3,4,25,26">正负号不是“有用”与“无用”</h2>
         <p>z 的符号不是“有用”或“无用”的语义判决。正、负只是相对于学习到的方向；换一组 feature 坐标或后续权重，解释会改变。把一个通道做 sign flip（符号翻转）也不等价于原网络，除非相关权重和后续计算一起做匹配变换。</p>
         <p>因此“这个 feature 为负”不能推出它没有信息。模型通常使用分布式 feature，单一通道的符号不等于固定的自然语言含义。</p>
 
-        <h2 id="bias-threshold" data-answers="8,9,10">bias 怎样移动阈值</h2>
+        <h2 id="bias-threshold" data-answers="16,17,18">bias 怎样移动阈值</h2>
         <p>一维例子 $ReLU(x-3)$ 的开关边界在 $x>3$：x 为 2、3、4 时，输出依次是 0、0、1。这里 bias 把阈值从 0 移到了 3。</p>
-        <table class="f25-mobile-stack">
+        <table class="f25-mobile-stack agv-threshold-table">
           <thead><tr><th>x</th><th>ReLU(x-3)</th></tr></thead>
           <tbody>
             <tr><td data-label="x">2</td><td data-label="ReLU(x-3)">0</td></tr>
@@ -76,22 +76,22 @@
         </table>
         <p>高维时边界是 $w^T x+b=0$。w 决定边界的方向，b 决定位置；w=0 时没有输入方向可分，负 w 则会反转一维不等式的方向。</p>
 
-        <h2 id="relu" data-answers="11,12,13,14">ReLU：明确的门控</h2>
-        <p><b>分段非线性</b>：$ReLU(z)=max(0,z)$。当 $z<0$ 时输出和通常导数为 0；当 $z>0$ 时输出 z、导数为 1。z=0 处不可微，实现会选一个 subgradient，不能把它说成唯一的数学导数。</p>
+        <h2 id="relu" data-answers="5,6,7,8">ReLU：明确的门控</h2>
+        <p><b>分段非线性</b>：$ReLU(z)=max(0,z)$。当 $z<0$、也就是 z 严格为负时，输出为 0，导数正好为 0；当 $z>0$ 时输出 z、导数为 1。仅在 z=0 处不可微，实现会选一个 subgradient，不能把它说成唯一的数学导数。</p>
         <p><b>门控</b>：它保留活跃的正 score，压掉负 score，但没有给通道命名。</p>
         <p><b>稀疏性</b>：一批输入会让部分输出为 0。若一个单元长期只落在负半轴，可能成为 dead ReLU；让它在某些样本上 active，或使用 Leaky-ReLU 的小负斜率，都是绕开这个训练问题的路径。</p>
 
-        <h2 id="gelu" data-answers="15,16,17,18">GELU：逐元素的平滑非线性</h2>
+        <h2 id="gelu" data-answers="9,22">GELU：逐元素的平滑非线性</h2>
         <p>先看具体数值。输入从负数走到正数时，GELU 让较大的正数接近原样通过，把较大的负数压到接近 0，中间则平滑变化。</p>
         <div class="f25-gelu-static">
           <table class="f25-mobile-stack f25-gelu-values">
-            <thead><tr><th>输入 x</th><th>GELU(x) 近似值</th></tr></thead>
+            <thead><tr><th>输入 x</th><th>ReLU(x)</th><th>GELU(x)</th></tr></thead>
             <tbody>
-              <tr data-gelu-input="-2" data-gelu-value="-0.046"><td data-label="输入 x">-2</td><td data-label="GELU(x) 近似值">-0.046</td></tr>
-              <tr data-gelu-input="-1" data-gelu-value="-0.159"><td data-label="输入 x">-1</td><td data-label="GELU(x) 近似值">-0.159</td></tr>
-              <tr data-gelu-input="0" data-gelu-value="0.000"><td data-label="输入 x">0</td><td data-label="GELU(x) 近似值">0.000</td></tr>
-              <tr data-gelu-input="1" data-gelu-value="0.841"><td data-label="输入 x">1</td><td data-label="GELU(x) 近似值">0.841</td></tr>
-              <tr data-gelu-input="2" data-gelu-value="1.954"><td data-label="输入 x">2</td><td data-label="GELU(x) 近似值">1.954</td></tr>
+              <tr data-gelu-input="-2" data-relu-value="0.000" data-gelu-value="-0.046"><td data-label="输入 x">-2</td><td data-label="ReLU(x)">0.000</td><td data-label="GELU(x)">-0.046</td></tr>
+              <tr data-gelu-input="-1" data-relu-value="0.000" data-gelu-value="-0.159"><td data-label="输入 x">-1</td><td data-label="ReLU(x)">0.000</td><td data-label="GELU(x)">-0.159</td></tr>
+              <tr data-gelu-input="0" data-relu-value="0.000" data-gelu-value="0.000"><td data-label="输入 x">0</td><td data-label="ReLU(x)">0.000</td><td data-label="GELU(x)">0.000</td></tr>
+              <tr data-gelu-input="1" data-relu-value="1.000" data-gelu-value="0.841"><td data-label="输入 x">1</td><td data-label="ReLU(x)">1.000</td><td data-label="GELU(x)">0.841</td></tr>
+              <tr data-gelu-input="2" data-relu-value="2.000" data-gelu-value="1.954"><td data-label="输入 x">2</td><td data-label="ReLU(x)">2.000</td><td data-label="GELU(x)">1.954</td></tr>
             </tbody>
           </table>
           <figure class="f25-gelu-figure">
@@ -107,52 +107,55 @@
           </figure>
         </div>
         <p>精确定义是 $GELU(x)=x\Phi(x)$，其中 $\Phi$ 是标准正态分布的累积分布函数。它对向量中的每个数字<b>逐元素</b>计算：没有可学习矩阵，也不在 token 位置之间通信。</p>
+        <p>训练时使用的导数是 $GELU'(z)=\Phi(z)+z\phi(z)$，其中 $\phi$ 是标准正态分布的概率密度函数。</p>
         <p>概率式直觉是：若以概率 $\Phi(x)$ 保留 x，期望输出为 $x\Phi(x)$。这只是随机门（random gate）的期望解释，不在运行时抽样每个 feature 的 Bernoulli；本页数值都由确定的 GELU 函数计算。</p>
         <p>较大的正数接近原样通过，较大的负数被压向 0；GELU 可以得到负输出，输出不被限制在 [0,1]。负半轴的一小段曲线并非单调，这正是平滑曲线的数值边界，不该把它说成阈值开关。</p>
         <p>后文 trace 中的 GELU 数字是按这个精确定义做<b>数值求值</b>后显示到三位小数的结果，不是新的符号定义。</p>
         <p><b>常见的 tanh 近似</b>可让实现避免直接计算 $\Phi$，但它近似的是精确定义：</p>
         <div class="math-block">$$\operatorname{GELU}_{\tanh}(x)\approx\frac{x}{2}\left[1+\tanh\!\left(\sqrt{\frac{2}{\pi}}\left(x+0.044715x^3\right)\right)\right]$$</div>
 
-        <h2 id="training-gates" data-answers="19,20,21,22">训练会怎样调 gate</h2>
-        <p>下面是 scalar regression 教学 toy：输入 x=1，$Loss=\frac12(GELU(z)-target)^2$，学习率 0.5。反向传播计算 dL/dz，再得到 dL/dw 和 dL/db；这不是人工为某个通道分配角色。因为只有本 toy 的 x=1，dL/dw 与 dL/db 才数值相等。</p>
-        <table class="f25-mobile-stack">
-          <thead><tr><th>目标</th><th>z</th><th>GELU</th><th>dL/dz</th><th>dL/dw</th><th>dL/db</th><th>next z</th></tr></thead>
+        <h2 id="training-gates" data-answers="10,11,12,13,14,15">训练会怎样调 gate</h2>
+        <p>下面是 scalar regression 教学 toy：输入 x=1，令 $a=GELU(z)$、$Loss=\frac12(a-target)^2$，学习率 0.5。完整的标量链式法则是 $dL/dz=(a-target)GELU'(z)$、$dL/dw=x*dL/dz$、$dL/db=dL/dz$。反向传播计算这些梯度；这不是人工为某个通道分配角色。因为只有本 toy 的 x=1，dL/dw 与 dL/db 才数值相等。</p>
+        <p><b>相关样本，target=1</b></p>
+        <table class="f25-mobile-stack" data-training-trace="relevant">
+          <thead><tr><th>step</th><th>z</th><th>GELU</th><th>dL/dz</th></tr></thead>
           <tbody>
-            <tr><td data-label="目标">相关：1</td><td data-label="z">-0.400</td><td data-label="GELU">-0.138</td><td data-label="dL/dz">负</td><td data-label="dL/dw">负</td><td data-label="dL/db">负</td><td data-label="next z">-0.176</td></tr>
-            <tr><td data-label="目标">相关：1</td><td data-label="z">0.213</td><td data-label="GELU">0.124</td><td data-label="dL/dz">负</td><td data-label="dL/dw">负</td><td data-label="dL/db">负</td><td data-label="next z">0.797</td></tr>
-            <tr><td data-label="目标">无关：0</td><td data-label="z">0.800</td><td data-label="GELU">0.631</td><td data-label="dL/dz">正</td><td data-label="dL/dw">正</td><td data-label="dL/db">正</td><td data-label="next z">0.157</td></tr>
+            <tr><td data-label="step">0</td><td data-label="z">-0.400</td><td data-label="GELU">-0.138</td><td data-label="dL/dz">-0.224</td></tr>
+            <tr><td data-label="step">1</td><td data-label="z">-0.176</td><td data-label="GELU">-0.076</td><td data-label="dL/dz">-0.389</td></tr>
+            <tr><td data-label="step">2</td><td data-label="z">0.213</td><td data-label="GELU">0.125</td><td data-label="dL/dz">-0.584</td></tr>
+            <tr><td data-label="step">3</td><td data-label="z">0.797</td><td data-label="GELU">0.628</td><td data-label="dL/dz">-0.379</td></tr>
+            <tr><td data-label="step">4</td><td data-label="z">1.177</td><td data-label="GELU">1.036</td><td data-label="dL/dz">0.040</td></tr>
+          </tbody>
+        </table>
+        <p><b>无关样本，target=0</b></p>
+        <table class="f25-mobile-stack" data-training-trace="irrelevant">
+          <thead><tr><th>step</th><th>z</th><th>GELU</th><th>dL/dz</th></tr></thead>
+          <tbody>
+            <tr><td data-label="step">0</td><td data-label="z">0.800</td><td data-label="GELU">0.631</td><td data-label="dL/dz">0.643</td></tr>
+            <tr><td data-label="step">1</td><td data-label="z">0.157</td><td data-label="GELU">0.088</td><td data-label="dL/dz">0.055</td></tr>
+            <tr><td data-label="step">2</td><td data-label="z">0.102</td><td data-label="GELU">0.055</td><td data-label="dL/dz">0.032</td></tr>
+            <tr><td data-label="step">3</td><td data-label="z">0.070</td><td data-label="GELU">0.037</td><td data-label="dL/dz">0.020</td></tr>
+            <tr><td data-label="step">4</td><td data-label="z">0.049</td><td data-label="GELU">0.026</td><td data-label="dL/dz">0.014</td></tr>
           </tbody>
         </table>
         <p>相关样本的 z 会提高；独立的无关样本会趋向低响应，却不必一定学成负 z。真实网络的损失只通过许多参数和样本间接塑造表示，feature 往往是分布式的，不能从这条 toy trace 推出单元的固定语义。</p>
 
-        <h2 id="negative-information" data-answers="23,24,25,26">负信息怎样继续流动</h2>
+        <h2 id="negative-information" data-answers="19,20,21,23">负信息怎样继续流动</h2>
         <p>成对的 ReLU 可以保留符号：先令 $z=w^T x+b$。相反的 paired 分支使用权重 $-w$ 和 bias $-b$，所以 $(-w)^T x+(-b)=-z$；下游第二个 Linear 再用 +1、-1，得到 $ReLU(z)-ReLU(-z)=z$。这不是说每个模型都会这样配对，只说明 ReLU 后仍可重构这条标量信息。</p>
         <p>GELU 也能给出负输出：$GELU(-1)\approx-0.159$，再乘后层负权重 -2，会给后续和带来正贡献约 0.318。负权重和负激活的组合不等于“删除信息”。</p>
         <p>residual stream 可以旁路一条变换，但 residual stream 不等于整个 block 可逆，也不能保证信息永不损失。</p>
+        <p class="agv-pair-reconstruction">ReLU(z)-ReLU(-z)=z；z=-2.500 时为 0.000-2.500=-2.500。</p>
 
         <div class="lab activation-gates-viz activation-gates-static" data-widget="activation-gates-viz" aria-label="activation gates static trace">
           <div class="lab-h"><span class="lab-tag">Experiment</span><span class="lab-t">正负响应怎样经过门控</span></div>
           <div class="lab-body">
-            <p class="agv-static-caption">四个视图复用纯计算，不为通道指定固定的人类语义。先看静态对照，再用控件改变输入。</p>
-            <div class="agv-static-grid">
-              <table class="f25-mobile-stack agv-channel-table"><thead><tr><th scope="col">通道 z</th><th scope="col">ReLU(z)</th><th scope="col">GELU(z)</th></tr></thead><tbody>
-                <tr><td data-label="通道 z">2.100</td><td data-label="ReLU(z)">2.100</td><td data-label="GELU(z)">2.062</td></tr>
-                <tr><td data-label="通道 z">-0.700</td><td data-label="ReLU(z)">0.000</td><td data-label="GELU(z)">-0.169</td></tr>
-                <tr><td data-label="通道 z">1.300</td><td data-label="ReLU(z)">1.300</td><td data-label="GELU(z)">1.174</td></tr>
-                <tr><td data-label="通道 z">-3.200</td><td data-label="ReLU(z)">0.000</td><td data-label="GELU(z)">-0.002</td></tr>
-              </tbody></table>
-              <div>
-                <table class="f25-mobile-stack agv-threshold-table" aria-label="ReLU(x-3) 阈值表"><thead><tr><th scope="col">x</th><th scope="col">ReLU(x-3)</th></tr></thead><tbody>
-                  <tr><td data-label="x">2</td><td data-label="ReLU(x-3)">0</td></tr>
-                  <tr><td data-label="x">3</td><td data-label="ReLU(x-3)">0</td></tr>
-                  <tr><td data-label="x">4</td><td data-label="ReLU(x-3)">1</td></tr>
-                </tbody></table>
-                <p><b>阈值：</b>w=0 时输入 x 不再移动边界；负 w 会反转一维不等式的方向。</p>
-                <p class="agv-pair-reconstruction">ReLU(z)-ReLU(-z)=z；z=-2.500 时为 0.000-2.500=-2.500。</p>
-                <p>这不保证每个模型都会使用这种配对。</p>
-              </div>
-            </div>
-            <div class="agv-static-traces"><p><b>相关 trace：</b>z -0.400 → -0.176 → 0.213 → 0.797 → 1.177，朝目标 1 上升。</p><p><b>无关 trace：</b>z 0.800 → 0.157 → 0.102 → 0.070 → 0.049，独立地向低响应移动。</p></div>
+            <p class="agv-static-caption">四个视图复用纯计算，不为通道指定固定的人类语义。先看冻结通道的静态对照，再用控件改变输入。</p>
+            <table class="f25-mobile-stack agv-channel-table"><thead><tr><th scope="col">通道 z</th><th scope="col">ReLU(z)</th><th scope="col">GELU(z)</th></tr></thead><tbody>
+              <tr><td data-label="通道 z">2.100</td><td data-label="ReLU(z)">2.100</td><td data-label="GELU(z)">2.062</td></tr>
+              <tr><td data-label="通道 z">-0.700</td><td data-label="ReLU(z)">0.000</td><td data-label="GELU(z)">-0.169</td></tr>
+              <tr><td data-label="通道 z">1.300</td><td data-label="ReLU(z)">1.300</td><td data-label="GELU(z)">1.174</td></tr>
+              <tr><td data-label="通道 z">-3.200</td><td data-label="ReLU(z)">0.000</td><td data-label="GELU(z)">-0.002</td></tr>
+            </tbody></table>
           </div>
         </div>
 

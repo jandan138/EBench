@@ -26,16 +26,26 @@ test("activation-gates widget registers after the shared core and before book", 
   assert.match(css, /\.activation-gates-viz/);
 });
 
-test("activation-gates lab keeps every interactive conclusion as static source content", () => {
+test("activation-gates conclusions have section-owned static source content", () => {
   const labStart = chapter.indexOf('data-widget="activation-gates-viz"');
   const labEnd = chapter.indexOf('<h2 id="why-nonlinearity"');
   const lab = labStart >= 0 && labEnd > labStart ? chapter.slice(labStart, labEnd) : "";
   assert.ok(lab, "activation gate lab missing");
-  ["2.100", "-0.700", "1.300", "-3.200", "ReLU(x-3)", "ReLU(z)-ReLU(-z)=z", "相关", "无关"]
+  ["2.100", "-0.700", "1.300", "-3.200"]
     .forEach((marker) => assert.ok(lab.includes(marker), `static lab missing ${marker}`));
-  assert.match(lab, /w=0/);
-  assert.match(lab, /负 w/);
-  assert.match(lab, /不保证/);
+  assert.equal((lab.match(/agv-channel-table/g) || []).length, 1);
+  assert.doesNotMatch(lab, /ReLU\(x-3\)|agv-pair-reconstruction|data-training-trace=/);
+
+  const threshold = chapter.match(/<h2[^>]*id="bias-threshold"[^>]*>[\s\S]*?(?=<h2|<\/article>)/)?.[0] || "";
+  assert.match(threshold, /ReLU\(x-3\)/);
+  assert.match(threshold, /w=0/);
+  assert.match(threshold, /负 w/);
+  const negative = chapter.match(/<h2[^>]*id="negative-information"[^>]*>[\s\S]*?(?=<h2|<\/article>)/)?.[0] || "";
+  assert.match(negative, /ReLU\(z\)-ReLU\(-z\)=z；z=-2\.500 时为 0\.000-2\.500=-2\.500/);
+  assert.match(negative, /不是说每个模型都会这样配对/);
+  const training = chapter.match(/<h2[^>]*id="training-gates"[^>]*>[\s\S]*?(?=<h2|<\/article>)/)?.[0] || "";
+  assert.equal((training.match(/data-training-trace="(?:relevant|irrelevant)"/g) || []).length, 2);
+  assert.equal((training.match(/<tr>/g) || []).length, 12, "two headers plus ten complete static trace rows");
   assert.ok(chapter.indexOf('id="negative-information"') < chapter.indexOf('data-widget="activation-gates-viz"'));
   assert.ok(chapter.indexOf('data-widget="activation-gates-viz"') < chapter.indexOf('id="why-nonlinearity"'));
   assert.match(chapter, /一条向量怎样穿过 MLP[\s\S]*既有 MLP trace/);

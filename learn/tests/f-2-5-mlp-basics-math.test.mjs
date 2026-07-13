@@ -70,10 +70,11 @@ test("static trace data values agree with the executable core", () => {
 test("static GELU table values agree with the executable core", () => {
   const core = require(coreFile);
   const chapter = readFileSync(chapterPath, "utf8");
-  const rows = [...chapter.matchAll(/data-gelu-input="([^"]+)" data-gelu-value="([^"]+)"/g)]
-    .map((match) => ({ input: Number(match[1]), output: match[2] }));
+  const rows = [...chapter.matchAll(/data-gelu-input="([^"]+)" data-relu-value="([^"]+)" data-gelu-value="([^"]+)"/g)]
+    .map((match) => ({ input: Number(match[1]), relu: match[2], gelu: match[3] }));
   assert.deepEqual(rows.map(({ input }) => input), [-2, -1, 0, 1, 2]);
-  assert.deepEqual(rows.map(({ output }) => output), rows.map(({ input }) => core.format(core.gelu(input))));
+  assert.deepEqual(rows.map(({ relu }) => relu), rows.map(({ input }) => core.format(core.relu(input))));
+  assert.deepEqual(rows.map(({ gelu }) => gelu), rows.map(({ input }) => core.format(core.gelu(input))));
 });
 
 test("activation gate helpers expose frozen scalar math and threshold behavior", () => {
@@ -104,6 +105,9 @@ test("channel trace derives frozen channel rows from the frozen affine fixture",
   for (const value of [core.CHANNEL_INPUT, core.CHANNEL_W, ...core.CHANNEL_W, core.CHANNEL_B]) {
     assert.ok(Object.isFrozen(value), "channel fixture must be deeply frozen");
   }
+  assert.deepEqual(core.CHANNEL_INPUT, [1, 1]);
+  assert.deepEqual(core.CHANNEL_W, [[1, -1, 0.5, -2], [1.1, 0.3, 0.8, -1.2]]);
+  assert.deepEqual(core.CHANNEL_B, [0, 0, 0, 0]);
   assert.match(implementation, /affine\(CHANNEL_INPUT, CHANNEL_W, CHANNEL_B\)/, "channelTrace must derive scores through the shared affine helper and frozen fixture");
   assert.doesNotMatch(implementation, /\[\s*2\.1\s*,\s*-0\.7\s*,\s*1\.3\s*,\s*-3\.2\s*\]/, "channelTrace must not duplicate literal scores");
   const expected = core.affine(core.CHANNEL_INPUT, core.CHANNEL_W, core.CHANNEL_B);
@@ -117,6 +121,21 @@ test("channel trace derives frozen channel rows from the frozen affine fixture",
     assert.deepEqual(row.weight, core.CHANNEL_W.map((weights) => weights[channel]));
     assert.equal(row.bias, core.CHANNEL_B[channel]);
   });
+});
+
+test("both complete static training tables agree cell-for-cell with the core", () => {
+  const core = require(coreFile);
+  const chapter = readFileSync(chapterPath, "utf8");
+  const fixtures = {
+    relevant: core.trainingTrace(-0.4, 0, 1, 5),
+    irrelevant: core.trainingTrace(0.8, 0, 0, 5),
+  };
+  for (const [kind, trace] of Object.entries(fixtures)) {
+    const table = chapter.match(new RegExp(`<table[^>]*data-training-trace="${kind}"[^>]*>[\\s\\S]*?<\\/table>`))?.[0] || "";
+    const cells = [...table.matchAll(/<td[^>]*>([^<]+)<\/td>/g)].map((match) => match[1].trim());
+    const expected = trace.flatMap((row) => [String(row.step), core.format(row.z), core.format(row.activation), core.format(row.dLossDz)]);
+    assert.deepEqual(cells, expected, `${kind} static training trace must derive from core formatting`);
+  }
 });
 
 test("GELU training trace captures frozen pre-update gradients and correct directions", () => {

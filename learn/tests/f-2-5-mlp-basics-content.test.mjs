@@ -7,8 +7,10 @@ const chapterPath = new URL("../chapters/foundations/f-2-5-linear-gelu-mlp.html"
 const chapter = existsSync(chapterPath) ? readFileSync(chapterPath, "utf8") : "";
 const corePath = new URL("../assets/js/widgets/mlp-basics-core.js", import.meta.url);
 const widgetPath = new URL("../assets/js/widgets/mlp-basics-viz.js", import.meta.url);
+const activationWidgetPath = new URL("../assets/js/widgets/activation-gates-viz.js", import.meta.url);
 const cssPath = new URL("../assets/css/book.css", import.meta.url);
 const widgetSource = existsSync(widgetPath) ? readFileSync(widgetPath, "utf8") : "";
+const activationWidgetSource = existsSync(activationWidgetPath) ? readFileSync(activationWidgetPath, "utf8") : "";
 const cssSource = readFileSync(cssPath, "utf8");
 const contentSource = readFileSync(new URL("../content.js", import.meta.url), "utf8");
 const f3Chapter = readFileSync(new URL("../chapters/foundations/f-3-transformer-block.html", import.meta.url), "utf8");
@@ -65,8 +67,8 @@ test("F-2.5 GELU teaches static values and an accessible curve before Phi", () =
   assert.ok(body.indexOf("先看具体数值") < body.indexOf("f25-gelu-values"));
   assert.ok(body.indexOf("f25-gelu-values") < formula);
   assert.ok(body.indexOf("f25-gelu-figure") < formula);
-  for (const [input, output] of [["-2", "-0.046"], ["-1", "-0.159"], ["0", "0.000"], ["1", "0.841"], ["2", "1.954"]]) {
-    assert.match(body, new RegExp(`data-gelu-input="${input}" data-gelu-value="${output}"`));
+  for (const [input, relu, gelu] of [["-2", "0.000", "-0.046"], ["-1", "0.000", "-0.159"], ["0", "0.000", "0.000"], ["1", "1.000", "0.841"], ["2", "2.000", "1.954"]]) {
+    assert.match(body, new RegExp(`data-gelu-input="${input}" data-relu-value="${relu}" data-gelu-value="${gelu}"`));
   }
   assert.match(body, /<svg[^>]*role="img"[^>]*aria-labelledby="f25-gelu-curve-title f25-gelu-curve-desc"/);
   assert.match(body, /<title id="f25-gelu-curve-title">/);
@@ -177,12 +179,18 @@ test("F-2.5 activation gates have stable section-local contracts and answer cove
   assert.ok(widget > staticEnd, "activation-gates-viz must follow #negative-information");
   assert.ok(widget < chapter.indexOf('id="why-nonlinearity"'), "activation-gates-viz must not split static gate sections");
 
-  const answers = [...chapter.matchAll(/data-answers="([^"]+)"/g)]
-    .flatMap((match) => match[1].split(","))
-    .map(Number)
-    .sort((a, b) => a - b);
-  assert.deepEqual(answers, Array.from({ length: 26 }, (_, index) => index + 1));
-  gateIds.forEach((id) => assert.match(chapter, new RegExp(`<h2[^>]*id="${id}"[^>]*data-answers="[^\"]+"`)));
+  const expectedAnswers = {
+    preactivation: "1,24",
+    "sign-is-not-meaning": "2,3,4,25,26",
+    relu: "5,6,7,8",
+    gelu: "9,22",
+    "training-gates": "10,11,12,13,14,15",
+    "bias-threshold": "16,17,18",
+    "negative-information": "19,20,21,23",
+  };
+  for (const [id, answers] of Object.entries(expectedAnswers)) {
+    assert.match(chapter, new RegExp(`<h2[^>]*id="${id}"[^>]*data-answers="${answers}"`), `#${id} exact answer mapping`);
+  }
   for (let outcome = 10; outcome <= 17; outcome += 1) {
     assert.equal((chapter.match(new RegExp(`data-check="outcome-${outcome}"`, "g")) || []).length, 1, `outcome-${outcome} must appear once`);
   }
@@ -194,13 +202,63 @@ test("F-2.5 gate narrative keeps mathematical boundaries with their owning secti
   const sign = section("sign-is-not-meaning");
   ["翻转", "不等价", "feature"].forEach((marker) => assert.ok(sign.includes(marker), `#sign-is-not-meaning missing ${marker}`));
   const relu = section("relu");
-  ["z<0", "z>0", "subgradient", "active", "Leaky-ReLU"].forEach((marker) => assert.ok(relu.includes(marker), `#relu missing ${marker}`));
+  ["z<0", "严格为负", "导数正好为 0", "z>0", "仅在 z=0", "subgradient", "active", "Leaky-ReLU"].forEach((marker) => assert.ok(relu.includes(marker), `#relu missing ${marker}`));
   const gelu = section("gelu");
-  ["期望", "Bernoulli", "不在运行时抽样", "f25-mobile-stack", "-2", "1.954"].forEach((marker) => assert.ok(gelu.includes(marker), `#gelu missing ${marker}`));
+  ["期望", "Bernoulli", "不在运行时抽样", "f25-mobile-stack", "ReLU(x)", "-2", "1.954", "GELU'(z)=\\Phi(z)+z\\phi(z)"].forEach((marker) => assert.ok(gelu.includes(marker), `#gelu missing ${marker}`));
   const training = section("training-gates");
-  ["相关", "无关", "低响应", "分布式", "损失", "间接"].forEach((marker) => assert.ok(training.includes(marker), `#training-gates missing ${marker}`));
+  ["相关", "无关", "低响应", "分布式", "损失", "间接", "dL/dz=(a-target)GELU'(z)", "dL/dw=x*dL/dz", "dL/db=dL/dz"].forEach((marker) => assert.ok(training.includes(marker), `#training-gates missing ${marker}`));
   const negative = section("negative-information");
   ["paired", "bias", "第二个 Linear", "正贡献", "旁路", "不能保证"].forEach((marker) => assert.ok(negative.includes(marker), `#negative-information missing ${marker}`));
+});
+
+test("F-2.5 frozen channel fixture is stated exactly in reader and widget copy", () => {
+  const preactivation = section("preactivation");
+  [
+    "CHANNEL_INPUT=[1,1]",
+    "CHANNEL_W=[[1,-1,0.5,-2],[1.1,0.3,0.8,-1.2]]",
+    "CHANNEL_B=[0,0,0,0]",
+    "[2.1,-0.7,1.3,-3.2]",
+  ].forEach((marker) => assert.ok(preactivation.includes(marker), `#preactivation missing exact fixture ${marker}`));
+  assert.match(activationWidgetSource, /x=\[1,1\] 的冻结通道计算/);
+  assert.doesNotMatch(activationWidgetSource, /x=\[2,-1\] 的冻结通道计算/);
+});
+
+test("F-2.5 static gate fallbacks belong to their teaching sections, not the lab", () => {
+  const training = section("training-gates");
+  const expectedTraces = {
+    relevant: [
+      ["0", "-0.400", "-0.138", "-0.224"],
+      ["1", "-0.176", "-0.076", "-0.389"],
+      ["2", "0.213", "0.125", "-0.584"],
+      ["3", "0.797", "0.628", "-0.379"],
+      ["4", "1.177", "1.036", "0.040"],
+    ],
+    irrelevant: [
+      ["0", "0.800", "0.631", "0.643"],
+      ["1", "0.157", "0.088", "0.055"],
+      ["2", "0.102", "0.055", "0.032"],
+      ["3", "0.070", "0.037", "0.020"],
+      ["4", "0.049", "0.026", "0.014"],
+    ],
+  };
+  for (const [kind, rows] of Object.entries(expectedTraces)) {
+    const table = training.match(new RegExp(`<table[^>]*data-training-trace="${kind}"[^>]*>[\\s\\S]*?<\\/table>`))?.[0] || "";
+    assert.ok(table, `missing ${kind} static trace table`);
+    assert.match(table, /<th[^>]*>step<\/th><th[^>]*>z<\/th><th[^>]*>GELU<\/th><th[^>]*>dL\/dz<\/th>/);
+    const cells = [...table.matchAll(/<td[^>]*>([^<]+)<\/td>/g)].map((match) => match[1].trim());
+    assert.deepEqual(cells, rows.flat(), `${kind} exact static trace cells`);
+  }
+
+  const threshold = section("bias-threshold");
+  assert.equal((threshold.match(/agv-threshold-table/g) || []).length, 1, "threshold table must stay at #bias-threshold");
+  const negative = section("negative-information");
+  assert.equal((negative.match(/agv-pair-reconstruction/g) || []).length, 1, "pair reconstruction must stay at #negative-information");
+  assert.match(negative, /z=-2\.500 时为 0\.000-2\.500=-2\.500/);
+
+  const lab = chapter.match(/<div class="lab activation-gates-viz activation-gates-static"[\s\S]*?(?=<h2 id="why-nonlinearity")/)?.[0] || "";
+  assert.equal((lab.match(/agv-channel-table/g) || []).length, 1, "lab must retain one static channel table");
+  assert.doesNotMatch(lab, /agv-threshold-table|agv-pair-reconstruction|agv-static-traces|data-training-trace=/,
+    "lab must not duplicate section-owned threshold, pair, or training fallbacks");
 });
 
 test("F-2.5 paired-ReLU explanation derives the opposite branch with a negative bias", () => {

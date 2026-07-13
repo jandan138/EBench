@@ -684,19 +684,31 @@ try {
         ["1.300", "1.300", "1.174"],
         ["-3.200", "0.000", "-0.002"],
       ], `${label}: static derived channel ReLU/GELU cells`);
-      assert.deepEqual(await activationStatic.locator(".agv-threshold-table tbody tr").evaluateAll((rows) => rows.map((row) => [...row.cells].map((cell) => cell.textContent.trim()))), [
+      assert.deepEqual(await page.locator("#bias-threshold + p + .agv-threshold-table tbody tr").evaluateAll((rows) => rows.map((row) => [...row.cells].map((cell) => cell.textContent.trim()))), [
         ["2", "0"],
         ["3", "0"],
         ["4", "1"],
       ], `${label}: exact ReLU(x-3) threshold table`);
-      assert.match((await activationStatic.locator(".agv-pair-reconstruction").textContent()).trim(), /^ReLU\(z\)-ReLU\(-z\)=z；z=-2\.500 时为 0\.000-2\.500=-2\.500。$/,
+      assert.match((await page.locator("#negative-information ~ .agv-pair-reconstruction").first().textContent()).trim(), /^ReLU\(z\)-ReLU\(-z\)=z；z=-2\.500 时为 0\.000-2\.500=-2\.500。$/,
         `${label}: paired -2.500 reconstruction`);
-      assert.deepEqual(await activationStatic.locator(".agv-static-traces p").allTextContents(), [
-        "相关 trace：z -0.400 → -0.176 → 0.213 → 0.797 → 1.177，朝目标 1 上升。",
-        "无关 trace：z 0.800 → 0.157 → 0.102 → 0.070 → 0.049，独立地向低响应移动。",
-      ], `${label}: ordered relevant and irrelevant training traces`);
-      const activationStaticText = await activationStatic.textContent();
-      for (const marker of ["w=0", "负 w"]) assert.ok(activationStaticText.includes(marker), `${label}: activation static content missing ${marker}`);
+      const expectedTraces = {
+        relevant: [
+          ["0", "-0.400", "-0.138", "-0.224"], ["1", "-0.176", "-0.076", "-0.389"],
+          ["2", "0.213", "0.125", "-0.584"], ["3", "0.797", "0.628", "-0.379"], ["4", "1.177", "1.036", "0.040"],
+        ],
+        irrelevant: [
+          ["0", "0.800", "0.631", "0.643"], ["1", "0.157", "0.088", "0.055"],
+          ["2", "0.102", "0.055", "0.032"], ["3", "0.070", "0.037", "0.020"], ["4", "0.049", "0.026", "0.014"],
+        ],
+      };
+      for (const [kind, expected] of Object.entries(expectedTraces)) {
+        assert.deepEqual(await page.locator(`[data-training-trace="${kind}"] tbody tr`).evaluateAll((rows) => rows.map((row) => [...row.cells].map((cell) => cell.textContent.trim()))), expected,
+          `${label}: exact ${kind} training trace cells`);
+      }
+      assert.equal(await activationStatic.locator(".agv-threshold-table, .agv-pair-reconstruction, .agv-static-traces, [data-training-trace]").count(), 0,
+        `${label}: activation lab duplicates section-owned fallbacks`);
+      const thresholdText = await page.locator("#bias-threshold").evaluate((heading) => `${heading.nextElementSibling.textContent} ${heading.nextElementSibling.nextElementSibling.textContent} ${heading.nextElementSibling.nextElementSibling.nextElementSibling.textContent}`);
+      for (const marker of ["w=0", "负 w"]) assert.ok(thresholdText.includes(marker), `${label}: threshold section missing ${marker}`);
     }
     assert.deepEqual(errors, [], `${label}: runtime/request failures`);
     await page.close();

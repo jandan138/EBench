@@ -20,7 +20,7 @@
 
     function channels() {
       const rows = core.channelTrace();
-      stage.innerHTML = `<div class="agv-view"><div class="agv-view-head"><b>通道先得到 affine score</b><span>x=[2,-1] 的冻结通道计算</span></div><div class="agv-grid agv-channel-grid"><table><thead><tr><th>通道</th><th>z</th><th>ReLU(z)</th><th>GELU(z)</th></tr></thead><tbody>${rows.map((row) => `<tr><td>c${row.channel}</td><td class="agv-channel-z">${value(row.z)}</td><td class="agv-channel-relu">${value(row.relu)}</td><td class="agv-channel-gelu">${value(row.gelu)}</td></tr>`).join("")}</tbody></table><p class="agv-note">正负号不是“有用”或“无用”的标签；这些数值来自同一 affine 计算，不能给通道指定固定的人类语义。</p></div></div>`;
+      stage.innerHTML = `<div class="agv-view"><div class="agv-view-head"><b>通道先得到 affine score</b><span>x=[1,1] 的冻结通道计算</span></div><div class="agv-grid agv-channel-grid"><table><thead><tr><th>通道</th><th>z</th><th>ReLU(z)</th><th>GELU(z)</th></tr></thead><tbody>${rows.map((row) => `<tr><td>c${row.channel}</td><td class="agv-channel-z">${value(row.z)}</td><td class="agv-channel-relu">${value(row.relu)}</td><td class="agv-channel-gelu">${value(row.gelu)}</td></tr>`).join("")}</tbody></table><p class="agv-note">正负号不是“有用”或“无用”的标签；这些数值来自同一 affine 计算，不能给通道指定固定的人类语义。</p></div></div>`;
       announce("通道视图：四个 score 比较 ReLU 与 GELU。");
     }
 
