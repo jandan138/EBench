@@ -130,18 +130,27 @@
         <p>GELU 也能给出负输出：$GELU(-1)\approx-0.159$，再乘后层负权重 -2，会给后续和带来正贡献约 0.318。负权重和负激活的组合不等于“删除信息”。</p>
         <p>residual stream 可以旁路一条变换，但 residual stream 不等于整个 block 可逆，也不能保证信息永不损失。</p>
 
-        <div class="lab activation-gates-viz" data-widget="activation-gates-viz" aria-label="activation gates static trace">
+        <div class="lab activation-gates-viz activation-gates-static" data-widget="activation-gates-viz" aria-label="activation gates static trace">
           <div class="lab-h"><span class="lab-tag">Experiment</span><span class="lab-t">正负响应怎样经过门控</span></div>
           <div class="lab-body">
             <p class="agv-static-caption">四个视图复用纯计算，不为通道指定固定的人类语义。先看静态对照，再用控件改变输入。</p>
             <div class="agv-static-grid">
-              <table class="f25-mobile-stack"><thead><tr><th>通道 z</th><th>ReLU(z)</th><th>GELU(z)</th></tr></thead><tbody>
+              <table class="f25-mobile-stack agv-channel-table"><thead><tr><th scope="col">通道 z</th><th scope="col">ReLU(z)</th><th scope="col">GELU(z)</th></tr></thead><tbody>
                 <tr><td data-label="通道 z">2.100</td><td data-label="ReLU(z)">2.100</td><td data-label="GELU(z)">2.062</td></tr>
                 <tr><td data-label="通道 z">-0.700</td><td data-label="ReLU(z)">0.000</td><td data-label="GELU(z)">-0.169</td></tr>
                 <tr><td data-label="通道 z">1.300</td><td data-label="ReLU(z)">1.300</td><td data-label="GELU(z)">1.174</td></tr>
                 <tr><td data-label="通道 z">-3.200</td><td data-label="ReLU(z)">0.000</td><td data-label="GELU(z)">-0.002</td></tr>
               </tbody></table>
-              <div><p><b>阈值：</b>ReLU(x-3) 在 x=2、3、4 时是 0、0、1。w=0 时输入 x 不再移动边界；负 w 会反转一维不等式的方向。</p><p><b>配对：</b>ReLU(z)-ReLU(-z)=z；z=-2.500 时为 0.000-2.500=-2.500。这不保证每个模型都会使用这种配对。</p></div>
+              <div>
+                <table class="f25-mobile-stack agv-threshold-table" aria-label="ReLU(x-3) 阈值表"><thead><tr><th scope="col">x</th><th scope="col">ReLU(x-3)</th></tr></thead><tbody>
+                  <tr><td data-label="x">2</td><td data-label="ReLU(x-3)">0</td></tr>
+                  <tr><td data-label="x">3</td><td data-label="ReLU(x-3)">0</td></tr>
+                  <tr><td data-label="x">4</td><td data-label="ReLU(x-3)">1</td></tr>
+                </tbody></table>
+                <p><b>阈值：</b>w=0 时输入 x 不再移动边界；负 w 会反转一维不等式的方向。</p>
+                <p class="agv-pair-reconstruction">ReLU(z)-ReLU(-z)=z；z=-2.500 时为 0.000-2.500=-2.500。</p>
+                <p>这不保证每个模型都会使用这种配对。</p>
+              </div>
             </div>
             <div class="agv-static-traces"><p><b>相关 trace：</b>z -0.400 → -0.176 → 0.213 → 0.797 → 1.177，朝目标 1 上升。</p><p><b>无关 trace：</b>z 0.800 → 0.157 → 0.102 → 0.070 → 0.049，独立地向低响应移动。</p></div>
           </div>

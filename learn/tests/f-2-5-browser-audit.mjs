@@ -676,10 +676,27 @@ try {
     if (path === f25Path) {
       const fallback = await page.locator(".f25-noscript").textContent();
       for (const marker of ["Linear 1", "GELU", "Linear 2", "W1", "B1", "W2", "B2"]) assert.ok(fallback.includes(marker), `${label}: missing ${marker}`);
-      const activationStatic = await page.locator(".activation-gates-viz").textContent();
-      for (const marker of ["2.100", "-0.700", "1.300", "-3.200", "ReLU(x-3)", "ReLU(z)-ReLU(-z)=z", "相关", "无关", "w=0", "负 w"]) {
-        assert.ok(activationStatic.includes(marker), `${label}: activation static content missing ${marker}`);
-      }
+      const activationStatic = page.locator(".activation-gates-static");
+      assert.equal(await activationStatic.count(), 1, `${label}: activation static lab count`);
+      assert.deepEqual(await activationStatic.locator(".agv-channel-table tbody tr").evaluateAll((rows) => rows.map((row) => [...row.cells].map((cell) => cell.textContent.trim()))), [
+        ["2.100", "2.100", "2.062"],
+        ["-0.700", "0.000", "-0.169"],
+        ["1.300", "1.300", "1.174"],
+        ["-3.200", "0.000", "-0.002"],
+      ], `${label}: static derived channel ReLU/GELU cells`);
+      assert.deepEqual(await activationStatic.locator(".agv-threshold-table tbody tr").evaluateAll((rows) => rows.map((row) => [...row.cells].map((cell) => cell.textContent.trim()))), [
+        ["2", "0"],
+        ["3", "0"],
+        ["4", "1"],
+      ], `${label}: exact ReLU(x-3) threshold table`);
+      assert.match((await activationStatic.locator(".agv-pair-reconstruction").textContent()).trim(), /^ReLU\(z\)-ReLU\(-z\)=z；z=-2\.500 时为 0\.000-2\.500=-2\.500。$/,
+        `${label}: paired -2.500 reconstruction`);
+      assert.deepEqual(await activationStatic.locator(".agv-static-traces p").allTextContents(), [
+        "相关 trace：z -0.400 → -0.176 → 0.213 → 0.797 → 1.177，朝目标 1 上升。",
+        "无关 trace：z 0.800 → 0.157 → 0.102 → 0.070 → 0.049，独立地向低响应移动。",
+      ], `${label}: ordered relevant and irrelevant training traces`);
+      const activationStaticText = await activationStatic.textContent();
+      for (const marker of ["w=0", "负 w"]) assert.ok(activationStaticText.includes(marker), `${label}: activation static content missing ${marker}`);
     }
     assert.deepEqual(errors, [], `${label}: runtime/request failures`);
     await page.close();
