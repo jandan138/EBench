@@ -87,6 +87,34 @@
         <p><b>常见的 tanh 近似</b>可让实现避免直接计算 $\Phi$，但它近似的是精确定义：</p>
         <div class="math-block">$$\operatorname{GELU}_{\tanh}(x)\approx\frac{x}{2}\left[1+\tanh\!\left(\sqrt{\frac{2}{\pi}}\left(x+0.044715x^3\right)\right)\right]$$</div>
 
+        <div class="lab activation-gates-static" aria-label="激活门控静态对照">
+          <div class="lab-h"><span class="lab-tag">Experiment</span><span class="lab-t">正负响应怎样经过门控</span></div>
+          <div class="lab-body">
+            <table class="f25-mobile-stack agv-channel-table">
+              <thead><tr><th scope="col">通道 z</th><th scope="col">ReLU(z)</th><th scope="col">GELU(z)</th></tr></thead>
+              <tbody>
+                <tr><td data-label="通道 z">2.100</td><td data-label="ReLU(z)">2.100</td><td data-label="GELU(z)">2.062</td></tr>
+                <tr><td data-label="通道 z">-0.700</td><td data-label="ReLU(z)">0.000</td><td data-label="GELU(z)">-0.169</td></tr>
+                <tr><td data-label="通道 z">1.300</td><td data-label="ReLU(z)">1.300</td><td data-label="GELU(z)">1.174</td></tr>
+                <tr><td data-label="通道 z">-3.200</td><td data-label="ReLU(z)">0.000</td><td data-label="GELU(z)">-0.002</td></tr>
+              </tbody>
+            </table>
+            <table class="f25-mobile-stack agv-threshold-table" aria-label="ReLU(x-3) 阈值表">
+              <thead><tr><th scope="col">x</th><th scope="col">ReLU(x-3)</th></tr></thead>
+              <tbody>
+                <tr><td data-label="x">2</td><td data-label="ReLU(x-3)">0</td></tr>
+                <tr><td data-label="x">3</td><td data-label="ReLU(x-3)">0</td></tr>
+                <tr><td data-label="x">4</td><td data-label="ReLU(x-3)">1</td></tr>
+              </tbody>
+            </table>
+            <p class="agv-pair-reconstruction">ReLU(z)-ReLU(-z)=z；z=-2.500 时为 0.000-2.500=-2.500。</p>
+            <div class="agv-static-traces">
+              <p>相关 trace：z -0.400 → -0.176 → 0.213 → 0.797 → 1.177，朝目标 1 上升。</p>
+              <p>无关 trace：z 0.800 → 0.157 → 0.102 → 0.070 → 0.049，独立地向低响应移动。</p>
+            </div>
+          </div>
+        </div>
+
         <h2 id="why-nonlinearity">为什么中间需要非线性</h2>
         <p>两个连续 affine transform 没有 GELU 时可以合并：</p>
         <div class="math-block">$$W_*=W_1W_2$$</div>
