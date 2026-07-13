@@ -143,7 +143,7 @@ $$H^{\ell+1} = A^\ell + \operatorname{MLP}^\ell\!\left(\operatorname{LN}_2^\ell(
 
         <h2 id="recap" data-answers="15">带走这条可复述的链路</h2>
         <p>Attention 负责通信；MLP 负责每个位置的非线性计算；Residual 传递原表示并叠加更新；LayerNorm 稳定进入分支的数值。多个 Block 保持 $[B,n,d]$，反复更新 hidden state，任务头再把它读成 GPT、BERT、VLM 或 VLA 所需的输出。</p>
-        <p>想复习细节，可回到 <a href="f-2-5-linear-gelu-mlp.html#shared-mlp">F-2.5 shared MLP</a> 或 <a href="f-2-5-linear-gelu-mlp.html#why-nonlinearity">F-2.5 非线性解释</a>。</p>
+        <p>想复习细节，可回到 <a href="f-2-5-linear-gelu-mlp.html#preactivation">F-2.5 pre-activation</a>、<a href="f-2-5-linear-gelu-mlp.html#shared-mlp">F-2.5 shared MLP</a> 或 <a href="f-2-5-linear-gelu-mlp.html#why-nonlinearity">F-2.5 非线性解释</a>。</p>
         <div class="callout note">
           <div class="c-h">五篇一手资料</div>
           <ul>

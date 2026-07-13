@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { test } from "node:test";
+import vm from "node:vm";
 
 const chapterPath = new URL("../chapters/foundations/f-2-5-linear-gelu-mlp.html", import.meta.url);
 const chapter = existsSync(chapterPath) ? readFileSync(chapterPath, "utf8") : "";
@@ -9,6 +10,8 @@ const widgetPath = new URL("../assets/js/widgets/mlp-basics-viz.js", import.meta
 const cssPath = new URL("../assets/css/book.css", import.meta.url);
 const widgetSource = existsSync(widgetPath) ? readFileSync(widgetPath, "utf8") : "";
 const cssSource = readFileSync(cssPath, "utf8");
+const contentSource = readFileSync(new URL("../content.js", import.meta.url), "utf8");
+const f3Chapter = readFileSync(new URL("../chapters/foundations/f-3-transformer-block.html", import.meta.url), "utf8");
 const section = (id) => chapter.match(
   new RegExp(`<h2[^>]*id="${id}"[^>]*>[\\s\\S]*?(?=<h2|</article>)`),
 )?.[0].replace(/\s+/g, " ") || "";
@@ -148,4 +151,69 @@ test("F-2.5 static selectors remain section scoped", () => {
   for (const rule of cssSource.matchAll(/([^{}]+)\{/g)) {
     if (rule[1].includes(".f25-")) assert.match(rule[1], /body\[data-section="f-2-5"\] \.article/);
   }
+});
+
+test("F-2.5 activation gates have stable section-local contracts and answer coverage", () => {
+  const required = [
+    ["preactivation", ["pre-activation", "z=w^T x+b", "hidden state", "激活后的数值", "affine", "投影"]],
+    ["sign-is-not-meaning", ["不是", "有用", "无用", "符号", "学习到的方向", "sign flip"]],
+    ["bias-threshold", ["ReLU(x-3)", "x>3", "w^T x+b=0", "方向", "位置", "w=0", "负"]],
+    ["relu", ["ReLU(z)=max(0,z)", "分段非线性", "稀疏", "导数", "dead ReLU", "z=0", "Leaky-ReLU"]],
+    ["gelu", ["GELU(x)=x\\Phi(x)", "不是", "抽样", "负输出", "期望", "随机门"]],
+    ["training-gates", ["Loss", "反向传播", "不是人工", "-0.400", "0.213", "dL/dz", "dL/dw", "dL/db", "scalar regression", "x=1"]],
+    ["negative-information", ["ReLU(z)-ReLU(-z)=z", "residual stream", "负权重", "不等于", "+1", "-1", "GELU(-1)", "可逆"]],
+  ];
+  required.forEach(([id, markers]) => requireMarkers(id, markers));
+
+  const ids = [...chapter.matchAll(/<h2[^>]*id="([^"]+)"/g)].map((match) => match[1]);
+  const gateIds = required.map(([id]) => id);
+  assert.deepEqual(ids.filter((id) => gateIds.includes(id)), gateIds);
+  assert.ok(ids.indexOf("linear-boundaries") < ids.indexOf("preactivation"));
+  assert.ok(ids.indexOf("gelu") < ids.indexOf("negative-information"));
+  assert.ok(ids.indexOf("negative-information") < ids.indexOf("why-nonlinearity"));
+
+  const staticEnd = chapter.indexOf('id="negative-information"');
+  const widget = chapter.indexOf('data-widget="activation-gates-viz"');
+  assert.ok(widget > staticEnd, "activation-gates-viz must follow #negative-information");
+  assert.ok(widget < chapter.indexOf('id="why-nonlinearity"'), "activation-gates-viz must not split static gate sections");
+
+  const answers = [...chapter.matchAll(/data-answers="([^"]+)"/g)]
+    .flatMap((match) => match[1].split(","))
+    .map(Number)
+    .sort((a, b) => a - b);
+  assert.deepEqual(answers, Array.from({ length: 26 }, (_, index) => index + 1));
+  gateIds.forEach((id) => assert.match(chapter, new RegExp(`<h2[^>]*id="${id}"[^>]*data-answers="[^\"]+"`)));
+  for (let outcome = 10; outcome <= 17; outcome += 1) {
+    assert.equal((chapter.match(new RegExp(`data-check="outcome-${outcome}"`, "g")) || []).length, 1, `outcome-${outcome} must appear once`);
+  }
+});
+
+test("F-2.5 gate narrative keeps mathematical boundaries with their owning sections", () => {
+  const preactivation = section("preactivation");
+  ["score", "不是", "投影", "限制"].forEach((marker) => assert.ok(preactivation.includes(marker), `#preactivation missing ${marker}`));
+  const sign = section("sign-is-not-meaning");
+  ["翻转", "不等价", "feature"].forEach((marker) => assert.ok(sign.includes(marker), `#sign-is-not-meaning missing ${marker}`));
+  const relu = section("relu");
+  ["z<0", "z>0", "subgradient", "active", "Leaky-ReLU"].forEach((marker) => assert.ok(relu.includes(marker), `#relu missing ${marker}`));
+  const gelu = section("gelu");
+  ["期望", "Bernoulli", "不在运行时抽样", "f25-mobile-stack", "-2", "1.954"].forEach((marker) => assert.ok(gelu.includes(marker), `#gelu missing ${marker}`));
+  const training = section("training-gates");
+  ["相关", "无关", "低响应", "分布式", "损失", "间接"].forEach((marker) => assert.ok(training.includes(marker), `#training-gates missing ${marker}`));
+  const negative = section("negative-information");
+  ["paired", "bias", "第二个 Linear", "正贡献", "旁路", "不能保证"].forEach((marker) => assert.ok(negative.includes(marker), `#negative-information missing ${marker}`));
+});
+
+test("F-2.5 metadata and F-3 recap expose the new gate foundation exactly once", () => {
+  const sandbox = { window: {} };
+  vm.runInNewContext(contentSource, sandbox);
+  const entry = sandbox.window.EBOOK.parts.flatMap((part) => part.sections).find((item) => item.id === "f-2-5");
+  assert.equal(entry.title, "Linear、ReLU/GELU 与 MLP 从零开始");
+  ["relu", "pre-activation", "bias", "gate", "dead relu"].forEach((term) => {
+    assert.ok(entry.keywords.toLowerCase().includes(term), `missing metadata term ${term}`);
+  });
+
+  const recap = f3Chapter.match(/<h2[^>]*id="recap"[^>]*>[\s\S]*?(?=<h2|<\/article>)/)?.[0] || "";
+  const links = [...recap.matchAll(/href="f-2-5-linear-gelu-mlp\.html#preactivation"/g)];
+  assert.equal(links.length, 1, "F-3 needs exactly one #preactivation recap link");
+  assert.doesNotMatch(recap, /z=w\^T x\+b|ReLU\(z\)=max/, "F-3 recap must not repeat the gate derivation");
 });

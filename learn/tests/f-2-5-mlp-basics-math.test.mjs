@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import vm from "node:vm";
 
 const require = createRequire(import.meta.url);
 const corePath = new URL("../assets/js/widgets/mlp-basics-core.js", import.meta.url);
@@ -73,4 +74,73 @@ test("static GELU table values agree with the executable core", () => {
     .map((match) => ({ input: Number(match[1]), output: match[2] }));
   assert.deepEqual(rows.map(({ input }) => input), [-2, -1, 0, 1, 2]);
   assert.deepEqual(rows.map(({ output }) => output), rows.map(({ input }) => core.format(core.gelu(input))));
+});
+
+test("activation gate helpers expose frozen scalar math and threshold behavior", () => {
+  const core = require(coreFile);
+  assert.equal(core.relu(-0.7), 0);
+  assert.equal(core.relu(2.1), 2.1);
+  assert.ok(Math.abs(core.normalCdf(0) - 0.5) < 1e-8);
+  assert.ok(Math.abs(core.normalPdf(0) - 0.3989422804) < 1e-10);
+  assert.ok(Math.abs(core.geluDerivative(-0.4) - 0.197270) < 1e-6);
+  const boundary = core.gate(3, 1, -3);
+  const above = core.gate(3.1, 1, -3);
+  assert.deepEqual(boundary, { input: 3, weight: 1, bias: -3, z: 0, relu: 0, gelu: core.gelu(0) });
+  assert.ok(Math.abs(above.relu - 0.1) < 1e-12);
+  assert.ok(Object.isFrozen(boundary));
+  assert.equal(core.gate(0, 0, 2).z, 2, "w=0 keeps the bias threshold independent of input");
+  assert.equal(core.gate(2, -1, 3).z, 1, "negative weight reverses the threshold direction");
+  [-2.5, 0, 3].forEach((z) => {
+    const pair = core.pairedRelu(z);
+    assert.ok(Object.isFrozen(pair));
+    assert.ok(Math.abs(pair.reconstructed - z) < 1e-12);
+  });
+});
+
+test("channel trace derives frozen channel rows from the frozen affine fixture", () => {
+  const core = require(coreFile);
+  for (const value of [core.CHANNEL_INPUT, core.CHANNEL_W, ...core.CHANNEL_W, core.CHANNEL_B]) {
+    assert.ok(Object.isFrozen(value), "channel fixture must be deeply frozen");
+  }
+  const expected = core.affine(core.CHANNEL_INPUT, core.CHANNEL_W, core.CHANNEL_B);
+  const rows = core.channelTrace();
+  assert.ok(Object.isFrozen(rows));
+  rows.forEach((row) => assert.ok(Object.isFrozen(row)));
+  assert.deepEqual(rows.map((row) => row.z), [2.1, -0.7, 1.3, -3.2]);
+  assert.deepEqual(rows.map((row) => row.z), expected, "channel scores must be derived through affine from the exported fixture");
+});
+
+test("GELU training trace captures frozen pre-update gradients and correct directions", () => {
+  const core = require(coreFile);
+  const relevant = core.trainingTrace(-0.4, 0, 1, 5);
+  const irrelevant = core.trainingTrace(0.8, 0, 0, 5);
+  [relevant, irrelevant].forEach((trace) => {
+    assert.ok(Object.isFrozen(trace));
+    trace.forEach((row) => {
+      assert.ok(Object.isFrozen(row));
+      ["step", "input", "target", "learningRate", "weight", "bias", "z", "activation", "dLossDz", "dLossDw", "dLossDb"].forEach((key) => assert.ok(key in row, `missing ${key}`));
+    });
+  });
+  assert.deepEqual(relevant.map((row) => core.format(row.z)), ["-0.400", "-0.176", "0.213", "0.797", "1.177"]);
+  assert.deepEqual(irrelevant.map((row) => core.format(row.z)), ["0.800", "0.157", "0.102", "0.070", "0.049"]);
+  assert.ok(relevant[0].dLossDz < 0 && relevant[0].dLossDw < 0 && relevant[0].dLossDb < 0);
+  assert.ok(relevant[1].z > relevant[0].z);
+  assert.ok(irrelevant[0].dLossDz > 0 && irrelevant[0].dLossDw > 0 && irrelevant[0].dLossDb > 0);
+  assert.ok(irrelevant[1].z < irrelevant[0].z);
+  assert.equal(relevant[0].dLossDw, relevant[0].dLossDb, "x=1 is the scalar teaching toy equality");
+});
+
+test("activation-gate API is equivalent through CommonJS and browser UMD", () => {
+  const commonjs = require(coreFile);
+  const browser = { window: {} };
+  browser.window.window = browser.window;
+  vm.runInNewContext(readFileSync(corePath, "utf8"), browser);
+  const api = browser.window.EBMLPBasics;
+  ["relu", "normalCdf", "normalPdf", "geluDerivative", "gate", "pairedRelu", "channelTrace", "trainingTrace"].forEach((name) => {
+    assert.equal(typeof api[name], "function", `browser API missing ${name}`);
+    assert.equal(typeof commonjs[name], "function", `CommonJS API missing ${name}`);
+  });
+  assert.equal(api.gate(3.1, 1, -3).relu, commonjs.gate(3.1, 1, -3).relu);
+  assert.deepEqual(Array.from(api.channelTrace(), (row) => row.z), commonjs.channelTrace().map((row) => row.z));
+  assert.deepEqual(Array.from(api.trainingTrace(-0.4, 0, 1, 5), (row) => api.format(row.z)), commonjs.trainingTrace(-0.4, 0, 1, 5).map((row) => commonjs.format(row.z)));
 });
