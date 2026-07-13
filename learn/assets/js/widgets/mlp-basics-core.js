@@ -86,9 +86,12 @@
       const dLossDz = (activation - target) * geluDerivative(z);
       const dLossDw = input * dLossDz;
       const dLossDb = dLossDz;
-      rows.push(Object.freeze({ step, input, target, learningRate, weight, bias, z, activation, dLossDz, dLossDw, dLossDb }));
-      weight -= learningRate * dLossDw;
-      bias -= learningRate * dLossDb;
+      const nextWeight = weight - learningRate * dLossDw;
+      const nextBias = bias - learningRate * dLossDb;
+      const nextZ = input * nextWeight + nextBias;
+      rows.push(Object.freeze({ step, input, target, learningRate, weight, bias, z, activation, dLossDz, dLossDw, dLossDb, nextZ }));
+      weight = nextWeight;
+      bias = nextBias;
     }
     return Object.freeze(rows);
   }

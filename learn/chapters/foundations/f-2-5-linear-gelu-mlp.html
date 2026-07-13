@@ -118,24 +118,24 @@
         <p>下面是 scalar regression 教学 toy：输入 x=1，令 $a=GELU(z)$、$Loss=\frac12(a-target)^2$，学习率 0.5。完整的标量链式法则是 $dL/dz=(a-target)GELU'(z)$、$dL/dw=x*dL/dz$、$dL/db=dL/dz$。反向传播计算这些梯度；这不是人工为某个通道分配角色。因为只有本 toy 的 x=1，dL/dw 与 dL/db 才数值相等。</p>
         <p><b>相关样本，target=1</b></p>
         <table class="f25-mobile-stack" data-training-trace="relevant">
-          <thead><tr><th>step</th><th>z</th><th>GELU</th><th>dL/dz</th></tr></thead>
+          <thead><tr><th>step</th><th>z</th><th>GELU</th><th>dL/dz</th><th>dL/dw</th><th>dL/db</th><th>next z</th></tr></thead>
           <tbody>
-            <tr><td data-label="step">0</td><td data-label="z">-0.400</td><td data-label="GELU">-0.138</td><td data-label="dL/dz">-0.224</td></tr>
-            <tr><td data-label="step">1</td><td data-label="z">-0.176</td><td data-label="GELU">-0.076</td><td data-label="dL/dz">-0.389</td></tr>
-            <tr><td data-label="step">2</td><td data-label="z">0.213</td><td data-label="GELU">0.125</td><td data-label="dL/dz">-0.584</td></tr>
-            <tr><td data-label="step">3</td><td data-label="z">0.797</td><td data-label="GELU">0.628</td><td data-label="dL/dz">-0.379</td></tr>
-            <tr><td data-label="step">4</td><td data-label="z">1.177</td><td data-label="GELU">1.036</td><td data-label="dL/dz">0.040</td></tr>
+            <tr><td data-label="step">0</td><td data-label="z">-0.400</td><td data-label="GELU">-0.138</td><td data-label="dL/dz">-0.224</td><td data-label="dL/dw">-0.224</td><td data-label="dL/db">-0.224</td><td data-label="next z">-0.176</td></tr>
+            <tr><td data-label="step">1</td><td data-label="z">-0.176</td><td data-label="GELU">-0.076</td><td data-label="dL/dz">-0.389</td><td data-label="dL/dw">-0.389</td><td data-label="dL/db">-0.389</td><td data-label="next z">0.213</td></tr>
+            <tr><td data-label="step">2</td><td data-label="z">0.213</td><td data-label="GELU">0.125</td><td data-label="dL/dz">-0.584</td><td data-label="dL/dw">-0.584</td><td data-label="dL/db">-0.584</td><td data-label="next z">0.797</td></tr>
+            <tr><td data-label="step">3</td><td data-label="z">0.797</td><td data-label="GELU">0.628</td><td data-label="dL/dz">-0.379</td><td data-label="dL/dw">-0.379</td><td data-label="dL/db">-0.379</td><td data-label="next z">1.177</td></tr>
+            <tr><td data-label="step">4</td><td data-label="z">1.177</td><td data-label="GELU">1.036</td><td data-label="dL/dz">0.040</td><td data-label="dL/dw">0.040</td><td data-label="dL/db">0.040</td><td data-label="next z">1.137</td></tr>
           </tbody>
         </table>
         <p><b>无关样本，target=0</b></p>
         <table class="f25-mobile-stack" data-training-trace="irrelevant">
-          <thead><tr><th>step</th><th>z</th><th>GELU</th><th>dL/dz</th></tr></thead>
+          <thead><tr><th>step</th><th>z</th><th>GELU</th><th>dL/dz</th><th>dL/dw</th><th>dL/db</th><th>next z</th></tr></thead>
           <tbody>
-            <tr><td data-label="step">0</td><td data-label="z">0.800</td><td data-label="GELU">0.631</td><td data-label="dL/dz">0.643</td></tr>
-            <tr><td data-label="step">1</td><td data-label="z">0.157</td><td data-label="GELU">0.088</td><td data-label="dL/dz">0.055</td></tr>
-            <tr><td data-label="step">2</td><td data-label="z">0.102</td><td data-label="GELU">0.055</td><td data-label="dL/dz">0.032</td></tr>
-            <tr><td data-label="step">3</td><td data-label="z">0.070</td><td data-label="GELU">0.037</td><td data-label="dL/dz">0.020</td></tr>
-            <tr><td data-label="step">4</td><td data-label="z">0.049</td><td data-label="GELU">0.026</td><td data-label="dL/dz">0.014</td></tr>
+            <tr><td data-label="step">0</td><td data-label="z">0.800</td><td data-label="GELU">0.631</td><td data-label="dL/dz">0.643</td><td data-label="dL/dw">0.643</td><td data-label="dL/db">0.643</td><td data-label="next z">0.157</td></tr>
+            <tr><td data-label="step">1</td><td data-label="z">0.157</td><td data-label="GELU">0.088</td><td data-label="dL/dz">0.055</td><td data-label="dL/dw">0.055</td><td data-label="dL/db">0.055</td><td data-label="next z">0.102</td></tr>
+            <tr><td data-label="step">2</td><td data-label="z">0.102</td><td data-label="GELU">0.055</td><td data-label="dL/dz">0.032</td><td data-label="dL/dw">0.032</td><td data-label="dL/db">0.032</td><td data-label="next z">0.070</td></tr>
+            <tr><td data-label="step">3</td><td data-label="z">0.070</td><td data-label="GELU">0.037</td><td data-label="dL/dz">0.020</td><td data-label="dL/dw">0.020</td><td data-label="dL/db">0.020</td><td data-label="next z">0.049</td></tr>
+            <tr><td data-label="step">4</td><td data-label="z">0.049</td><td data-label="GELU">0.026</td><td data-label="dL/dz">0.014</td><td data-label="dL/dw">0.014</td><td data-label="dL/db">0.014</td><td data-label="next z">0.036</td></tr>
           </tbody>
         </table>
         <p>相关样本的 z 会提高；独立的无关样本会趋向低响应，却不必一定学成负 z。真实网络的损失只通过许多参数和样本间接塑造表示，feature 往往是分布式的，不能从这条 toy trace 推出单元的固定语义。</p>

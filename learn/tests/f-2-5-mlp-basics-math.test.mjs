@@ -133,7 +133,15 @@ test("both complete static training tables agree cell-for-cell with the core", (
   for (const [kind, trace] of Object.entries(fixtures)) {
     const table = chapter.match(new RegExp(`<table[^>]*data-training-trace="${kind}"[^>]*>[\\s\\S]*?<\\/table>`))?.[0] || "";
     const cells = [...table.matchAll(/<td[^>]*>([^<]+)<\/td>/g)].map((match) => match[1].trim());
-    const expected = trace.flatMap((row) => [String(row.step), core.format(row.z), core.format(row.activation), core.format(row.dLossDz)]);
+    const expected = trace.flatMap((row) => [
+      String(row.step),
+      core.format(row.z),
+      core.format(row.activation),
+      core.format(row.dLossDz),
+      core.format(row.dLossDw),
+      core.format(row.dLossDb),
+      core.format(row.nextZ),
+    ]);
     assert.deepEqual(cells, expected, `${kind} static training trace must derive from core formatting`);
   }
 });
@@ -146,16 +154,23 @@ test("GELU training trace captures frozen pre-update gradients and correct direc
     assert.ok(Object.isFrozen(trace));
     trace.forEach((row) => {
       assert.ok(Object.isFrozen(row));
-      ["step", "input", "target", "learningRate", "weight", "bias", "z", "activation", "dLossDz", "dLossDw", "dLossDb"].forEach((key) => assert.ok(key in row, `missing ${key}`));
+      ["step", "input", "target", "learningRate", "weight", "bias", "z", "activation", "dLossDz", "dLossDw", "dLossDb", "nextZ"].forEach((key) => assert.ok(key in row, `missing ${key}`));
     });
   });
   assert.deepEqual(relevant.map((row) => core.format(row.z)), ["-0.400", "-0.176", "0.213", "0.797", "1.177"]);
   assert.deepEqual(irrelevant.map((row) => core.format(row.z)), ["0.800", "0.157", "0.102", "0.070", "0.049"]);
+  assert.deepEqual(relevant.map((row) => core.format(row.nextZ)), ["-0.176", "0.213", "0.797", "1.177", "1.137"]);
+  assert.deepEqual(irrelevant.map((row) => core.format(row.nextZ)), ["0.157", "0.102", "0.070", "0.049", "0.036"]);
   assert.ok(relevant[0].dLossDz < 0 && relevant[0].dLossDw < 0 && relevant[0].dLossDb < 0);
   assert.ok(relevant[1].z > relevant[0].z);
   assert.ok(irrelevant[0].dLossDz > 0 && irrelevant[0].dLossDw > 0 && irrelevant[0].dLossDb > 0);
   assert.ok(irrelevant[1].z < irrelevant[0].z);
   assert.equal(relevant[0].dLossDw, relevant[0].dLossDb, "x=1 is the scalar teaching toy equality");
+  [relevant, irrelevant].forEach((trace) => trace.forEach((row) => {
+    const nextWeight = row.weight - row.learningRate * row.dLossDw;
+    const nextBias = row.bias - row.learningRate * row.dLossDb;
+    assert.equal(row.nextZ, row.input * nextWeight + nextBias, "next z must use the same simultaneous w/b update");
+  }));
 });
 
 test("activation-gate API is equivalent through CommonJS and browser UMD", () => {
