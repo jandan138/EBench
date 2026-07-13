@@ -225,3 +225,9 @@ test("F-2.5 metadata and F-3 recap expose the new gate foundation exactly once",
   assert.equal(links.length, 1, "F-3 needs exactly one #preactivation recap link");
   assert.doesNotMatch(recap, /z=w\^T x\+b|ReLU\(z\)=max/, "F-3 recap must not repeat the gate derivation");
 });
+
+test("F-2.5 recap directly links readers to the F-3 LayerNorm introduction", () => {
+  const recap = section("recap");
+  assert.match(recap, /<a href="f-3-transformer-block\.html#layernorm">[^<]*F-3[^<]*LayerNorm[^<]*<\/a>/);
+  assert.equal((recap.match(/f-3-transformer-block\.html#layernorm/g) || []).length, 1);
+});

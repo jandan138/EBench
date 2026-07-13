@@ -130,9 +130,21 @@
         <p>GELU 也能给出负输出：$GELU(-1)\approx-0.159$，再乘后层负权重 -2，会给后续和带来正贡献约 0.318。负权重和负激活的组合不等于“删除信息”。</p>
         <p>residual stream 可以旁路一条变换，但 residual stream 不等于整个 block 可逆，也不能保证信息永不损失。</p>
 
-        <div class="lab" data-widget="activation-gates-viz" aria-label="activation gates static trace">
-          <div class="lab-h"><span class="lab-tag">Trace</span><span class="lab-t">激活门控的静态对照</span></div>
-          <div class="lab-body"><p>先算 z，再比较 ReLU 与 GELU，最后由损失的梯度更新权重和 bias。</p></div>
+        <div class="lab activation-gates-viz" data-widget="activation-gates-viz" aria-label="activation gates static trace">
+          <div class="lab-h"><span class="lab-tag">Experiment</span><span class="lab-t">正负响应怎样经过门控</span></div>
+          <div class="lab-body">
+            <p class="agv-static-caption">四个视图复用纯计算，不为通道指定固定的人类语义。先看静态对照，再用控件改变输入。</p>
+            <div class="agv-static-grid">
+              <table class="f25-mobile-stack"><thead><tr><th>通道 z</th><th>ReLU(z)</th><th>GELU(z)</th></tr></thead><tbody>
+                <tr><td data-label="通道 z">2.100</td><td data-label="ReLU(z)">2.100</td><td data-label="GELU(z)">2.062</td></tr>
+                <tr><td data-label="通道 z">-0.700</td><td data-label="ReLU(z)">0.000</td><td data-label="GELU(z)">-0.169</td></tr>
+                <tr><td data-label="通道 z">1.300</td><td data-label="ReLU(z)">1.300</td><td data-label="GELU(z)">1.174</td></tr>
+                <tr><td data-label="通道 z">-3.200</td><td data-label="ReLU(z)">0.000</td><td data-label="GELU(z)">-0.002</td></tr>
+              </tbody></table>
+              <div><p><b>阈值：</b>ReLU(x-3) 在 x=2、3、4 时是 0、0、1。w=0 时输入 x 不再移动边界；负 w 会反转一维不等式的方向。</p><p><b>配对：</b>ReLU(z)-ReLU(-z)=z；z=-2.500 时为 0.000-2.500=-2.500。这不保证每个模型都会使用这种配对。</p></div>
+            </div>
+            <div class="agv-static-traces"><p><b>相关 trace：</b>z -0.400 → -0.176 → 0.213 → 0.797 → 1.177，朝目标 1 上升。</p><p><b>无关 trace：</b>z 0.800 → 0.157 → 0.102 → 0.070 → 0.049，独立地向低响应移动。</p></div>
+          </div>
         </div>
 
         <h2 id="why-nonlinearity">为什么中间需要非线性</h2>
@@ -167,6 +179,7 @@
         <div class="lab">
           <div class="lab-h"><span class="lab-tag">Experiment</span><span class="lab-t">一条向量怎样穿过 MLP</span></div>
           <div class="lab-body mlp-basics-viz" data-widget="mlp-basics-viz"></div>
+          <p class="f25-lab-caption">这是既有 MLP trace 的逐阶段实验；上方激活门控实验只比较通道、阈值、配对和冻结训练 trace。</p>
           <noscript><div class="f25-noscript"><b>完整静态 trace</b><p>输入 [2, -1] → Linear 1 [3, -2, 0.5, 1] → GELU [2.996, -0.046, 0.346, 0.841] → Linear 2 [0.614, 1.529]</p><p>参数：W1 [[1, 0, 0.5, 0.25], [-1, 2, 0.5, -0.50]]；B1 [0, 0, 0, 0]；W2 [[0.2, 0.4], [0.1, -0.2], [0.3, 0.2], [-0.1, 0.3]]；B2 [0, 0]。</p></div></noscript>
         </div>
 
@@ -206,7 +219,7 @@ F-3: Residual + LayerNorm 组装 Block</code></pre></div>
         </ol>
 
         <h2 id="recap">带着这条桥进入 F-3</h2>
-        <p>现在可以把 Attention 后的一条 contextual hidden state 看成 MLP 的输入：Linear 1 扩宽，GELU 加入非线性，Linear 2 回到宽度 $d$。下一节 <a href="f-3-transformer-block.html#block-scene">F-3</a> 再用 Residual 和 LayerNorm 把两种更新组装成可堆叠的 Transformer Block。</p>
+        <p>现在可以把 Attention 后的一条 contextual hidden state 看成 MLP 的输入：Linear 1 扩宽，GELU 加入非线性，Linear 2 回到宽度 $d$。下一节从 <a href="f-3-transformer-block.html#block-scene">F-3 Block 场景</a> 开始，再到 <a href="f-3-transformer-block.html#layernorm">F-3 LayerNorm</a> 了解它怎样与 Residual 一起把更新组装成可堆叠的 Transformer Block。</p>
       </article>
     </main>
     <aside class="rail" id="rail"></aside>
@@ -222,6 +235,7 @@ F-3: Residual + LayerNorm 组装 Block</code></pre></div>
   <script src="../../content.js"></script>
   <script src="../../assets/js/widgets/registry.js"></script>
   <script src="../../assets/js/widgets/mlp-basics-core.js"></script>
+  <script src="../../assets/js/widgets/activation-gates-viz.js"></script>
   <script src="../../assets/js/widgets/mlp-basics-viz.js"></script>
   <script src="../../assets/js/book.js"></script>
 </body>

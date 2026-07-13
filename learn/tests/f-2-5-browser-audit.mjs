@@ -133,6 +133,7 @@ async function collectLayoutFailures(page) {
   return page.evaluate(() => {
     const selectors = [
       "html", "body", "article", "[data-widget]", ".f25-stage", ".mbv-stage", ".mbv-band",
+      ".activation-gates-viz", ".agv-stage", ".agv-grid", ".agv-trace", ".agv-view-controls",
       ".tbv-panel", ".tbv-stages", ".tbv-op", "table", ".math-block", "code", "pre",
     ];
     const viewportWidth = document.documentElement.clientWidth;
@@ -295,12 +296,91 @@ async function activateNative(page, locator, key, selectedSelector, label) {
   await assertFocused(page, locator, `${label} ${key}`);
 }
 
+async function auditActivationGates(page, width, label) {
+  const api = await page.evaluate(() => ({
+    core: typeof window.EBMLPBasics,
+    channels: typeof window.EBMLPBasics?.channelTrace,
+  }));
+  assert.deepEqual(api, { core: "object", channels: "function" }, `${label}: activation core globals before mount`);
+
+  const widget = page.locator('[data-widget="activation-gates-viz"]');
+  assert.equal(await widget.getAttribute("data-mounted"), null, `${label}: activation widget mounted before intersection`);
+  await widget.scrollIntoViewIfNeeded();
+  await page.locator('[data-widget="activation-gates-viz"][data-mounted="1"]').waitFor();
+  const buttons = page.locator(".agv-view-controls > .agv-view-button");
+  const status = page.locator('.agv-status[role="status"]');
+  assert.equal(await buttons.count(), 4, `${label}: activation view count`);
+  assert.equal(await status.count(), 1, `${label}: activation status count`);
+  assert.equal(await page.locator('.agv-view-button[aria-pressed="true"]').count(), 1, `${label}: one activation view pressed`);
+
+  for (let index = 0; index < 4; index += 1) {
+    await buttons.nth(index).click();
+    await assertSelectedAndFocused(page, buttons.nth(index), '.agv-view-button[aria-pressed="true"]', `${label} activation view ${index}`);
+    await assertLayout(page, `${label} activation view ${index}`);
+    if ([1440, 320].includes(width)) {
+      await page.screenshot({ path: join(auditDir, `activation-${width}-${label.replace(/[^a-z0-9]+/gi, "-")}-view-${index}.png`), fullPage: true });
+    }
+  }
+  for (const [key, expected] of [["ArrowRight", 1], ["ArrowLeft", 3], ["Home", 0], ["End", 3]]) {
+    await buttons.nth(0).click();
+    await page.keyboard.press(key);
+    await assertSelectedAndFocused(page, buttons.nth(expected), '.agv-view-button[aria-pressed="true"]', `${label} activation ${key}`);
+  }
+  await activateNative(page, buttons.nth(1), "Enter", '.agv-view-button[aria-pressed="true"]', `${label} activation view`);
+  await activateNative(page, buttons.nth(2), "Space", '.agv-view-button[aria-pressed="true"]', `${label} activation view`);
+
+  await buttons.nth(0).click();
+  assert.deepEqual(await page.locator(".agv-channel-z").allTextContents(), ["2.100", "-0.700", "1.300", "-3.200"], `${label}: derived channel scores`);
+  assert.deepEqual(await page.locator(".agv-channel-relu").allTextContents(), ["2.100", "0.000", "1.300", "0.000"], `${label}: derived channel ReLU values`);
+  assert.deepEqual(await page.locator(".agv-channel-gelu").allTextContents(), ["2.062", "-0.169", "1.174", "-0.002"], `${label}: derived channel GELU values`);
+
+  await buttons.nth(1).click();
+  const input = page.getByRole("slider", { name: "输入 x", exact: true });
+  const weight = page.getByRole("slider", { name: "权重 w", exact: true });
+  const bias = page.getByRole("slider", { name: "偏置 b", exact: true });
+  await input.fill("4"); await weight.fill("1"); await bias.fill("-3");
+  assert.equal(await page.locator(".agv-threshold-z").textContent(), "1.000");
+  assert.equal(await page.locator(".agv-threshold-relu").textContent(), "1.000");
+  await input.fill("2");
+  assert.equal(await page.locator(".agv-threshold-z").textContent(), "-1.000");
+  assert.equal(await page.locator(".agv-threshold-relu").textContent(), "0.000");
+  await weight.fill("0");
+  assert.match(await page.locator(".agv-threshold-rule").textContent(), /w=0/);
+  await weight.fill("-1");
+  assert.match(await page.locator(".agv-threshold-rule").textContent(), /负 w/);
+
+  await buttons.nth(2).click();
+  const pair = page.getByRole("slider", { name: "配对输入 z", exact: true });
+  await pair.fill("-2.5");
+  assert.equal(await page.locator(".agv-pair-reconstructed").textContent(), "-2.500");
+  assert.match(await page.locator(".agv-pair-note").textContent(), /不保证/);
+
+  await buttons.nth(3).click();
+  const training = page.locator(".agv-training-choice");
+  await training.nth(0).click();
+  const relevant = (await page.locator(".agv-training-z").allTextContents()).map(Number);
+  assert.ok(relevant.every((value, index) => index === 0 || value > relevant[index - 1]), `${label}: relevant z must increase`);
+  await training.nth(1).click();
+  const irrelevant = (await page.locator(".agv-training-z").allTextContents()).map(Number);
+  assert.ok(irrelevant.every((value, index) => index === 0 || value < irrelevant[index - 1]), `${label}: irrelevant z must decrease`);
+  await assertStatusChange(status, () => training.nth(0).click(), /相关/, `${label} activation training status`);
+
+  if (width === 320) {
+    await assertGrid(page, ".agv-view-controls", 2, label);
+    await buttons.nth(1).click();
+    await assertGrid(page, ".agv-grid", 1, label);
+    await buttons.nth(3).click();
+    await assertGrid(page, ".agv-trace", 1, label);
+  }
+}
+
 async function auditF25(page, width, label) {
   await assertMath(page, label);
   await assertNoRawMath(page, label);
   const widget = page.locator('[data-widget="mlp-basics-viz"]');
   assert.equal(await widget.getAttribute("data-mounted"), null, `${label}: widget mounted before intersection`);
   await assertLayout(page, `${label} static`);
+  await auditActivationGates(page, width, label);
   await widget.scrollIntoViewIfNeeded();
   await page.locator('[data-widget="mlp-basics-viz"][data-mounted="1"]').waitFor();
   assert.equal(await page.locator(".mbv-view-controls > .mbv-view-button").count(), 4);
@@ -558,6 +638,35 @@ try {
     await context.close();
   }
 
+  const bridge = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  await prepareContext(bridge, baseOrigin, cacheDir);
+  const f3Bridge = await newAuditedPage(bridge, baseOrigin);
+  await assertHttp200(f3Bridge.page, `${base}${f3Path}#recap`);
+  const preactivationLink = f3Bridge.page.locator('a[href="f-2-5-linear-gelu-mlp.html#preactivation"]');
+  assert.equal(await preactivationLink.count(), 1, "F-3 recap preactivation link count");
+  await preactivationLink.click();
+  await f3Bridge.page.waitForLoadState("networkidle");
+  await f3Bridge.page.locator("#preactivation").waitFor();
+  assert.equal(new URL(f3Bridge.page.url()).hash, "#preactivation");
+  assert.equal(await f3Bridge.page.locator("#preactivation").count(), 1, "F-2.5 preactivation target must be unique");
+  assert.ok(await f3Bridge.page.locator("#preactivation").evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    const headerBottom = document.querySelector(".topbar").getBoundingClientRect().bottom;
+    return bounds.bottom > headerBottom && bounds.top < window.innerHeight;
+  }), "F-2.5 preactivation target is not visible below the header");
+  const f25Bridge = await newAuditedPage(bridge, baseOrigin);
+  await assertHttp200(f25Bridge.page, `${base}${f25Path}#recap`);
+  const layerNormLink = f25Bridge.page.locator('a[href="f-3-transformer-block.html#layernorm"]');
+  assert.equal(await layerNormLink.count(), 1, "F-2.5 LayerNorm recap link count");
+  await layerNormLink.click();
+  await f25Bridge.page.waitForLoadState("networkidle");
+  await f25Bridge.page.locator("#layernorm").waitFor();
+  assert.equal(new URL(f25Bridge.page.url()).hash, "#layernorm");
+  assert.ok(await f25Bridge.page.locator("#layernorm").evaluate((element) => element.getBoundingClientRect().top >= 50), "LayerNorm introduction hidden by sticky header");
+  assert.deepEqual(f3Bridge.errors, [], "F-3 recap bridge runtime/request failures");
+  assert.deepEqual(f25Bridge.errors, [], "F-2.5 LayerNorm bridge runtime/request failures");
+  await bridge.close();
+
   const noJs = await browser.newContext({ javaScriptEnabled: false, viewport: { width: 320, height: 720 } });
   await prepareContext(noJs, baseOrigin, cacheDir);
   for (const [path, label] of [[f25Path, "no-JS F-2.5"], [f3Path, "no-JS F-3"]]) {
@@ -567,6 +676,10 @@ try {
     if (path === f25Path) {
       const fallback = await page.locator(".f25-noscript").textContent();
       for (const marker of ["Linear 1", "GELU", "Linear 2", "W1", "B1", "W2", "B2"]) assert.ok(fallback.includes(marker), `${label}: missing ${marker}`);
+      const activationStatic = await page.locator(".activation-gates-viz").textContent();
+      for (const marker of ["2.100", "-0.700", "1.300", "-3.200", "ReLU(x-3)", "ReLU(z)-ReLU(-z)=z", "相关", "无关", "w=0", "负 w"]) {
+        assert.ok(activationStatic.includes(marker), `${label}: activation static content missing ${marker}`);
+      }
     }
     assert.deepEqual(errors, [], `${label}: runtime/request failures`);
     await page.close();
@@ -578,10 +691,12 @@ try {
   await eager.addInitScript(() => {
     delete window.IntersectionObserver;
     window.__mlpMountCalls = 0;
+    window.__activationMountCalls = 0;
     window.EBWidgets = new Proxy({}, {
       set(target, property, value) {
-        target[property] = property === "mlp-basics-viz" ? function (...args) {
-          window.__mlpMountCalls += 1;
+        target[property] = ["mlp-basics-viz", "activation-gates-viz"].includes(property) ? function (...args) {
+          if (property === "mlp-basics-viz") window.__mlpMountCalls += 1;
+          if (property === "activation-gates-viz") window.__activationMountCalls += 1;
           return value(...args);
         } : value;
         return true;
@@ -591,7 +706,9 @@ try {
   const eagerAudit = await newAuditedPage(eager, baseOrigin);
   await assertHttp200(eagerAudit.page, `${base}${f25Path}`);
   await eagerAudit.page.locator('[data-widget="mlp-basics-viz"][data-mounted="1"]').waitFor();
+  await eagerAudit.page.locator('[data-widget="activation-gates-viz"][data-mounted="1"]').waitFor();
   assert.equal(await eagerAudit.page.evaluate(() => window.__mlpMountCalls), 1, "eager mount count after load");
+  assert.equal(await eagerAudit.page.evaluate(() => window.__activationMountCalls), 1, "eager activation mount count after load");
   assert.equal(await eagerAudit.page.locator(".mbv-view-controls").count(), 1, "eager controls after load");
   await assertMath(eagerAudit.page, "eager F-2.5");
   await assertLayout(eagerAudit.page, "eager F-2.5");
@@ -600,6 +717,7 @@ try {
   await eagerAudit.page.evaluate(() => scrollTo(0, 0));
   await eagerAudit.page.locator('[data-widget="mlp-basics-viz"]').scrollIntoViewIfNeeded();
   assert.equal(await eagerAudit.page.evaluate(() => window.__mlpMountCalls), 1, "eager widget mounted again after re-entry");
+  assert.equal(await eagerAudit.page.evaluate(() => window.__activationMountCalls), 1, "eager activation widget mounted again after re-entry");
   assert.equal(await eagerAudit.page.locator('.mbv-view-controls[data-audit-identity="eager-original"]').count(), 1, "eager controls replaced after re-entry");
   assert.deepEqual(eagerAudit.errors, [], "eager F-2.5 runtime/request failures");
   await eager.close();
