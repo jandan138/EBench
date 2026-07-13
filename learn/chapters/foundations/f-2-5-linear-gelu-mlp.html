@@ -126,7 +126,7 @@
         <p>相关样本的 z 会提高；独立的无关样本会趋向低响应，却不必一定学成负 z。真实网络的损失只通过许多参数和样本间接塑造表示，feature 往往是分布式的，不能从这条 toy trace 推出单元的固定语义。</p>
 
         <h2 id="negative-information" data-answers="23,24,25,26">负信息怎样继续流动</h2>
-        <p>成对的 ReLU 可以保留符号：取相同 bias 的 paired 权重 +1、-1，第二个 Linear 的系数也取 +1、-1，则 $ReLU(z)-ReLU(-z)=z$。这不是说每个模型都会这样配对，只说明 ReLU 后仍可重构这条标量信息。</p>
+        <p>成对的 ReLU 可以保留符号：先令 $z=w^T x+b$。相反的 paired 分支使用权重 $-w$ 和 bias $-b$，所以 $(-w)^T x+(-b)=-z$；下游第二个 Linear 再用 +1、-1，得到 $ReLU(z)-ReLU(-z)=z$。这不是说每个模型都会这样配对，只说明 ReLU 后仍可重构这条标量信息。</p>
         <p>GELU 也能给出负输出：$GELU(-1)\approx-0.159$，再乘后层负权重 -2，会给后续和带来正贡献约 0.318。负权重和负激活的组合不等于“删除信息”。</p>
         <p>residual stream 可以旁路一条变换，但 residual stream 不等于整个 block 可逆，也不能保证信息永不损失。</p>
 

@@ -99,15 +99,24 @@ test("activation gate helpers expose frozen scalar math and threshold behavior",
 
 test("channel trace derives frozen channel rows from the frozen affine fixture", () => {
   const core = require(coreFile);
+  const source = readFileSync(corePath, "utf8");
+  const implementation = source.match(/function channelTrace\(\) \{([\s\S]*?)\n  \}/)?.[1] || "";
   for (const value of [core.CHANNEL_INPUT, core.CHANNEL_W, ...core.CHANNEL_W, core.CHANNEL_B]) {
     assert.ok(Object.isFrozen(value), "channel fixture must be deeply frozen");
   }
+  assert.match(implementation, /affine\(CHANNEL_INPUT, CHANNEL_W, CHANNEL_B\)/, "channelTrace must derive scores through the shared affine helper and frozen fixture");
+  assert.doesNotMatch(implementation, /\[\s*2\.1\s*,\s*-0\.7\s*,\s*1\.3\s*,\s*-3\.2\s*\]/, "channelTrace must not duplicate literal scores");
   const expected = core.affine(core.CHANNEL_INPUT, core.CHANNEL_W, core.CHANNEL_B);
   const rows = core.channelTrace();
   assert.ok(Object.isFrozen(rows));
   rows.forEach((row) => assert.ok(Object.isFrozen(row)));
   assert.deepEqual(rows.map((row) => row.z), [2.1, -0.7, 1.3, -3.2]);
   assert.deepEqual(rows.map((row) => row.z), expected, "channel scores must be derived through affine from the exported fixture");
+  rows.forEach((row, channel) => {
+    assert.equal(row.input, core.CHANNEL_INPUT, "channel rows must retain the frozen input provenance");
+    assert.deepEqual(row.weight, core.CHANNEL_W.map((weights) => weights[channel]));
+    assert.equal(row.bias, core.CHANNEL_B[channel]);
+  });
 });
 
 test("GELU training trace captures frozen pre-update gradients and correct directions", () => {

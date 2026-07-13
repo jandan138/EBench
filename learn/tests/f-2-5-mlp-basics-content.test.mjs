@@ -203,6 +203,14 @@ test("F-2.5 gate narrative keeps mathematical boundaries with their owning secti
   ["paired", "bias", "第二个 Linear", "正贡献", "旁路", "不能保证"].forEach((marker) => assert.ok(negative.includes(marker), `#negative-information missing ${marker}`));
 });
 
+test("F-2.5 paired-ReLU explanation derives the opposite branch with a negative bias", () => {
+  const negative = section("negative-information");
+  assert.match(negative, /z=w\^T x\+b/);
+  assert.match(negative, /\(-w\)\^T x\+\(-b\)=-z/);
+  assert.match(negative, /下游.*\+1、-1/);
+  assert.doesNotMatch(negative, /相同 bias/);
+});
+
 test("F-2.5 metadata and F-3 recap expose the new gate foundation exactly once", () => {
   const sandbox = { window: {} };
   vm.runInNewContext(contentSource, sandbox);
