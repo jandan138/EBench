@@ -36,6 +36,11 @@ test("F-3 keeps old MLP fragments immediately before the visible MLP section", (
 
 test("F-3 recap exposes the corresponding F-2.5 sections", () => {
   const recap = section("recap");
+  assert.match(
+    recap,
+    /<a href="f-2-25-multi-head-attention\.html#output-projection">[^<]+<\/a>/,
+    "F-2.25 output-projection link missing",
+  );
   [
     ["shared-mlp", "F-2.5 shared MLP"],
     ["why-nonlinearity", "F-2.5 nonlinearity"],
@@ -60,7 +65,9 @@ test("F-3 opens with a contextual scene and formula-free four-role mainline", ()
 
 test("F-3 preserves concise bridge semantics at stable anchors", () => {
   const attention = section("attention-params");
-  assert.ok(attention.includes("W_O"));
+  ["W_O", "concat", "f-2-25-multi-head-attention.html#output-projection"].forEach((marker) => {
+    assert.ok(attention.includes(marker), `#attention-params missing ${marker}`);
+  });
   assert.match(attention, /回到.*宽度.*d/);
 
   const mlp = section("mlp");

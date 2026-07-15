@@ -25,7 +25,7 @@
       <article class="article">
         <div class="eyebrow">Part F · Foundations · f-3</div>
         <h1>Transformer Block 从零开始（MLP / Residual / LayerNorm）</h1>
-        <p class="lede">F-2 解释 Attention 怎样收集上下文，F-2.5 解释一条向量怎样经过 Linear、GELU 与 MLP 继续加工。本节把它们放回一个可堆叠的 Block：通信、逐位置计算、残差传递与归一化共同更新 hidden state。</p>
+        <p class="lede">F-2 解释单头 Attention 怎样收集上下文，F-2.25 解释多个 head 怎样 concat 并经 $W_O$ 回到模型宽度，F-2.5 解释一条向量怎样经过 Linear、GELU 与 MLP 继续加工。本节把它们放回一个可堆叠的 Block：通信、逐位置计算、残差传递与归一化共同更新 hidden state。</p>
 
         <h2 id="block-scene">先回到“她 / 小红”的一条 contextual state</h2>
         <p>Attention 已经让“小红”的信息来到“她”的位置。现在“她”的 contextual hidden state 不再只是这个字本身，而是一条带着当前上下文的向量；它还要经过逐位置计算，成为下一步可继续传递的状态。</p>
@@ -43,7 +43,7 @@
         <p>“通信、计算、传递、稳定”是理解分工的捷径，不是绝对能力边界。整个 batch 中有 $B$ 条序列、每条有 $n$ 个位置、每个位置宽度为 $d$；Block 不改变这三个轴。</p>
 
         <h2 id="attention-params" data-answers="1">Attention 的短回顾：W_O 回到宽度 d</h2>
-        <p>F-2 的 Attention 先在可见位置之间通信。各 head 的结果随后经过 $W_O$ 混合并<b>回到模型宽度 d</b>，因此可以和 residual stream 相加。这里不重做 Q/K/V 推导。</p>
+        <p><a href="f-2-25-multi-head-attention.html#output-projection">F-2.25</a> 已经推导了完整的 multi-head Attention：各 head 的结果先 <code>concat</code>，再经过 $W_O$ 线性混合并<b>回到模型宽度 d</b>，因此可以和 residual stream 相加。这里不重做 Q/K/V 或多头推导。</p>
 
         <a id="shared-mlp" aria-hidden="true" style="display:block;height:0;overflow:hidden;scroll-margin-top:5rem"></a>
         <a id="mlp-expressivity" aria-hidden="true" style="display:block;height:0;overflow:hidden;scroll-margin-top:5rem"></a>
@@ -143,7 +143,7 @@ $$H^{\ell+1} = A^\ell + \operatorname{MLP}^\ell\!\left(\operatorname{LN}_2^\ell(
 
         <h2 id="recap" data-answers="15">带走这条可复述的链路</h2>
         <p>Attention 负责通信；MLP 负责每个位置的非线性计算；Residual 传递原表示并叠加更新；LayerNorm 稳定进入分支的数值。多个 Block 保持 $[B,n,d]$，反复更新 hidden state，任务头再把它读成 GPT、BERT、VLM 或 VLA 所需的输出。</p>
-        <p>想复习细节，可回到 <a href="f-2-5-linear-gelu-mlp.html#preactivation">F-2.5 pre-activation</a>、<a href="f-2-5-linear-gelu-mlp.html#shared-mlp">F-2.5 shared MLP</a> 或 <a href="f-2-5-linear-gelu-mlp.html#why-nonlinearity">F-2.5 非线性解释</a>。</p>
+        <p>想复习细节，可先回到 <a href="f-2-25-multi-head-attention.html#output-projection">F-2.25 的 concat 与 $W_O$</a>，再看 <a href="f-2-5-linear-gelu-mlp.html#preactivation">F-2.5 pre-activation</a>、<a href="f-2-5-linear-gelu-mlp.html#shared-mlp">F-2.5 shared MLP</a> 或 <a href="f-2-5-linear-gelu-mlp.html#why-nonlinearity">F-2.5 非线性解释</a>。</p>
         <div class="callout note">
           <div class="c-h">五篇一手资料</div>
           <ul>

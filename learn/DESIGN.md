@@ -27,7 +27,7 @@
 
 ## 2. 信息架构（章节）
 
-Part F（基础补完） + 10 个 Part + Appendix，共 61 节。详见 `content.js`（导航单一真相源）。
+Part F（基础补完） + 10 个 Part + Appendix，共 63 节。详见 `content.js`（导航单一真相源）。
 
 - **Part F 基础**：Transformer、Attention、Token、回归、CE、Gym、概率分布等核心直觉与数学（可跳读，为后续 Part 提供共同语言）
 - **Part 0 序章**：why EBench / repo constellation / 怎么读这本书

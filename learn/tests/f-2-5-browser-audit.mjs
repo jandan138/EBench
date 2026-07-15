@@ -17,6 +17,7 @@ const sizes = [[1440, 900], [834, 1112], [390, 844], [320, 720]];
 const themes = ["light", "dark"];
 const mime = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".woff2": "font/woff2" };
 const f25Path = "/chapters/foundations/f-2-5-linear-gelu-mlp.html";
+const f225Path = "/chapters/foundations/f-2-25-multi-head-attention.html";
 const f3Path = "/chapters/foundations/f-3-transformer-block.html";
 let server;
 let browser;
@@ -496,6 +497,20 @@ async function auditF3(page, width, label) {
   }
 }
 
+async function auditF225(page, width, label) {
+  await assertMath(page, label);
+  await assertNoRawMath(page, label);
+  await assertLayout(page, `${label} static`);
+  for (const selector of [".mha-coordinate-grid", ".mha-parallel-flow", ".mha-head-grid", ".mha-shape-ledger", ".mha-gpu-code"]) {
+    assert.ok(await page.locator(selector).count() >= 1, `${label}: missing ${selector}`);
+  }
+  if (width === 320) {
+    for (const selector of [".mha-coordinate-grid", ".mha-parallel-flow", ".mha-head-grid"]) {
+      await assertGrid(page, selector, 1, label);
+    }
+  }
+}
+
 async function newAuditedPage(context, baseOrigin) {
   const page = await context.newPage();
   const requests = [];
@@ -573,6 +588,13 @@ try {
       const context = await browser.newContext({ viewport: { width, height }, ignoreHTTPSErrors: true });
       await prepareContext(context, baseOrigin, cacheDir);
       await context.addInitScript((value) => localStorage.setItem("ebook-theme", value), theme);
+
+      const f225 = await newAuditedPage(context, baseOrigin);
+      await assertHttp200(f225.page, `${base}${f225Path}`);
+      await auditF225(f225.page, width, `F-2.25 ${width}x${height} ${theme}`);
+      await f225.page.screenshot({ path: join(auditDir, `f225-${width}x${height}-${theme}.png`), fullPage: true });
+      assert.deepEqual(f225.errors, [], `F-2.25 ${width}x${height} ${theme} runtime/request failures`);
+      await f225.page.close();
 
       const f25 = await newAuditedPage(context, baseOrigin);
       await assertHttp200(f25.page, `${base}${f25Path}`);
@@ -669,7 +691,7 @@ try {
 
   const noJs = await browser.newContext({ javaScriptEnabled: false, viewport: { width: 320, height: 720 } });
   await prepareContext(noJs, baseOrigin, cacheDir);
-  for (const [path, label] of [[f25Path, "no-JS F-2.5"], [f3Path, "no-JS F-3"]]) {
+  for (const [path, label] of [[f225Path, "no-JS F-2.25"], [f25Path, "no-JS F-2.5"], [f3Path, "no-JS F-3"]]) {
     const { page, errors } = await newAuditedPage(noJs, baseOrigin);
     await assertHttp200(page, `${base}${path}`);
     await assertLayout(page, label);
@@ -757,7 +779,7 @@ try {
   assert.deepEqual(eagerAudit.errors, [], "eager F-2.5 runtime/request failures");
   await eager.close();
 
-  console.log(`F-2.5/F-3 browser audit passed; screenshots: ${auditDir}; KaTeX: ${cacheDir ? `cache ${cacheDir}` : "network"}`);
+  console.log(`F-2.25/F-2.5/F-3 browser audit passed; screenshots: ${auditDir}; KaTeX: ${cacheDir ? `cache ${cacheDir}` : "network"}`);
 } finally {
   if (browser) await browser.close();
   if (server) await new Promise((resolve) => server.close(resolve));

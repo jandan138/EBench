@@ -23,15 +23,17 @@ const resolveReference = (sourceFile, reference) => {
 
 const isLocal = (reference) => !/^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(reference);
 
-test("formal navigation registers the unique F-2 -> F-2.5 -> F-3 path", () => {
-  assert.equal(flat.length, 62);
+test("formal navigation registers the unique F-2 -> F-2.25 -> F-2.5 -> F-3 path", () => {
+  assert.equal(flat.length, 63);
   assert.equal(new Set(flat.map((section) => section.id)).size, flat.length);
   assert.equal(new Set(flat.map((section) => section.file)).size, flat.length);
   flat.forEach((section) => assert.ok(existsSync(resolve(learnRoot, section.file)), `missing registered file ${section.file}`));
   const f2 = flat.findIndex((section) => section.id === "f-2");
+  const f225 = flat.findIndex((section) => section.id === "f-2-25");
   const f25 = flat.findIndex((section) => section.id === "f-2-5");
   const f3 = flat.findIndex((section) => section.id === "f-3");
-  assert.equal(f2 + 1, f25);
+  assert.equal(f2 + 1, f225);
+  assert.equal(f225 + 1, f25);
   assert.equal(f25 + 1, f3);
 });
 
@@ -57,15 +59,21 @@ test("navigation parsing accepts single-quoted and double-quoted local attribute
   assert.deepEqual(references(fixture), ["fixtures/single.html#single", "fixtures/double.svg"]);
 });
 
-test("F-2 routes prerequisites through F-2.5 without changing F-3 deep links", () => {
+test("F-2 routes the attention output projection through F-2.25 before F-2.5", () => {
   const f2 = readFileSync(resolve(learnRoot, "chapters/foundations/f-2-attention.html"), "utf8");
-  assert.match(f2, /href="f-2-5-linear-gelu-mlp\.html#start"/);
-  ["attention-params", "residual-ln", "full-flow"].forEach((fragment) => {
+  ["start", "output-projection"].forEach((fragment) => {
+    assert.match(f2, new RegExp(`href="f-2-25-multi-head-attention\\.html#${fragment}"`));
+  });
+  ["residual-ln", "full-flow"].forEach((fragment) => {
     assert.match(f2, new RegExp(`href="f-3-transformer-block\\.html#${fragment}"`));
   });
 });
 
-test("F-3 bridges its MLP recap back to the F-2.5 trace", () => {
+test("F-2.25 bridges one-head Attention to F-2.5, and F-3 links back to both prerequisites", () => {
+  const f225 = readFileSync(resolve(learnRoot, "chapters/foundations/f-2-25-multi-head-attention.html"), "utf8");
+  assert.match(f225, /href="f-2-5-linear-gelu-mlp\.html#start"/);
+
   const f3 = readFileSync(resolve(learnRoot, "chapters/foundations/f-3-transformer-block.html"), "utf8");
   assert.match(f3, /href="f-2-5-linear-gelu-mlp\.html#mlp-trace"/);
+  assert.match(f3, /href="f-2-25-multi-head-attention\.html#output-projection"/);
 });

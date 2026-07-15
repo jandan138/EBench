@@ -17,6 +17,8 @@ window.EBOOK = {
           keywords: "transformer rnn attention 为什么 transformer 序列模型 并行计算 token vector shape nxd vla vlm llm long sequence self-attention representation hidden state 拟人化 token自己 圆桌会议 排队传话" },
         { id: "f-2", title: "Attention 从零开始（Q/K/V 直觉）", file: "chapters/foundations/f-2-attention.html",
           keywords: "attention query key value qkv q k v wq wk wv self-attention dot product scaled dot-product sqrt(d_k) softmax qk^t row-wise value aggregation hidden state score attention weight mask causal mask bidirectional mask attention matrix 自注意力 因果掩码 双向掩码 点积 缩放 形状" },
+        { id: "f-2-25", title: "Multi-Head Attention 从零开始（head / concat / W_O）", file: "chapters/foundations/f-2-25-multi-head-attention.html",
+          keywords: "multi-head attention mha head heads concat w_o output projection d_model d_head tensor shape gpu batch matmul reshape transpose mask self-attention mqa gqa 多头注意力 头 拼接 输出投影 形状 并行" },
         { id: "f-2-5", title: "Linear、ReLU/GELU 与 MLP 从零开始", file: "chapters/foundations/f-2-5-linear-gelu-mlp.html",
           keywords: "linear gelu relu pre-activation bias gate dead relu mlp ffn weight activation function hidden state d_ff affine nonlinearity 参数共享" },
         { id: "f-3", title: "Transformer Block 从零开始（MLP / Residual / LayerNorm）", file: "chapters/foundations/f-3-transformer-block.html",
