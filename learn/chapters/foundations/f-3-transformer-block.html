@@ -150,6 +150,7 @@ x → 子层 F(x) ──┘</code></pre></div>
 
         <h2 id="recap" data-answers="15">带走这一条连续主线</h2>
         <p>Attention 负责通信，MLP 负责逐位置计算，Residual 保留并传递当前表示再叠加更新，LayerNorm 稳定进入分支的数值。一个 Block 用两次“规范化 → 分支 → 加回”把 <code>[B,n,d]</code> 更新成新的同 shape hidden states；堆叠多个 Block 后，任务头再把它读成 GPT、BERT、VLM 或 VLA 所需的输出。</p>
+        <p>这一章故意把 <code>H</code> 当作已经排好的向量序列。下一章不是倒回去重讲 Transformer，而是只退到第一个 Block 之前：解释 VLA 里的文字、图像、状态怎样变成这些 <code>[B,n,d]</code> 行。继续读 <a href="f-4-everything-is-token.html#vla-input-bridge">F-4：给抽象 hidden state 找真实输入来源</a>。</p>
         <p>想复习细节，可回到 <a href="f-2-25-multi-head-attention.html#output-projection">F-2.25 的 concat 与 W<sub>O</sub></a>、<a href="f-2-5-linear-gelu-mlp.html#mlp-trace">F-2.5 的完整 MLP trace</a>，或 <a href="f-2-6-activation-gates.html#preactivation">F-2.6 的 pre-activation 与门控</a>。</p>
         <div class="callout note">
           <div class="c-h">五篇一手资料</div>

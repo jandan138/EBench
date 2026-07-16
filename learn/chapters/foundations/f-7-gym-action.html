@@ -28,56 +28,65 @@
         <p class="lede">前面讲了模型内部的 token、loss 和概率。现在回到机器人世界：模型不是在真空里输出数字，它要和环境按固定契约来回交换 observation 与 action。Gym 的 reset/step 心智模型，是理解 EBench EvalClient 的最低门槛。</p>
 
         <h2 id="loop">最小循环：reset 拿第一帧，step 送动作</h2>
-        <p>Gym 风格环境的核心很小：先 reset，拿到第一帧 observation；然后反复让模型根据 observation 产生 action，再把 action 交给环境 step。</p>
-        <div class="code" data-lang="python"><div class="code-h"><span class="fn">Gym-style loop</span><button class="cp">复制</button></div><pre><code>obs = env.reset()
-done = False
+        <p>先只记两个名词：<b>observation</b> 是环境交给策略的当前信息，<b>action</b> 是策略交还给环境的控制命令。Gymnasium 风格环境的核心很小：reset 拿第一帧，再反复“看 observation → 算 action → step”。</p>
+        <div class="code" data-lang="python"><div class="code-h"><span class="fn">Modern Gymnasium mental model</span><button class="cp">复制</button></div><pre><code>obs, info = env.reset()
+episode_done = False
 
-while not done:
+while not episode_done:
     action = policy(obs)
-    obs, reward, done, info = env.step(action)</code></pre></div>
-        <p>这段代码的重点不是 Python 语法，而是接口边界：环境不管你的模型里面是 Transformer、Diffusion 还是手写规则；模型也不需要知道仿真器内部怎么跑物理。双方只靠 observation 和 action 对话。</p>
+    obs, reward, terminated, truncated, info = env.step(action)
+    episode_done = terminated or truncated</code></pre></div>
+        <p><code>terminated</code> 表示任务按自身规则到达终止状态，例如成功或失败；<code>truncated</code> 表示时间上限等外部截断。二者都是<b>一个 episode</b> 的边界。代码重点不是 Python 语法，而是接口边界：环境不管模型内部是 Transformer、Diffusion 还是手写规则；模型也不需要知道仿真器如何跑物理。双方只靠 observation 和 action 对话。</p>
 
         <h2 id="evalclient">EBench 的 EvalClient 是同一件事的 client-server 版本</h2>
-        <p>EBench 把环境放在 server 侧，把你的模型放在 client 侧，所以接口长得略有不同，但心智模型一样：</p>
-        <div class="code" data-lang="python"><div class="code-h"><span class="fn">EvalClient loop mental model</span><button class="cp">复制</button></div><pre><code>client = EvalClient(base_url=endpoint, worker_ids=["0"], run_id=run_id)
-obs = client.reset()
+        <p>EBench 把环境放在 server 侧，把你的模型放在 client 侧。先看不带真实字段的同构关系：</p>
+        <div class="code" data-lang="python"><div class="code-h"><span class="fn">Client-server mental model</span><button class="cp">复制</button></div><pre><code>observations = client.reset()
+eval_finished = False
 
-while True:
-    if obs["0"]["obs"]["reset"]:
-        model.reset()
+while not eval_finished:
+    worker_obs = select_one_worker(observations)
+    if worker_obs["reset"]:
+        policy.reset()
 
-    action = model.get_action(obs["0"]["obs"])
-    obs, eval_finished = client.step(action)
-
-    if eval_finished:
-        break
-
-client.close()</code></pre></div>
-        <p>后文 <a href="../04-engine/4-2-evalclient.html">4-2</a> 会细拆真实字段。Part F 里你只需要先记住：EvalClient 本质上就是把 Gym 的 reset/step 搬到网络和多 worker 评测里。</p>
+    action_payload = policy(worker_obs)
+    observations, eval_finished = client.step(action_payload)</code></pre></div>
+        <p>这里有三个不同层次的边界：Gymnasium 的 <code>terminated/truncated</code> 是一个 episode 的结束；<code>worker_obs["reset"]</code> 是 EBench 通知“这个 worker 开始新 episode”，此时策略应清缓存；<code>eval_finished</code> 是 client 级整段评测完成。它们<b>不是</b>同一种信号。</p>
+        <div class="callout note">
+          <div class="c-h">再看真实字段，但先只认名字</div>
+          <p>真实代码会用单个 <code>worker_id</code> 索引 observation，并把 action 按 worker 包装；构造 client 时还需要 endpoint、token、run_id 和 worker_ids。概念上可写成 <code>worker_obs = obs[worker_id]["obs"]</code>，再调用 <code>client.step({worker_id: action_payload})</code>。字段形状和 step/chunk 模式留给 <a href="../04-engine/4-2-evalclient.html">4-2</a> 与 <a href="../04-engine/4-4-chunk-step.html">4-4</a>。</p>
+        </div>
 
         <h2 id="obs-action">Observation 是条件，Action 是承诺</h2>
         <p>模型每一步都在学一个条件映射：</p>
         <div class="math-block">$$\pi: o_t \mapsto a_t \quad \text{or} \quad \pi: o_t \mapsto A_t$$</div>
-        <p>$o_t$ 是当前观测，$a_t$ 是当前一步动作，$A_t=[a_t,\ldots,a_{t+H-1}]$ 是未来 $H$ 步动作 chunk。输出动作不是随便吐一个数组，而是必须符合环境约定的 shape、单位、范围和语义。</p>
+        <p>$o_t$ 是当前观测，$a_t$ 是当前一步动作，$A_t=[a_t,\ldots,a_{t+H-1}]$ 是未来一段动作。训练时，专家 action 是监督 target；推理时，policy 产生 action payload 并交给环境。它不是随便吐一个数组，而是必须符合环境约定的 shape、单位、范围和语义。F-4 里的 <a href="f-4-everything-is-token.html#action-roles">动作三角色</a> 就在这里落地。</p>
 
         <h2 id="spaces">动作空间：Discrete、Box、Dict</h2>
-        <table>
+        <table class="foundation-mobile-stack">
           <thead>
             <tr><th>动作空间</th><th>数学形态</th><th>例子</th><th>常见训练方式</th></tr>
           </thead>
           <tbody>
-            <tr><td>Discrete</td><td>$a \in \{1,\ldots,K\}$</td><td>左/右/停，选择一个技能。</td><td>分类、Cross Entropy、categorical policy。</td></tr>
-            <tr><td>Box</td><td>$a \in \mathbb{R}^{d_a}$，带上下界。</td><td>关节速度、末端位姿增量、底盘速度。</td><td>MSE、高斯策略、flow/diffusion。</td></tr>
-            <tr><td>MultiDiscrete</td><td>多个离散维度组合。</td><td>多个按钮或多个量化 code。</td><td>多头 CE 或序列化 token。</td></tr>
-            <tr><td>Dict</td><td>多个字段组成一个 action。</td><td>机械臂 + 夹爪 + 底盘 + 控制类型。</td><td>按字段路由不同 head/loss。</td></tr>
+            <tr><td data-label="动作空间">Discrete</td><td data-label="数学形态">$a \in \{0,\ldots,K-1\}$</td><td data-label="例子">左/右/停，选择一个技能。</td><td data-label="常见训练方式">分类、Cross Entropy、categorical policy。</td></tr>
+            <tr><td data-label="动作空间">Box</td><td data-label="数学形态">$a \in \mathbb{R}^{d_a}$，带上下界。</td><td data-label="例子">关节速度、末端位姿增量、底盘速度。</td><td data-label="常见训练方式">MSE、高斯策略、flow/diffusion。</td></tr>
+            <tr><td data-label="动作空间">MultiDiscrete</td><td data-label="数学形态">多个离散维度组合。</td><td data-label="例子">多个按钮或多个量化 code。</td><td data-label="常见训练方式">多头 CE 或序列化 token。</td></tr>
+            <tr><td data-label="动作空间">Dict</td><td data-label="数学形态">多个字段组成一个 action。</td><td data-label="例子">机械臂 + 夹爪 + 底盘 + 控制类型。</td><td data-label="常见训练方式">按字段路由不同 head/loss。</td></tr>
           </tbody>
         </table>
+        <div class="code" data-lang="python"><div class="code-h"><span class="fn">只看结构，不是 EBench 的精确 schema</span><button class="cp">复制</button></div><pre><code>arm_velocity = Box(low=-1.0, high=1.0, shape=(7,))
+action = Dict({
+    "arm": arm_velocity,
+    "gripper": Box(low=0.0, high=1.0, shape=(1,)),
+    "mode": Discrete(2),
+})</code></pre></div>
+        <p>Box 是一个带范围的连续数组；Dict 不是另一条大向量，而是按字段组织多个子空间的容器。真实系统仍可在网络内部把这些字段拼接、分头预测或序列化。</p>
         <p>EBench 的真实 action 更接近 Dict + 连续 Box 的组合，而不是一个简单按钮。比如同一个 action 字典里可能同时包含手臂控制、夹爪控制、底盘运动、绝对/相对控制标志。后文 <a href="../04-engine/4-3-action-vector.html">4-3</a> 会把 16/19-D 与 base_motion 拆开。</p>
 
         <h2 id="chunk">Action chunk：一次输出未来一段</h2>
-        <p>很多 VLA 不只输出当前一步动作，而是输出未来一段动作：</p>
-        <div class="math-block">$$A_t = [a_t, a_{t+1}, \ldots, a_{t+H-1}] \in \mathbb{R}^{H \times d_a}$$</div>
-        <p>如果控制频率是 50Hz，$H=50$ 就大约是一秒动作。模型可以每隔几步重新规划一次，这叫 receding horizon。action chunk 的好处是让模型看到短期运动结构；代价是接口和训练 shape 都更复杂。</p>
+        <p>很多 VLA 不只输出当前一步动作，而是先预测未来一段：</p>
+        <div class="math-block">$$A_t^{\text{pred}}=[a_t,\ldots,a_{t+H_{\text{pred}}-1}]\in\mathbb{R}^{H_{\text{pred}}\times d_a},\qquad K_{\text{exec}}\le H_{\text{pred}}$$</div>
+        <p>$H_{\text{pred}}$ 是模型一次预测多少步；$K_{\text{exec}}$ 是环境实际执行前 K 步后就重新观察、重新规划多少步。它们不是同一个数。比如 50Hz 下，模型可预测 $H_{\text{pred}}=50$ 步约一秒动作，却只执行 $K_{\text{exec}}=10$ 步约 0.2 秒后再看新 observation。</p>
+        <p>这种“预测一段、只执行前一段、再重规划”的方式叫 receding horizon。具体执行多少取决于 EBench 的 step/chunk 模式，而不是 action chunk 这个概念本身；后文 <a href="../04-engine/4-4-chunk-step.html">4-4</a> 会把它拆开。</p>
 
         <div class="callout note">
           <div class="c-h">把 F-5/F-6/F-8 和动作空间连起来</div>

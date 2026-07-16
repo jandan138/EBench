@@ -15,6 +15,11 @@ const routes = [
   ["/chapters/foundations/f-2-5-linear-gelu-mlp.html", "f25"],
   ["/chapters/foundations/f-2-6-activation-gates.html", "f26"],
   ["/chapters/foundations/f-3-transformer-block.html", "f3"],
+  ["/chapters/foundations/f-4-everything-is-token.html", "f4"],
+  ["/chapters/foundations/f-5-regression-mse.html", "f5"],
+  ["/chapters/foundations/f-6-cross-entropy.html", "f6"],
+  ["/chapters/foundations/f-7-gym-action.html", "f7"],
+  ["/chapters/foundations/f-8-probability-multimodal.html", "f8"],
 ];
 const viewports = [
   { label: "desktop", width: 1440, height: 900 },
@@ -115,12 +120,25 @@ async function scrollPage(page) {
   });
 }
 
+async function hydrateWidgets(page) {
+  const widgets = page.locator("[data-widget]");
+  const count = await widgets.count();
+  for (let index = 0; index < count; index += 1) {
+    await widgets.nth(index).scrollIntoViewIfNeeded();
+    await page.waitForFunction((widgetIndex) => {
+      const node = document.querySelectorAll("[data-widget]")[widgetIndex];
+      return node?.dataset.mounted === "1" && node.childElementCount > 0;
+    }, index, { timeout: 10000 });
+  }
+  await page.evaluate(() => window.scrollTo(0, 0));
+}
+
 async function assertReaderLayout(page, label) {
   const metrics = await page.evaluate(() => {
     const article = document.querySelector(".article");
     const h1 = document.querySelector("h1");
     const rawMath = article.textContent.includes("$$") || article.textContent.includes("\\[");
-    const tooWide = [...document.querySelectorAll(".article .katex-display, .article table, .article pre, .article svg")]
+    const tooWide = [...document.querySelectorAll(".article .katex-display, .article table, .article pre, .article svg, .article canvas")]
       .filter((element) => element.getBoundingClientRect().width > element.parentElement.getBoundingClientRect().width + 1)
       .map((element) => element.className || element.tagName);
     return {
@@ -150,6 +168,7 @@ async function auditRoute(base, path, routeLabel, viewport, theme, cacheDir) {
   assert.equal(response.status(), 200, routeLabel + ": HTTP status");
   await page.waitForFunction(() => document.querySelectorAll(".article .katex").length > 0, null, { timeout: 10000 });
   await scrollPage(page);
+  await hydrateWidgets(page);
   await assertReaderLayout(page, routeLabel + " " + viewport.label + " " + theme);
   await page.screenshot({ path: join(auditDir, routeLabel + "-" + viewport.label + "-" + theme + ".png"), fullPage: true });
   assert.deepEqual(errors, [], routeLabel + " " + viewport.label + " " + theme + ": runtime/request failures");
@@ -214,6 +233,51 @@ async function assertWidgetsAndBridges(base, cacheDir) {
   assert.equal(new URL(f3.url()).hash, "#preactivation");
   assert.equal(await f3.locator("#preactivation").count(), 1);
 
+  const f4 = await context.newPage();
+  await f4.goto(base + "/chapters/foundations/f-3-transformer-block.html#recap", { waitUntil: "networkidle" });
+  await f4.locator('a[href="f-4-everything-is-token.html#vla-input-bridge"]').click();
+  await f4.waitForLoadState("networkidle");
+  assert.equal(new URL(f4.url()).hash, "#vla-input-bridge");
+  assert.equal(await f4.locator("#vla-input-bridge").count(), 1);
+  await f4.locator('a[href="f-5-regression-mse.html#bc"]').click();
+  await f4.waitForLoadState("networkidle");
+  assert.equal(new URL(f4.url()).hash, "#bc");
+
+  const f5 = f4;
+  const f5Widget = f5.locator('[data-widget="mode-averaging"]');
+  assert.equal(await f5Widget.count(), 1);
+  await f5Widget.scrollIntoViewIfNeeded();
+  await f5Widget.locator("canvas").waitFor();
+  await f5Widget.locator(".seg button").nth(1).click();
+  await f5.locator('a[href="f-6-cross-entropy.html"]').click();
+  await f5.waitForLoadState("networkidle");
+  assert.equal(new URL(f5.url()).pathname, "/chapters/foundations/f-6-cross-entropy.html");
+
+  const f6 = f5;
+  const f6Widget = f6.locator('[data-widget="softmax-temperature"]');
+  assert.equal(await f6Widget.count(), 1);
+  await f6Widget.scrollIntoViewIfNeeded();
+  await f6Widget.locator('input[type="range"]').waitFor();
+  await f6Widget.locator('input[type="range"]').fill("0.5");
+  assert.match(await f6Widget.textContent(), /正确 token：place.*CE/);
+  await f6.locator('a[href="f-7-gym-action.html"]').click();
+  await f6.waitForLoadState("networkidle");
+  assert.equal(new URL(f6.url()).pathname, "/chapters/foundations/f-7-gym-action.html");
+  assert.equal(await f6.locator("#evalclient").count(), 1);
+  await f6.locator('a[href="f-8-probability-multimodal.html"]').click();
+  await f6.waitForLoadState("networkidle");
+  assert.equal(new URL(f6.url()).pathname, "/chapters/foundations/f-8-probability-multimodal.html");
+
+  const f8 = f6;
+  const f8Widget = f8.locator('[data-widget="multimodal-distribution"]');
+  assert.equal(await f8Widget.count(), 1);
+  await f8Widget.scrollIntoViewIfNeeded();
+  await f8Widget.getByRole("button", { name: "从噪声采样" }).click();
+  assert.match(await f8Widget.textContent(), /从噪声采样.*最终样本/);
+  await f8.locator('a[href="../00-orientation/0-1-why-ebench.html"]').click();
+  await f8.waitForLoadState("networkidle");
+  assert.equal(new URL(f8.url()).pathname, "/chapters/00-orientation/0-1-why-ebench.html");
+
   await context.close();
 }
 
@@ -248,6 +312,11 @@ try {
   await assertAnchor(base, "/chapters/foundations/f-2-5-linear-gelu-mlp.html", "preactivation", "#preactivation", cacheDir, "/chapters/foundations/f-2-6-activation-gates.html");
   await assertAnchor(base, "/chapters/foundations/f-2-6-activation-gates.html", "preactivation", "#preactivation", cacheDir);
   await assertAnchor(base, "/chapters/foundations/f-3-transformer-block.html", "full-flow", "#full-flow", cacheDir);
+  await assertAnchor(base, "/chapters/foundations/f-4-everything-is-token.html", "vla-input-bridge", "#vla-input-bridge", cacheDir);
+  await assertAnchor(base, "/chapters/foundations/f-5-regression-mse.html", "mse", "#mse", cacheDir);
+  await assertAnchor(base, "/chapters/foundations/f-6-cross-entropy.html", "worked-example", "#worked-example", cacheDir);
+  await assertAnchor(base, "/chapters/foundations/f-7-gym-action.html", "evalclient", "#evalclient", cacheDir);
+  await assertAnchor(base, "/chapters/foundations/f-8-probability-multimodal.html", "density", "#density", cacheDir);
   await assertWidgetsAndBridges(base, cacheDir);
   await assertNoJsFallbacks(base, cacheDir);
   process.stdout.write("Foundations browser audit passed. Screenshots: " + auditDir + "\n");

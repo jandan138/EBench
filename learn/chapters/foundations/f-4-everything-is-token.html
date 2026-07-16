@@ -27,33 +27,51 @@
         <h1>一切皆 Token + Embedding</h1>
         <p class="lede">“一切皆 token”这句话很容易误导小白，好像图像、状态、动作都被硬切成文字编号。更准确的说法是：不同模态进入 Transformer 前，都要被包装成同宽向量。离散对象通常查 embedding 表；连续对象通常通过线性层或 encoder 投影。</p>
 
+        <h2 id="vla-input-bridge">F-3 里的向量行，在 VLA 里从哪里来？</h2>
+        <p>F-3 把 Transformer 的输入写成 <code>[B,n,d]</code>：B 是 batch，n 是序列位置数，d 是每个位置的向量宽度。那一章先假设这些行已经准备好，专心解释它们如何经过 Block 更新。本章只回答更早的一步：文字、图像和机器人状态怎样各自变成一行 d 维向量，再排进同一条序列。</p>
+        <div class="callout note">
+          <div class="c-h">先固定本章的主线</div>
+          <p><b>不同来源的原始数据 → 同宽向量 → Transformer 的输入序列。</b>动作会在这条主线旁边出现，但要先分清它何时是训练目标、何时是推理输出、何时才是某种架构的可选上下文。</p>
+        </div>
+
         <h2 id="string-id-vector">从字符串到向量：四个东西不要混</h2>
         <p>你读 Transformer 时经常会看到 token、token id、embedding、hidden state 混在一起说。它们不是同一个东西，只是在一条流水线上前后相接。</p>
-        <table>
+        <table class="foundation-mobile-stack">
           <thead>
             <tr><th>名字</th><th>是什么</th><th>例子</th><th>模型里长什么样</th></tr>
           </thead>
           <tbody>
-            <tr><td>字符串片段</td><td>人能读的文本片段</td><td><code>"她"</code>、<code>"Transformer"</code></td><td>还不是模型输入</td></tr>
-            <tr><td>token</td><td>tokenizer 切出的基本单位</td><td>一个字、一个子词、一个特殊符号</td><td>概念单位</td></tr>
-            <tr><td>token id</td><td>词表里的整数编号</td><td><code>3912</code></td><td>整数索引</td></tr>
-            <tr><td>embedding</td><td>id 查表得到的初始向量</td><td>$e_i=E[\text{id}_i]$</td><td>$d$ 维浮点向量</td></tr>
+            <tr><td data-label="名字">字符串片段</td><td data-label="是什么">人能读的文本片段</td><td data-label="例子"><code>"她"</code>、<code>"Transformer"</code></td><td data-label="模型里长什么样">还不是模型输入</td></tr>
+            <tr><td data-label="名字">token</td><td data-label="是什么">tokenizer 切出的基本单位</td><td data-label="例子">一个字、一个子词、一个特殊符号</td><td data-label="模型里长什么样">概念单位</td></tr>
+            <tr><td data-label="名字">token id</td><td data-label="是什么">词表里的整数编号</td><td data-label="例子"><code>3912</code></td><td data-label="模型里长什么样">整数索引</td></tr>
+            <tr><td data-label="名字">embedding</td><td data-label="是什么">id 查表得到的初始向量</td><td data-label="例子">$e_i=E[\text{id}_i]$</td><td data-label="模型里长什么样">$d$ 维浮点向量</td></tr>
           </tbody>
         </table>
         <p>所以“token 是不是一个 ID？”答案是：日常口语里会混用，但严格说，token 是切分出来的单位，token id 是它在词表里的整数编号，embedding 是这个 id 查表后的向量。模型真正能做矩阵乘法的是向量，不是字符串，也不是中文词本身。</p>
 
+        <h2 id="token-two-meanings">“token”有两种语境，先把它们分开</h2>
+        <div class="callout note">
+          <div class="c-h">语境一：文本 token</div>
+          <p>它是 tokenizer 从字符串里切出的单位，可以再查词表得到 token id。这里的 token 和文字、子词、特殊符号有关。</p>
+        </div>
+        <div class="callout note">
+          <div class="c-h">语境二：sequence slot</div>
+          <p>它是 Transformer 序列里的一个<b>向量位置</b>。图像 patch、状态片段甚至特定架构里的动作表示，都可以占一个 sequence slot；它们不需要先拥有文本 token id。</p>
+        </div>
+        <p>因此，“状态 token”通常是简写，准确说法是“由状态投影得到、放在序列中的向量位置”。后文若说“token 在通信”，指的是第二种语境的向量行，不是在说字符串自己有状态或函数。</p>
+
         <h2 id="hidden-lifecycle">Embedding、representation、hidden state 的生命周期</h2>
-        <p>第一层 Transformer 看到的通常不是裸 embedding，而是 token embedding 加上位置信息。最小写法是：</p>
+        <p>先认四个本页会反复出现的符号：i 是位置编号，n 是位置总数，d 是每条向量的宽度，$\ell$ 是层号。第一层 Transformer 看到的通常不是裸 embedding，而是 token embedding 加上位置信息：</p>
         <div class="math-block">$$h_i^0 = x_i = e_i + p_i$$</div>
         <p>$e_i$ 是第 $i$ 个 token id 查表得到的 embedding，$p_i$ 是第 $i$ 个位置的位置 embedding 或位置编码。很多论文直接把第一层输入写成 $x_i$，不是因为忘了 $e_i+p_i$，而是因为后面推导只关心“当前层输入的那条向量”。</p>
-        <table>
+        <table class="foundation-mobile-stack">
           <thead>
             <tr><th>术语</th><th>最准确的含义</th><th>什么时候和别的词相同</th></tr>
           </thead>
           <tbody>
-            <tr><td>embedding</td><td>输入端查表或投影得到的初始向量</td><td>刚进入模型时，常是 hidden state 的起点</td></tr>
-            <tr><td>hidden state</td><td>某一层、某一位置当前保存的向量</td><td>$h_i^0$ 可由 embedding 加位置得到；$h_i^1$ 以后已不是 embedding</td></tr>
-            <tr><td>representation</td><td>“表示”的泛称，强调这条向量编码了什么信息</td><td>embedding 和 hidden state 都是 representation</td></tr>
+            <tr><td data-label="术语">embedding</td><td data-label="最准确的含义">输入端查表或投影得到的初始向量</td><td data-label="什么时候和别的词相同">刚进入模型时，常是 hidden state 的起点</td></tr>
+            <tr><td data-label="术语">hidden state</td><td data-label="最准确的含义">某一层、某一位置当前保存的向量</td><td data-label="什么时候和别的词相同">$h_i^0$ 可由 embedding 加位置得到；$h_i^1$ 以后已不是 embedding</td></tr>
+            <tr><td data-label="术语">representation</td><td data-label="最准确的含义">“表示”的泛称，强调这条向量编码了什么信息</td><td data-label="什么时候和别的词相同">embedding 和 hidden state 都是 representation</td></tr>
           </tbody>
         </table>
         <p>经过一层 Transformer 后，hidden state 会被更新：</p>
@@ -65,17 +83,17 @@
         </div>
 
         <h2 id="two-routes">两条进场路线：查表和投影</h2>
-        <p>先把 token 分成两类，你会少很多困惑。</p>
-        <table>
+        <p>不要把对象硬分成“都是 token”或“都不是 token”。更有用的问题是：它怎样得到一个 d 维 sequence slot？离散对象常查表；连续对象常经投影。</p>
+        <table class="foundation-mobile-stack">
           <thead>
             <tr><th>对象</th><th>怎么变成向量</th><th>公式</th><th>例子</th></tr>
           </thead>
           <tbody>
-            <tr><td>离散 token</td><td>先变成整数 id，再查 embedding 表。</td><td>$e=E[\text{id}]$</td><td>文字 BPE token、离散动作 token。</td></tr>
-            <tr><td>连续输入</td><td>用线性层或 encoder 投影到模型宽度。</td><td>$x=Wu+b$</td><td>机器人状态、图像 patch 特征、连续动作变量。</td></tr>
+            <tr><td data-label="对象">离散 token</td><td data-label="怎么变成向量">先变成整数 id，再查 embedding 表。</td><td data-label="公式">$e=E[\text{id}]$</td><td data-label="例子">文字 BPE token、离散动作 token。</td></tr>
+            <tr><td data-label="对象">连续输入</td><td data-label="怎么变成向量">用线性层或 encoder 投影到模型宽度。</td><td data-label="公式">$x=Wu+b$</td><td data-label="例子">机器人状态、图像 patch 特征、连续动作变量。</td></tr>
           </tbody>
         </table>
-        <p>所以 token 不一定等于“词”。token 更像 Transformer 圆桌上的一个座位。这个座位上坐的可以是一个词、一块图像、一个状态片段，或者一个动作片段。</p>
+        <p>在 $x=Wu+b$ 里，u 是原始连续输入，W 是学习到的投影矩阵，b 是偏置，x 是投影后的 d 维向量。可以把 sequence slot 想成 Transformer 圆桌上的一个座位：文字、图像 patch、状态片段都能坐上去。</p>
 
         <h2 id="text">文字：先切词，再查表</h2>
         <p>语言模型不会直接吃完整句子。它先用 tokenizer 把句子切成 token，再把每个 token 映射成 id。比如“把蓝色杯子放进托盘”可能被切成若干子词 token。每个 id 查 embedding 表，得到一条 $d$ 维向量。</p>
@@ -86,32 +104,41 @@
         <p>图像不是天然的一维句子，但可以被切成 patch。ViT 风格的视觉编码会把一张图切成很多小块，每块通过线性投影或视觉 encoder 变成一个向量。四个相机可以产生更多 patch token，最后和文字 token 放到同一序列里。</p>
         <p>你可以把图像 patch 想成“视觉词”。某个 patch 可能覆盖蓝色杯子，另一个 patch 覆盖托盘边缘。Attention 后面就能让“蓝色杯子”这几个文字 token 去看对应的图像 patch。</p>
 
-        <h2 id="state-action">状态和动作：不是查词表那么简单</h2>
-        <p>机器人状态通常是连续数值，比如关节角、夹爪宽度、底盘速度。它们不是词表里的离散 id，不能直接查表。常见做法是把这些连续数值拼成向量 $u$，再用线性层投影到模型宽度：</p>
+        <h2 id="state-action">连续状态：投影成 1 或 k 个 sequence slot</h2>
+        <p>机器人状态通常是连续数值，例如关节角、夹爪宽度和底盘速度。它们没有词表 id，不能查 embedding 表。最简单的设计把整条状态向量 $u_{\text{state}}$ 投影成一个位置：</p>
         <div class="math-block">$$x_{\text{state}} = W_{\text{state}}u_{\text{state}} + b_{\text{state}}$$</div>
-        <p>动作也有两种路线：</p>
-        <ul>
-          <li><b>连续路线</b>：模型直接输出连续动作或动作 chunk，常见损失是 MSE、Gaussian NLL、flow matching。</li>
-          <li><b>离散路线</b>：先把连续动作量化成动作 token，再像语言 token 一样用 Cross Entropy 训练。FAST 就是这类思路的重要代表。</li>
-        </ul>
+        <p>这里 u 是原始状态数值，W 和 b 是学习到的参数，x 是一个 d 维 sequence slot。也可以让 encoder 输出 k 个位置：</p>
+        <div class="math-block">$$u_{\text{state}} \longrightarrow X_{\text{state}} \in \mathbb{R}^{k\times d}$$</div>
+        <p><b>k=1</b> 是“整条状态占一个位置”的最简单情况；k 个位置则是模型设计选择，例如按关节组、时间片或 learned queries 拆开。后面的“7 个状态 token”只是本章算例选择 k=7，不是所有 VLA 的固定规则。</p>
 
+        <h2 id="action-roles">动作有三个角色，不是三种 action</h2>
+        <table class="foundation-mobile-stack">
+          <thead>
+            <tr><th>发生在什么时候</th><th>动作在做什么</th><th>是否属于本例 observation 序列</th></tr>
+          </thead>
+          <tbody>
+            <tr><td data-label="发生在什么时候">训练时</td><td data-label="动作在做什么"><b>训练时专家 target</b>：拿示范动作和模型预测比较，交给 MSE、CE 或生成式损失。</td><td data-label="是否属于本例 observation 序列">不是；它是监督答案。</td></tr>
+            <tr><td data-label="发生在什么时候">推理时</td><td data-label="动作在做什么"><b>推理时 policy output</b>：模型算出动作，再转换成环境契约需要的 payload。</td><td data-label="是否属于本例 observation 序列">不是；它是模型输出。</td></tr>
+            <tr><td data-label="发生在什么时候">特定自回归设计</td><td data-label="动作在做什么"><b>可选上下文输入</b>：已知或先前动作可以作为 sequence slot 进入上下文。</td><td data-label="是否属于本例 observation 序列">可能；这依赖 teacher-forcing 或自回归架构。</td></tr>
+          </tbody>
+        </table>
         <div class="callout warn">
-          <div class="c-h">常见误解</div>
-          <p>“action token”不一定表示 EBench 的 action 字典里真的有一个整数 token 字段。它通常是训练 recipe 里的内部表示：连续动作被 tokenizer 量化后，才变成可分类的离散 token。评测时仍要输出符合 EvalClient 契约的连续 action 字典。</p>
+          <div class="c-h">“action token”还要再问一句</div>
+          <p>连续 action slot 只是序列中的向量位置，不是词表 id。只有连续动作先被 FAST 一类 tokenizer 量化后，才会得到可用于 Cross Entropy 的离散 action token id；也不是所有 VLA 都会把动作 token 喂回 Transformer。</p>
         </div>
 
         <h2 id="packed">把一帧 EBench 观测排成一串</h2>
-        <p>用一个极简例子把形状串起来。假设某一步有 8 个文字 token、196 个图像 patch、7 个状态 token。它们都被变成 $d$ 维向量后，可以拼成：</p>
+        <p>现在只拼 observation 输入。假设某一步有 8 个文字 token、196 个图像 patch，状态 encoder 选择输出 k=7 个状态 slot。它们都被变成 d 维向量后，可以拼成：</p>
         <div class="math-block">$$X = \text{concat}(X_{\text{text}}, X_{\text{image}}, X_{\text{state}}) \in \mathbb{R}^{211 \times d}$$</div>
-        <table>
+        <table class="foundation-mobile-stack">
           <thead>
             <tr><th>模态</th><th>数量示意</th><th>进入 Transformer 前</th><th>后文对应章节</th></tr>
           </thead>
           <tbody>
-            <tr><td>指令文字</td><td>8</td><td>token id 查 embedding。</td><td><a href="../05b-vla-systems/5b-1-training-sample.html">5b-1</a> 样本里的 language。</td></tr>
-            <tr><td>图像 patch</td><td>196</td><td>视觉 encoder / patch projection。</td><td><a href="../01-problem/1-2-what-is-vla.html">1-2</a> 的 VLM backbone。</td></tr>
-            <tr><td>本体状态</td><td>7</td><td>连续数值线性投影。</td><td><a href="../04-engine/4-2-evalclient.html">4-2</a> 的 observation schema。</td></tr>
-            <tr><td>动作</td><td>取决于 horizon</td><td>连续 chunk 或离散 action tokens。</td><td><a href="../05-theory/5-8-discrete-continuous.html">5-8</a> 离散/连续分工。</td></tr>
+            <tr><td data-label="模态">指令文字</td><td data-label="数量示意">8</td><td data-label="进入 Transformer 前">token id 查 embedding。</td><td data-label="后文对应章节"><a href="../05b-vla-systems/5b-1-training-sample.html">5b-1</a> 样本里的 language。</td></tr>
+            <tr><td data-label="模态">图像 patch</td><td data-label="数量示意">196</td><td data-label="进入 Transformer 前">视觉 encoder / patch projection。</td><td data-label="后文对应章节"><a href="../01-problem/1-2-what-is-vla.html">1-2</a> 的 VLM backbone。</td></tr>
+            <tr><td data-label="模态">本体状态</td><td data-label="数量示意">7</td><td data-label="进入 Transformer 前">连续数值投影成 7 个 slot。</td><td data-label="后文对应章节"><a href="../04-engine/4-2-evalclient.html">4-2</a> 的 observation schema。</td></tr>
+            <tr><td data-label="模态">动作</td><td data-label="数量示意">取决于 horizon</td><td data-label="进入 Transformer 前">本例不是 observation 输入；它通常是训练 target 或推理 output，特定自回归设计才可能作上下文。</td><td data-label="后文对应章节"><a href="../05-theory/5-8-discrete-continuous.html">5-8</a> 离散/连续分工。</td></tr>
           </tbody>
         </table>
 
@@ -128,7 +155,8 @@
         <p>这就是 F-1 那个 $X \in \mathbb{R}^{n \times d}$ 的具体来源。F-2 和 F-3 的 Attention/Block 都是在这排向量上工作。</p>
 
         <h2 id="recap">这一节你需要带走的</h2>
-        <p>一切皆 token 的准确含义是：一切都要被包装成同宽向量，坐到 Transformer 的序列位置上。离散 token 常靠 embedding 查表；连续状态、图像、动作常靠投影或 encoder。下一节 <a href="f-5-regression-mse.html">F-5</a> 开始转向训练：如果动作是连续向量，最朴素的训练方式就是回归和 MSE。</p>
+        <p>“一切皆 token”的准确含义是：不同来源的数据要先变成同宽向量，才能占 Transformer 的 sequence slot。文本 token 常经 id 查 embedding；图像和连续状态常经 projection 或 encoder。动作不是天然固定在输入序列里的东西：训练时常是 target，推理时常是 policy output，只有特定架构才会把它作为上下文。</p>
+        <p>下一节 <a href="f-5-regression-mse.html#bc">F-5</a> 沿着“训练时专家 target”这条线继续：若动作是连续向量，最朴素的学习方式就是回归和 MSE；离散 action token 的 Cross Entropy 路线会在 <a href="f-6-cross-entropy.html#action-token">F-6</a> 出现。</p>
       </article>
     </main>
     <aside class="rail" id="rail"></aside>

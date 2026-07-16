@@ -28,60 +28,80 @@
         <p class="lede">F-5 的 MSE 是“预测一个连续向量”。Cross Entropy 是另一种常见训练目标：在有限选项里，把概率质量推到正确选项上。LLM 训练下一个词靠它；当动作被 FAST 这类 tokenizer 离散成 action token 时，动作训练也能借用这套机制。</p>
 
         <h2 id="logits">第一步：模型先吐 logits，不是概率</h2>
-        <p>分类模型最后通常输出一排原始分数，叫 <span class="term">logits</span>。比如模型要从 5 个动作词里选一个：</p>
-        <table>
+        <p>分类模型最后通常输出一排原始分数，叫 <span class="term">logits</span>。这一章只跟一个固定例子：下一个正确 token 是 <code>place</code>，但模型现在把最高分给了 <code>pick</code>。这正是训练需要修的错误。</p>
+        <table class="foundation-mobile-stack">
           <thead>
             <tr><th>候选 token</th><th>pick</th><th>place</th><th>push</th><th>wait</th><th>other</th></tr>
           </thead>
           <tbody>
-            <tr><td>logit</td><td>2.1</td><td>1.4</td><td>0.8</td><td>0.3</td><td>-0.5</td></tr>
+            <tr><td data-label="候选 token">logit</td><td data-label="pick">2.1</td><td data-label="place">1.4</td><td data-label="push">0.8</td><td data-label="wait">0.3</td><td data-label="other">-0.5</td></tr>
           </tbody>
         </table>
         <p>logit 可以是任意实数，不要求大于 0，也不要求加起来等于 1。它只是“模型偏好”的原始分数。要把它变成概率，就用 softmax。</p>
 
         <h2 id="softmax">第二步：Softmax 把分数变成概率</h2>
         <div class="math-block">$$p_i = \frac{\exp(z_i)}{\sum_j \exp(z_j)}$$</div>
-        <p>$z_i$ 是第 $i$ 个 logit。指数函数会放大高分和低分的差距；分母把所有选项归一化，让概率加起来等于 1。实际代码里会先减去最大 logit，避免指数爆炸，但数学含义不变。</p>
+        <p>$z_i$ 是第 i 个 logit。指数函数会放大高分和低分的差距；分母把所有选项归一化，让概率加起来等于 1。实际代码里会先减去最大 logit，避免指数爆炸，但数学含义不变。想复习 softmax 为什么这样做，可回到 <a href="f-2-attention.html#softmax">F-2 的 Softmax 直觉</a>。</p>
 
-        <div class="lab">
-          <div class="lab-h"><span class="lab-tag">interactive</span><span class="lab-t">Softmax 温度：概率分布如何变尖或变平</span></div>
-          <div class="lab-body" data-widget="softmax-temperature"></div>
-          <div class="lab-cap">温度是推理/采样时常见的旋钮。训练 Cross Entropy 时通常按标准 logits 计算，不靠调高温度来“修”损失。</div>
-        </div>
+        <h2 id="worked-example">把同一条错误走完整：logits → 概率 → 损失</h2>
+        <ol>
+          <li>上表的最大 logit 是 <code>pick=2.1</code>，所以模型当前最想选 pick；但 target=place，预测是错的。</li>
+          <li>Softmax 后，五个概率约为 <code>[0.498, 0.247, 0.136, 0.082, 0.037]</code>，其中 $p_{\text{place}}\approx0.247$。</li>
+          <li>Cross Entropy 只看正确类：$-\ln(0.247)\approx1.398$。正确答案 place 的概率只有约四分之一，所以损失不小。</li>
+          <li>反向传播会调整参数，让类似输入下 <b>提高 place 的 logit</b> 相对其它 logits；不是手工把 place 的概率直接改成 1。</li>
+        </ol>
 
         <h2 id="ce">第三步：Cross Entropy 只盯正确类概率</h2>
         <p>如果正确答案是类别 $c$，Cross Entropy 就是：</p>
         <div class="math-block">$$\mathcal{L}_{\text{CE}} = -\log p_c$$</div>
         <p>正确类概率越高，损失越小。几个数感受一下：</p>
-        <table>
+        <table class="foundation-mobile-stack">
           <thead>
             <tr><th>正确类概率 $p_c$</th><th>CE = $-\log p_c$</th><th>直觉</th></tr>
           </thead>
           <tbody>
-            <tr><td>0.90</td><td>0.105</td><td>模型很确定，罚得小。</td></tr>
-            <tr><td>0.50</td><td>0.693</td><td>模型半信半疑。</td></tr>
-            <tr><td>0.01</td><td>4.605</td><td>正确答案几乎没概率，罚得很重。</td></tr>
+            <tr><td data-label="正确类概率 p_c">0.90</td><td data-label="CE = -log p_c">0.105</td><td data-label="直觉">模型很确定，罚得小。</td></tr>
+            <tr><td data-label="正确类概率 p_c">0.50</td><td data-label="CE = -log p_c">0.693</td><td data-label="直觉">模型半信半疑。</td></tr>
+            <tr><td data-label="正确类概率 p_c">0.01</td><td data-label="CE = -log p_c">4.605</td><td data-label="直觉">正确答案几乎没概率，罚得很重。</td></tr>
           </tbody>
         </table>
         <p>如果用 one-hot 标签 $y_i$ 写，公式是：</p>
         <div class="math-block">$$\mathcal{L}_{\text{CE}} = -\sum_i y_i \log p_i$$</div>
         <p>因为 one-hot 里只有正确类位置是 1，所以它等价于 $-\log p_c$。</p>
 
+        <h2 id="temperature">optional：温度不属于这条训练闭环</h2>
+        <p>上面的 Cross Entropy 直接使用标准 logits。温度通常是推理或采样时的旋钮：它会让概率分布变尖或变平，但不靠“调温度”修复训练损失。</p>
+        <div class="lab">
+          <div class="lab-h"><span class="lab-tag">interactive</span><span class="lab-t">Softmax 温度：概率分布如何变尖或变平</span></div>
+          <div class="lab-body" data-widget="softmax-temperature"></div>
+          <div class="lab-cap">温度是推理/采样时常见的旋钮。训练 Cross Entropy 时通常按标准 logits 计算，不靠调高温度来“修”损失。</div>
+        </div>
+
         <h2 id="sequence">序列训练：每个位置都做一次分类</h2>
-        <p>LLM 训练不是只选一个 token，而是在每个位置预测下一个 token。常见 shape 是：</p>
-        <div class="math-block">$$\text{logits}\in \mathbb{R}^{B \times T \times V},\qquad \text{target}\in \mathbb{R}^{B \times T}$$</div>
-        <p>$B$ 是 batch size，$T$ 是序列长度，$V$ 是词表大小。每个位置都有一排 $V$ 维 logits，对应一个正确 target id。序列版 CE 就是把所有有效位置的 $-\log p(\text{target})$ 平均起来。</p>
+        <p>LLM 训练不是只选一个 token，而是在每个位置预测下一个 token。可以先把“右移一格”看成一个小表：</p>
+        <table class="foundation-mobile-stack">
+          <thead><tr><th>输入位置看到的 token</th><th>该位置的 target</th></tr></thead>
+          <tbody>
+            <tr><td data-label="输入位置看到的 token">我</td><td data-label="该位置的 target">喜欢</td></tr>
+            <tr><td data-label="输入位置看到的 token">喜欢</td><td data-label="该位置的 target">苹果</td></tr>
+            <tr><td data-label="输入位置看到的 token">苹果</td><td data-label="该位置的 target">&lt;eos&gt;</td></tr>
+          </tbody>
+        </table>
+        <p>常见 shape 是：</p>
+        <div class="math-block">$$\text{logits}\in \mathbb{R}^{B\times T\times V},\qquad \text{target}\in \{0,\ldots,V-1\}^{B\times T}$$</div>
+        <p>B 是 batch size，T 是序列长度，V 是词表大小。每个位置有一排 V 维原始 logits，对应一个整数 target id；padding 等无效位置会被忽略。数学上可先 softmax 再取负对数；实现中 PyTorch <code>CrossEntropyLoss</code> 通常直接接收<b>原始 logits</b>，不应先手动 softmax 后再传进去。</p>
 
         <h2 id="action-token">动作 token 为什么也能用 CE</h2>
-        <p>连续动作本来不能直接分类。但如果先把动作量化成有限词表里的 token，任务就变成“下一个 action token 是哪一个”。这就是 FAST 等 action tokenizer 思路背后的训练便利性：把部分动作学习问题改写成和语言建模非常相似的离散 token 预测。</p>
-        <table>
+        <p>连续 action slot 和离散 action token id 不是一回事。前者只是一个连续向量位置，可用于回归或 flow；后者要先把连续动作量化到有限 codebook，才会成为能分类的整数 id。只有第二种路线才直接使用 Cross Entropy。</p>
+        <p>这就是 FAST 等 action tokenizer 思路背后的训练便利性：把部分动作学习问题改写成和语言建模相似的离散 token 预测。动作在推理时仍要变回 <a href="f-7-gym-action.html#obs-action">环境契约需要的 action payload</a>，并不等于所有 VLA 都把 action token 作为输入上下文。</p>
+        <table class="foundation-mobile-stack">
           <thead>
             <tr><th>路线</th><th>输出对象</th><th>典型损失</th><th>优势/代价</th></tr>
           </thead>
           <tbody>
-            <tr><td>MSE 回归</td><td>连续向量</td><td>MSE</td><td>简单，但多峰时会平均。</td></tr>
-            <tr><td>离散动作 token</td><td>词表 id</td><td>Cross Entropy</td><td>训练像 LLM，但有量化误差。</td></tr>
-            <tr><td>生成式连续策略</td><td>连续分布采样</td><td>Flow / diffusion loss</td><td>保留多峰，推理更复杂。</td></tr>
+            <tr><td data-label="路线">MSE 回归</td><td data-label="输出对象">连续向量</td><td data-label="典型损失">MSE</td><td data-label="优势/代价">简单，但多峰时会平均。</td></tr>
+            <tr><td data-label="路线">离散 action token id</td><td data-label="输出对象">词表 id</td><td data-label="典型损失">Cross Entropy</td><td data-label="优势/代价">训练像 LLM，但有量化误差。</td></tr>
+            <tr><td data-label="路线">生成式连续策略</td><td data-label="输出对象">连续分布采样</td><td data-label="典型损失">Flow / diffusion loss</td><td data-label="优势/代价">保留多峰，推理更复杂。</td></tr>
           </tbody>
         </table>
 
