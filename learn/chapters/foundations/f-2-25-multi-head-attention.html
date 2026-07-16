@@ -25,26 +25,33 @@
       <article class="article">
         <div class="eyebrow">Part F · Foundations · f-2.25</div>
         <h1>Multi-Head Attention 从零开始（head / concat / W<sub>O</sub>）</h1>
-        <p class="lede">F-2 刚刚把一套 Q/K/V 算到了最后的加权 Value。那其实只是一条 Attention 支路，也就是一个 head。真实 Transformer 通常让多条支路并行看同一批 token，再把结果拼接、混合，最后才交给 residual stream。本节专门补齐 <code>head</code>、<code>concat</code> 和 <code>W_O</code>，再回到 MLP 和完整 Block。</p>
+        <p class="lede">F-2 把一套 Q/K/V 算到了加权 Value。那不是“Attention 的一小部分”，而是一条完整的 Attention 支路，也就是一个 head。现在先走完一条连续故事：一个 head 怎样变成多个 head，多个结果怎样 concat，最后的 W<sub>O</sub> 又在做什么。形状、GPU、mask 和 MQA/GQA 放到第二遍再看。</p>
 
-        <h2 id="start">先给一个不会误导人的总画面</h2>
-        <p>把 Multi-Head Attention 看成“同一批当前 hidden states，走过多套不同参数的单头 Attention”。每一套就是一个 head，都完成一次 F-2 的完整链路：变出 Q/K/V，算分数，做 softmax，混合 Value。不同 head 的结果最后才合在一起。</p>
-        <div class="mha-parallel-flow" aria-label="同一个输入经过两个并行 attention head、concat 和 W O 的流程图">
+        <h2 id="start">先给总画面，也先把符号翻译成人话</h2>
+        <p>Multi-Head Attention 的输入仍是一批当前 hidden states。下面图里的 shape 先只当作标签；不必一开始就会矩阵乘法。</p>
+        <div class="mha-coordinate-grid" aria-label="多头注意力图中符号的最小词典">
+          <div class="mha-coordinate"><b>B</b><span>一次一起算多少条序列，叫 batch size。</span></div>
+          <div class="mha-coordinate"><b>n</b><span>一条序列有多少个 token 位置。</span></div>
+          <div class="mha-coordinate"><b>d<sub>model</sub></b><span>代码里常写作 <code>d_model</code>：每个 token 当前向量有多少个 feature，也叫模型宽度。</span></div>
+          <div class="mha-coordinate"><b>h / d<sub>head</sub></b><span>h 是并行支路数；每条支路内部使用 <code>d_head</code> 个 feature。</span></div>
+        </div>
+        <p>把它看成：<b>同一个输入 X，同时交给 h 套不同参数的单头 Attention。</b>每一套都完成 F-2 的完整链路。直到各自把 Value 混合完，结果才被拼在一起。</p>
+        <div class="mha-parallel-flow" aria-label="同一个输入经过两个并行 attention head、concat 和输出投影的流程图">
           <div class="mha-stage">
             <b>同一个输入 X</b>
             <code>[B,n,d<sub>model</sub>]</code>
-            <span>每个 token 当前的 hidden state</span>
+            <span>每个位置当前的 hidden state</span>
           </div>
           <div class="mha-arrow" aria-hidden="true">→</div>
           <div class="mha-head-grid">
             <div class="mha-head-card">
               <b>head 1</b>
-              <code>W_Q<sup>(1)</sup>, W_K<sup>(1)</sup>, W_V<sup>(1)</sup></code>
+              <code>W<sub>Q</sub><sup>(1)</sup>, W<sub>K</sub><sup>(1)</sup>, W<sub>V</sub><sup>(1)</sup></code>
               <span>一套完整单头 Attention</span>
             </div>
             <div class="mha-head-card">
               <b>head 2</b>
-              <code>W_Q<sup>(2)</sup>, W_K<sup>(2)</sup>, W_V<sup>(2)</sup></code>
+              <code>W<sub>Q</sub><sup>(2)</sup>, W<sub>K</sub><sup>(2)</sup>, W<sub>V</sub><sup>(2)</sup></code>
               <span>另一套完整单头 Attention</span>
             </div>
           </div>
@@ -56,81 +63,83 @@
           </div>
           <div class="mha-arrow" aria-hidden="true">→</div>
           <div class="mha-stage mha-output-stage">
-            <b>W<sub>O</sub></b>
+            <b>Linear W<sub>O</sub></b>
             <code>[B,n,d<sub>model</sub>]</code>
-            <span>学习如何混合各 head 结果</span>
+            <span>混合多条支路的结果</span>
           </div>
         </div>
         <div class="callout warn">
-          <div class="c-h">先把一句话校正</div>
-          <p>“多个 head 同时看句子”是有帮助的直觉，但不是说 token 真的复制出多个小人。GPU 保存的是张量和参数矩阵；所谓并行，是这些矩阵运算可以沿 head 这一维一起批量执行。</p>
+          <div class="c-h">图里的“并行”不是多个小人</div>
+          <p>这是讲数据流的方便说法。真实实现保存的是张量和参数矩阵；GPU 能沿 head 这一维批量计算。head 没有自己的存储、人格或函数，它是一套参数切片和相应的计算通道。</p>
         </div>
 
-        <h2 id="coordinate-system">head 在哪条坐标轴上？先分清四个东西</h2>
-        <p>很多困惑来自把不同层级的名词混成一个东西。下面四个词描述的是不同问题：</p>
+        <h2 id="coordinate-system">head 到底在哪条坐标轴上？</h2>
+        <p>“第 3 个 token”“第 3 层”“第 3 个 head”听起来相似，却是三个不同问题：</p>
         <div class="mha-coordinate-grid">
-          <div class="mha-coordinate"><b>token / 位置</b><span>序列里的第几个位置，例如“她”或“小红”。有 <code>n</code> 个。</span></div>
-          <div class="mha-coordinate"><b>feature / 通道</b><span>一个位置的向量里第几个数。有 <code>d_model</code> 个。</span></div>
+          <div class="mha-coordinate"><b>token / 位置</b><span>序列里的第几个位置，例如“她”或“小红”。有 n 个。</span></div>
+          <div class="mha-coordinate"><b>feature / 通道</b><span>一个位置的向量里第几个数。有 d<sub>model</sub> 个。</span></div>
           <div class="mha-coordinate"><b>Transformer 层</b><span>第几次完整更新 hidden state。每层有自己的参数。</span></div>
-          <div class="mha-coordinate"><b>head</b><span>同一层 Attention 内的一套独立 Q/K/V 投影和注意力计算。有 <code>h</code> 个。</span></div>
+          <div class="mha-coordinate"><b>head</b><span>同一层 Attention 内的一套 Q/K/V 投影与计算。有 h 个。</span></div>
         </div>
-        <p><b>一个 head 不是 token，不是位置，也不是 Transformer 层。</b>比如“第 3 个 token”“第 3 层”“第 3 个 head”分别在序列轴、深度轴和 Attention 的并行计算轴上；三者不能互换。</p>
+        <p><b>一个 head 不是 token，不是位置，也不是 Transformer 层。</b>它处理所有可见 token，只是使用自己的投影参数。</p>
 
-        <h2 id="single-head">先回看：一个 head 本身已经是完整 Attention</h2>
-        <p>令第 <code>r</code> 个 head 的参数带上上标 <code>(r)</code>。它拿到的输入仍然是同一个当前 hidden-state 张量 <code>X</code>，只是用自己的三套矩阵投影：</p>
+        <h2 id="single-head">先站稳：一个 head 本身已经是完整 Attention</h2>
+        <p>令第 r 个 head 的参数带上上标 <code>(r)</code>。它拿到的输入仍是同一个当前 hidden-state 张量 X，只是用自己的三套矩阵投影：</p>
         <div class="math-block">$$Q^{(r)}=XW_Q^{(r)},\qquad K^{(r)}=XW_K^{(r)},\qquad V^{(r)}=XW_V^{(r)}$$</div>
-        <p>然后完全照着 F-2 的单头流程走：</p>
-        <div class="math-block">$$A^{(r)}=\operatorname{softmax}\left(\frac{Q^{(r)}\left(K^{(r)}\right)^T}{\sqrt{d_{head}}}\right),\qquad O^{(r)}=A^{(r)}V^{(r)}$$</div>
-        <p>这里 <code>A</code> 是 attention weights，<code>O</code> 是这个 head 为每个 token 取回的结果。每个 head 都有自己的 Q、K、V、score、softmax 和 Value 聚合；不是所有 head 共用一份 Q/K/V 后只换一个名字。</p>
-        <div class="callout note">
-          <div class="c-h">为什么分数仍要除以 √d<sub>head</sub>？</div>
-          <p>F-2 中的缩放理由没有消失，只是单头的 key 维度现在写作 <code>d_head</code>。每个 head 的 score 都先除以 √d<sub>head</sub>，再做自己的 softmax。</p>
-        </div>
+        <p>接着完全照着 F-2 的单头流程走：</p>
+        <div class="math-block">$$A^{(r)}=\operatorname{softmax}\left(\frac{Q^{(r)}(K^{(r)})^T}{\sqrt{d_{head}}}\right),\qquad O^{(r)}=A^{(r)}V^{(r)}$$</div>
+        <p>A 是这个 head 内每个 Query 对 Key token 的权重，O 是它为每个 token 取回的结果。标准 MHA 中，每个 head 有自己的 Q、K、V、score、softmax 和 Value 聚合；不是共用一份 Q/K/V 后只换名字。</p>
 
         <h2 id="parallel-heads">为什么不只保留一个 head？</h2>
-        <p>一个 head 当然可以通信，但它只能在<b>一套</b> Q/K 几何空间里给关系打分，也只能在一套 V 空间里取回内容。多个独立 head 给模型多个可学习的投影空间：同一个输入位置可以在不同空间里形成不同的匹配模式和内容读取方式。</p>
-        <p>这不是“head 1 天生找主语，head 2 天生找宾语”。训练开始时所有矩阵通常随机；Loss 通过反向传播分别调整它们。一些训练后的 head 可能出现不同偏好，也可能重叠、难以解释，或在某些输入上几乎不用。结构只提供了不同的参数通道，不保证人工可命名的分工。</p>
+        <p>一个 head 当然可以通信，但它只能在<b>一套</b> Q/K 几何空间里给关系打分，也只能在一套 V 空间里读取内容。多个独立 head 给模型多个可学习的投影空间：同一个位置可以在不同空间里形成不同的匹配模式和内容读取方式。</p>
+        <p>这不是“head 1 天生找主语，head 2 天生找宾语”。训练开始时参数通常随机；Loss 通过反向传播分别调整它们。一些 head 可能形成不同偏好，也可能重叠、难以解释，或在某些输入上几乎不用。结构提供不同参数通道，不保证人工可命名的分工。</p>
         <div class="mha-head-grid mha-example-heads">
-          <div class="mha-head-card">
-            <b>教学中的 head A</b>
-            <span>可以把“她”更多地对准“小红”，演示一条指代相关的匹配模式。</span>
-          </div>
-          <div class="mha-head-card">
-            <b>教学中的 head B</b>
-            <span>可以把同一个“她”更多地对准“指”，演示另一条关系模式。</span>
-          </div>
+          <div class="mha-head-card"><b>教学中的 head A</b><span>可以让“她”更多地对准“小红”，演示一条指代相关的匹配模式。</span></div>
+          <div class="mha-head-card"><b>教学中的 head B</b><span>可以让同一个“她”更多地对准“指”，演示另一条关系模式。</span></div>
         </div>
-        <p class="mha-caption">上面只是帮助观察“同一 Query 能得到两套权重”的 toy 例子，不是在给真实模型里的 head 贴固定语义标签。</p>
+        <p class="mha-caption">这是帮助观察“同一 Query 可得到两套权重”的 toy 例子，不是在给真实模型里的 head 贴固定语义标签。</p>
 
         <h2 id="concat">concat：不是拼 token，也不是平均</h2>
-        <p>假设每个 head 都为第 <code>i</code> 个 token 输出一小段向量 <code>o_i^(r)</code>。<code>concat</code> 做的是把<b>同一个 token</b>在不同 head 的结果沿最后一个 feature 维排在一起：</p>
+        <p>假设每个 head 都为第 i 个 token 输出一小段向量 <code>o_i^(r)</code>。concat 把<b>同一个 token</b>在不同 head 的结果沿最后一个 feature 维排在一起：</p>
         <div class="math-block">$$c_i=[o_i^{(1)}\,\Vert\,o_i^{(2)}\,\Vert\,\cdots\,\Vert\,o_i^{(h)}]$$</div>
-        <p>如果一个 token 在两个 head 的输出分别是 <code>[2, 5]</code> 和 <code>[7, 1]</code>，concat 得到 <code>[2, 5, 7, 1]</code>。它<b>不是拼 token</b>，所以 token 数 <code>n</code> 不变；它<b>不是平均</b>，所以也没有把两条信息压成一个数。只是最后一个 feature 维变宽了。</p>
+        <p>如果一个 token 在两个 head 的输出分别是 <code>[2, 5]</code> 和 <code>[7, 1]</code>，concat 得到 <code>[2, 5, 7, 1]</code>。它<b>不是拼 token</b>，所以 token 数 n 不变；它<b>不是平均</b>，所以没有把多条信息压成一个数。只是这个 token 的 feature 向量变宽了。</p>
         <div class="mha-concat-example" aria-label="concat 的 feature 维拼接示例">
           <code>token “她”</code><span>[2, 5]</span><span>||</span><span>[7, 1]</span><span>→</span><b>[2, 5, 7, 1]</b>
         </div>
-        <p>head 的排列顺序本身没有“第一个更重要”的人类语义；后面的 <code>W_O</code> 会学习怎样读取和混合这个拼接向量。</p>
 
-        <h2 id="output-projection">W<sub>O</sub>：不是额外一次 Attention，而是输出投影</h2>
-        <p>拼接后的向量已经带着多个 head 的结果，但它还不是 Transformer residual stream 的标准宽度。输出矩阵 <code>W_O</code> 对每个 token 的拼接向量做一次普通 Linear：</p>
-        <div class="math-block">$$Y=\operatorname{Concat}(O^{(1)},\ldots,O^{(h)})W_O+b_O$$</div>
-        <p>在常见行向量约定下，<code>W_O</code> 的 shape 是 <code>[h d_head,d_model]</code>。它把 <code>h d_head</code> 个拼接 feature 映射回 $d_{model}$ 个输出 feature，因此 <code>Y</code> 可以和原本的 residual stream 相加。</p>
-        <p><code>W_O</code> 不是另一次“谁看谁”的 Attention，也不是纯粹的 reshape。reshape 只是换张量的看法，不改变数值；<code>W_O</code> 是可训练的线性变换，真的会学习各个 head 的 feature 应怎样组合。</p>
+        <h2 id="output-projection">W<sub>O</sub>：把拼接结果做一次普通 Linear</h2>
+        <p>concat 后的向量已经带着多个 head 的结果。W<sub>O</sub> 不再做“谁看谁”的匹配；它是一次<b>普通 Linear</b>，也就是对 feature 做可学习的加权组合。令 C 表示 concat 后的张量：</p>
+        <div class="math-block">$$Y=CW_O+b_O$$</div>
+        <p>对一个 token 的一个输出 feature 来说，就是“C 里的每个数乘一个权重、全部相加，再加上一个 bias”。例如 <code>c=[2,5,7,1]</code> 时，某一维可以是 <code>y=2w_1+5w_2+7w_3+1w_4+b</code>。这就是加权组合；<code>b_O</code> 是可学习的偏置，有些具体模型会省略它。</p>
+        <p>常见行向量约定下，<code>W_O</code> 的 shape 是 <code>[h d_head,d_model]</code>。它把 concat 的 <code>h d_head</code> 个 feature 映射回 <code>d_model</code> 个 feature。这个“回到原宽度”是后续 Transformer Block 能做逐元素相加的形状前提；residual 的意义会在 F-3 再定义。</p>
+        <p><code>W_O</code> 不是另一次 Attention，也不是纯 reshape。reshape 只改变怎么看同一批数；<code>W_O</code> 会改变数值，并学习怎样混合多个 head 的 feature。</p>
 
-        <h2 id="shape-ledger">把整条形状链路写成一份账本</h2>
-        <p>下面采用最常见的等分设计：<code>d_model = h d_head</code>。例如 <code>512 = 8 × 64</code>。为了表达 batch 维，我们用 <code>B</code>；序列长度仍用 <code>n</code>。</p>
+        <h2 id="core-summary">第一遍走完：多头到底多了什么？</h2>
+        <ol>
+          <li>每个 head 都是完整的单头 Attention，不是一个 token。</li>
+          <li>多个 head 用不同参数并行处理同一个输入 X。</li>
+          <li>concat 只把同一 token 的 feature 拼宽，不改变 token 数。</li>
+          <li>W<sub>O</sub> 是普通 Linear，把拼接向量混合并映射回 d<sub>model</sub>。</li>
+          <li>若有 causal 或 padding mask，它仍应在<b>每个 head 的 softmax 前</b>作用在 score 上。</li>
+        </ol>
+        <p>到这里已经足够继续读 <a href="f-2-5-linear-gelu-mlp.html#start">F-2.5 的 Linear 与 MLP</a>。下面是第二遍：不改变主线，只把它落到张量、GPU 和常见变体上。</p>
+
+        <h2 id="implementation-deep-dive">第二遍再看：形状、GPU 与边界</h2>
+        <p>这一组内容是可见的进阶补充，不会藏进折叠面板；从搜索或书签跳到其中任一小节也能单独阅读。</p>
+
+        <h3 id="shape-ledger">把整条形状链路写成账本</h3>
+        <p>采用最常见的等分设计：<code>d_model = h d_head</code>，例如 <code>512 = 8 × 64</code>。B 是 batch size，n 是序列长度。</p>
         <div class="mha-shape-ledger" aria-label="多头注意力张量形状账本">
           <div><b>输入 X</b><code>[B,n,d_{model}]</code><span>每个 batch 的每个 token 有 d<sub>model</sub> 个 feature。</span></div>
           <div><b>Q / K / V</b><code>[B,h,n,d_{head}]</code><span>每个 head 各有一小段 Q、K、V。</span></div>
           <div><b>scores / weights</b><code>[B,h,n,n]</code><span>每个 head 内，每个 Query 对所有 Key 的分数或权重。</span></div>
           <div><b>每 head 输出 O</b><code>[B,h,n,d_{head}]</code><span>每个 token 在每个 head 内取回 d<sub>head</sub> 维内容。</span></div>
           <div><b>concat</b><code>[B,n,h d_{head}]</code><span>只把最后一个 feature 维拼宽，n 不变。</span></div>
-          <div><b>输出 Y</b><code>[B,n,d_{model}]</code><span>经过 W<sub>O</sub> 回到 residual stream 所需的宽度。</span></div>
+          <div><b>输出 Y</b><code>[B,n,d_{model}]</code><span>经过 W<sub>O</sub> 回到标准模型宽度。</span></div>
         </div>
-        <p>等分只是常见选择。更一般地，concat 的宽度是 <code>h d_head</code>，<code>W_O</code> 负责把它映射回 <code>d_model</code>。教材先用等分，是为了让形状最容易追踪。</p>
 
-        <h2 id="gpu-view">从 GPU 看：不是 h 个 Python for 循环</h2>
-        <p>概念上，我们把每个 head 写成独立的 <code>W_Q^(r)</code>、<code>W_K^(r)</code>、<code>W_V^(r)</code>。实现上常把同类矩阵沿输出 feature 拼成一张大矩阵，一次大矩阵乘法得到所有 head 的 Q，再 reshape 和 transpose 出 head 轴：</p>
+        <h3 id="gpu-view">从 GPU 看：不是 h 个 Python for 循环</h3>
+        <p>概念上可以把每个 head 写成独立的 <code>W_Q^(r)</code>、<code>W_K^(r)</code>、<code>W_V^(r)</code>。实现上常把同类矩阵沿输出 feature 拼成一张大矩阵，一次大矩阵乘法得到所有 head 的 Q，再 reshape 和 transpose 出 head 轴：</p>
         <div class="code mha-gpu-code" data-lang="text"><div class="code-h"><span class="fn">逻辑上的多头，GPU 上的打包张量</span><button class="cp">复制</button></div><pre><code>X: [B,n,d_model]
 Q_big = X @ W_Q
 Q: [B,h,n,d_head]
@@ -141,33 +150,31 @@ O = weights @ V
 
 concat: [B,n,h*d_head]
 Y = concat @ W_O</code></pre></div>
-        <p>这里的 <code>reshape</code> 和 <code>transpose</code> 只是把同一批数组织成方便批量矩阵乘法的视图；它们不让 head 变成 token，也不让 head 变成 Transformer 层。GPU 可以在 batch、head、token 等维度上并行处理，但每个 head 仍使用不同的参数切片。</p>
+        <p>reshape 和 transpose 只是组织同一批数以方便大矩阵运算；它们不会让 head 变成 token 或 Transformer 层。</p>
 
-        <h2 id="mask-boundary">mask 仍在每个 head 的 softmax 前</h2>
-        <p>因果 mask、padding mask 或模态 mask 都应加在 score 上、<b>softmax 前</b>。对每个 head 的每一行 Query 来说，被遮住的 key 得到极小分数，softmax 后权重接近 0，所以它的 Value 不会被取回。</p>
-        <div class="math-block">$$A^{(r)}=\operatorname{softmax}\left(\frac{Q^{(r)}\left(K^{(r)}\right)^T}{\sqrt{d_{head}}}+M\right)$$</div>
-        <p>工程中一个形状为 <code>[B,1,n,n]</code> 的 mask 可以广播给所有 <code>h</code> 个 head；这表示“每个 head 看同一组允许/禁止位置”。更复杂的架构也可以设计不同规则，但本节的标准 self-attention 假设同一 mask 作用于每个 head。</p>
-        <p>本节只讲 self-attention：Q、K、V 都来自同一个 <code>X</code>。cross-attention 中 Query 的长度可以与 Key/Value 的长度不同，但 head、concat 和 <code>W_O</code> 的基本思想仍然相同。</p>
+        <h3 id="mask-boundary">mask 仍在每个 head 的 softmax 前</h3>
+        <p>因果 mask、padding mask 或模态 mask 都应加在 score 上、<b>softmax 前</b>。对每个 head 的每一行 Query 来说，被遮住的 key 得到极小分数，softmax 后权重接近 0，因此它的 Value 不会被取回。</p>
+        <div class="math-block">$$A^{(r)}=\operatorname{softmax}\left(\frac{Q^{(r)}(K^{(r)})^T}{\sqrt{d_{head}}}+M\right)$$</div>
+        <p>工程中一个形状为 <code>[B,1,n,n]</code> 的 mask 可以广播给所有 h 个 head。全遮住一整行时，具体实现需要额外约定以避免 softmax 对全极小值产生无意义分布；标准 causal self-attention 不应制造这种可见 Query 行。</p>
 
-        <h2 id="training">训练如何让不同 head 出现不同偏好？</h2>
-        <p>训练开始时，所有 head 的参数通常是随机的。模型没有收到“你负责代词”“你负责语法”的人工标签；最终任务的 Loss 通过反向传播改变 <code>W_Q</code>、<code>W_K</code>、<code>W_V</code>、<code>W_O</code> 等全部相关参数。</p>
-        <p>如果某种匹配和内容读取有助于降低 Loss，梯度会逐步让对应 head 的参数朝有利方向更新。不同初始化、数据和优化过程可能让多个 head 学出不同模式，也可能没有清晰分工。没有任何结构保证每个 head 都重要、可解释或互不重复；训练不保证每个 head 都有一个可命名的专属职责。</p>
-        <div class="callout note">
-          <div class="c-h">标准 MHA 之外</div>
-          <p>MQA 和 GQA 会让多个 Query head 共享一部分 K/V head，以减少推理时 KV cache 的成本。它们是常见变体，但不改变这里先建立的核心：head 是一条投影与 attention 计算通道，不是一个 token。</p>
-        </div>
+        <h3 id="training">训练如何让不同 head 出现不同偏好？</h3>
+        <p>训练开始时，所有 head 的参数通常是随机的。模型没有收到“你负责代词”“你负责语法”的人工标签；最终任务的 Loss 通过反向传播改变 <code>W_Q</code>、<code>W_K</code>、<code>W_V</code>、<code>W_O</code> 等参数。</p>
+        <p>如果某种匹配和内容读取有助于降低 Loss，梯度会逐步让对应参数朝有利方向更新。不同初始化、数据和优化过程可能让多个 head 学出不同模式，也可能没有清晰分工。没有结构保证每个 head 都重要、可解释或互不重复；训练<b>不保证</b>每个 head 都能得到一个人类可命名的职责。</p>
+
+        <h3 id="mqa-gqa">标准 MHA 之外：MQA 与 GQA</h3>
+        <p>上面“每个 head 独立 Q/K/V”说的是标准 MHA。MQA 让多个 Query head 共享一组 K/V；GQA 让若干 Query head 共享一组 K/V group。它们主要为了减少推理时 KV cache 的成本。核心直觉仍不变：Query head 仍是 Attention 的计算通道，不是一个 token。</p>
 
         <h2 id="checkpoint">小检查：现在能分清这些说法了吗？</h2>
         <ol>
           <li>“一个 head 就是一个 token。”不对。head 是同一层 Attention 的一套参数和计算；每个 head 都处理所有 token。</li>
           <li>“多个 head 只是把 token 分组。”不对。每个 head 都看完整可见序列，只是用不同 Q/K/V 投影。</li>
           <li>“softmax 在所有 head 之间挑一个最重要的 head。”不对。softmax 在每个 head 内、沿 Key token 轴把 score 变成权重。</li>
-          <li>“concat 是把更多 token 接到序列后面。”不对。concat 沿 feature 维拼接同一 token 的多条输出，序列长度不变。</li>
-          <li>“<code>W_O</code> 只是改 shape。”不对。<code>W_O</code> 是可训练 Linear，用来混合 concat 后的 feature 并回到 d<sub>model</sub>。</li>
+          <li>“concat 是把更多 token 接到序列后面。”不对。它沿 feature 维拼接同一 token 的多条输出。</li>
+          <li>“W<sub>O</sub> 只是改 shape。”不对。W<sub>O</sub> 是可训练 Linear，用来混合 concat 后的 feature 并回到 d<sub>model</sub>。</li>
         </ol>
 
         <h2 id="recap">带走这条多头主线</h2>
-        <p>F-2 推导了一个单头 Attention：按 Q/K 匹配，用 softmax 得权重，再混合 Value。Multi-Head Attention 让同一个输入并行经过多套这样的计算；把各 head 输出 concat，再经 W<sub>O</sub> 回到 <code>d_model</code>。下一节 <a href="f-2-5-linear-gelu-mlp.html#start">F-2.5</a> 解释 MLP 如何对每个位置做非线性计算，之后 <a href="f-3-transformer-block.html#full-flow">F-3</a> 再把多头 Attention、Residual、LayerNorm 和 MLP 组装成完整 Transformer Block。</p>
+        <p>F-2 推导了一个单头 Attention：按 Q/K 匹配，用 softmax 得权重，再混合 Value。Multi-Head Attention 让同一个输入并行经过多套这样的计算；把各 head 输出 concat，再经 W<sub>O</sub> 回到 d<sub>model</sub>。下一节 <a href="f-2-5-linear-gelu-mlp.html#start">F-2.5</a> 解释同一位置的向量怎样进入 MLP；随后 <a href="f-2-6-activation-gates.html#start">F-2.6</a> 再深挖 GELU 的门控；最后在 <a href="f-3-transformer-block.html#full-flow">F-3</a> 组装成完整 Block。</p>
         <div class="callout note">
           <div class="c-h">一手资料</div>
           <ul>

@@ -34,7 +34,7 @@ jobs:
 
       - name: Verify Foundations source contracts
         run: |
-          node --test learn/tests/activation-gates-viz.test.mjs learn/tests/foundations-navigation-integrity.test.mjs learn/tests/f-2-25-multi-head-content.test.mjs learn/tests/f-2-5-mlp-basics-content.test.mjs learn/tests/f-2-5-mlp-basics-math.test.mjs learn/tests/f-3-transformer-block-content.test.mjs
+          node --test learn/tests/activation-gates-viz.test.mjs learn/tests/foundations-navigation-integrity.test.mjs learn/tests/f-2-25-multi-head-content.test.mjs learn/tests/f-2-5-mlp-basics-content.test.mjs learn/tests/f-2-5-mlp-basics-math.test.mjs learn/tests/f-2-6-activation-content.test.mjs learn/tests/f-3-transformer-block-content.test.mjs learn/tests/foundations-story-arc.test.mjs
           node --check learn/assets/js/widgets/activation-gates-viz.js
 
   deploy:

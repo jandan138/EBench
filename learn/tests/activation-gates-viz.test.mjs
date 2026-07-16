@@ -2,79 +2,68 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 
-const chapterPath = new URL("../chapters/foundations/f-2-5-linear-gelu-mlp.html", import.meta.url);
-const widgetPath = new URL("../assets/js/widgets/activation-gates-viz.js", import.meta.url);
-const cssPath = new URL("../assets/css/book.css", import.meta.url);
-const workflowPath = new URL("../../.github/workflows/deploy-learning-site.yml", import.meta.url);
-const chapter = readFileSync(chapterPath, "utf8");
-const widget = existsSync(widgetPath) ? readFileSync(widgetPath, "utf8") : "";
-const css = readFileSync(cssPath, "utf8");
-const workflow = readFileSync(workflowPath, "utf8");
+const chapterPath = new URL("../chapters/foundations/f-2-6-activation-gates.html", import.meta.url);
+const chapter = existsSync(chapterPath) ? readFileSync(chapterPath, "utf8") : "";
+const core = readFileSync(new URL("../assets/js/widgets/mlp-basics-core.js", import.meta.url), "utf8");
+const widget = readFileSync(new URL("../assets/js/widgets/activation-gates-viz.js", import.meta.url), "utf8");
+const css = readFileSync(new URL("../assets/css/book.css", import.meta.url), "utf8");
+const workflow = readFileSync(new URL("../../.github/workflows/deploy-learning-site.yml", import.meta.url), "utf8");
+const section = (id) => chapter.match(
+  new RegExp("<h2[^>]*id=\"" + id + "\"[^>]*>[\\s\\S]*?(?=<h2|</article>)"),
+)?.[0].replace(/\s+/g, " ") || "";
 
-test("activation-gates widget registers after the shared core and before book", () => {
-  assert.ok(existsSync(widgetPath), "missing activation-gates-viz.js");
+test("activation-gates widget belongs to F-2.6 and registers after the shared core", () => {
   assert.match(chapter, /data-widget="activation-gates-viz"/);
   assert.ok(chapter.indexOf("mlp-basics-core.js") < chapter.indexOf("activation-gates-viz.js"));
   assert.ok(chapter.indexOf("activation-gates-viz.js") < chapter.indexOf("book.js"));
+  assert.match(core, /window\.EBMLPBasics/);
   assert.match(widget, /EBWidgets\["activation-gates-viz"\]/);
   ["channels", "threshold", "pair", "training"].forEach((view) => {
-    assert.ok(widget.includes(`data-view: "${view}"`), `missing ${view} view`);
+    assert.match(widget, new RegExp("data-view: \"" + view + "\""), "widget view missing: " + view);
   });
-  assert.match(widget, /aria-pressed/);
-  assert.match(widget, /aria-live/);
-  assert.match(widget, /keydown/);
-  assert.match(css, /\.activation-gates-viz/);
 });
 
-test("activation-gates conclusions have section-owned static source content", () => {
-  const labStart = chapter.indexOf('data-widget="activation-gates-viz"');
-  const labEnd = chapter.indexOf('<h2 id="why-nonlinearity"');
-  const lab = labStart >= 0 && labEnd > labStart ? chapter.slice(labStart, labEnd) : "";
-  assert.ok(lab, "activation gate lab missing");
-  ["2.100", "-0.700", "1.300", "-3.200"]
-    .forEach((marker) => assert.ok(lab.includes(marker), `static lab missing ${marker}`));
-  assert.equal((lab.match(/agv-channel-table/g) || []).length, 1);
-  assert.doesNotMatch(lab, /ReLU\(x-3\)|agv-pair-reconstruction|data-training-trace=/);
-
-  const threshold = chapter.match(/<h2[^>]*id="bias-threshold"[^>]*>[\s\S]*?(?=<h2|<\/article>)/)?.[0] || "";
-  assert.match(threshold, /ReLU\(x-3\)/);
-  assert.match(threshold, /w=0/);
-  assert.match(threshold, /负 w/);
-  const negative = chapter.match(/<h2[^>]*id="negative-information"[^>]*>[\s\S]*?(?=<h2|<\/article>)/)?.[0] || "";
-  assert.match(negative, /ReLU\(z\)-ReLU\(-z\)=z；z=-2\.500 时为 0\.000-2\.500=-2\.500/);
-  assert.match(negative, /不是说每个模型都会这样配对/);
-  const training = chapter.match(/<h2[^>]*id="training-gates"[^>]*>[\s\S]*?(?=<h2|<\/article>)/)?.[0] || "";
-  assert.equal((training.match(/data-training-trace="(?:relevant|irrelevant)"/g) || []).length, 2);
-  assert.equal((training.match(/<tr>/g) || []).length, 12, "two headers plus ten complete static trace rows");
-  assert.ok(chapter.indexOf('id="negative-information"') < chapter.indexOf('data-widget="activation-gates-viz"'));
-  assert.ok(chapter.indexOf('data-widget="activation-gates-viz"') < chapter.indexOf('id="why-nonlinearity"'));
-  assert.match(chapter, /一条向量怎样穿过 MLP[\s\S]*既有 MLP trace/);
-  assert.match(lab, /四个视图复用纯计算.*不为通道指定固定的人类语义/);
+test("F-2.6 keeps the static teaching source next to each gate conclusion", () => {
+  const preactivation = section("preactivation");
+  ["CHANNEL_INPUT", "CHANNEL_W", "CHANNEL_B", "z_1=1(1)+1(1.1)+0=2.1"].forEach((marker) => {
+    assert.ok(preactivation.includes(marker), "#preactivation missing " + marker);
+  });
+  const threshold = section("bias-threshold");
+  ["ReLU(x-3)", ">2<", ">3<", ">4<"].forEach((marker) => {
+    assert.ok(threshold.includes(marker), "#bias-threshold missing " + marker);
+  });
+  const negative = section("negative-information");
+  ["ReLU(z)-ReLU(-z)=z", "GELU(-1)", "0.318"].forEach((marker) => {
+    assert.ok(negative.includes(marker), "#negative-information missing " + marker);
+  });
+  const training = section("training-gates");
+  ["data-training-trace=\"relevant\"", "data-training-trace=\"irrelevant\"", "w_new=w-η", "optional"].forEach((marker) => {
+    assert.ok(training.includes(marker), "#training-gates missing " + marker);
+  });
 });
 
-test("activation-gates CSS is fully widget scoped while static F-2.5 rules stay section scoped", () => {
-  for (const rule of css.matchAll(/([^{}]+)\{/g)) {
-    const selector = rule[1].trim();
-    if (selector.includes(".f25-")) assert.match(selector, /body\[data-section="f-2-5"\] \.article/);
-    if (selector.includes(".agv-")) {
-      selector.split(",").map((part) => part.trim()).forEach((part) => {
-        assert.match(part, /^\.activation-gates-viz(?:\s|\.|:|$)/, `unscoped activation selector: ${part}`);
-      });
-    }
-  }
-  assert.doesNotMatch(css, /^\s*\.agv-/m, "top-level .agv-* selector is not allowed");
+test("F-2.6 owns the static GELU and mobile table rules without leaking F-2.5 selectors", () => {
+  ["f26-gelu-static", "f26-gelu-values", "f26-gelu-figure", "f26-mobile-stack", "f26-object-grid"].forEach((className) => {
+    assert.match(chapter, new RegExp("class=\"[^\"]*" + className), "chapter missing ." + className);
+    assert.match(css, new RegExp("body\\[data-section=\"f-2-6\"\\][\\s\\S]*\\." + className), "CSS missing F-2.6 scope for ." + className);
+  });
+  const mobile = css.match(/@media \(max-width: 560px\) \{([\s\S]*?)\n\}/)?.[1] || "";
+  ["f26-gelu-static", "f26-mobile-stack"].forEach((className) => {
+    assert.match(mobile, new RegExp("body\\[data-section=\"f-2-6\"\\][\\s\\S]*\\." + className), "mobile CSS missing ." + className);
+  });
+  assert.match(css, /\.activation-gates-viz \.agv-view-controls/);
 });
 
-test("F-2.5 recap makes the F-3 LayerNorm introduction directly discoverable", () => {
-  const recap = chapter.match(/<h2[^>]*id="recap"[^>]*>[\s\S]*?(?=<h2|<\/article>)/)?.[0] || "";
+test("F-2.6 recap points into the full Block and keeps LayerNorm discoverable", () => {
+  const recap = section("recap");
+  assert.match(recap, /<a href="f-3-transformer-block\.html#full-flow">[^<]*F-3[^<]*完整 Block[^<]*<\/a>/);
   assert.match(recap, /<a href="f-3-transformer-block\.html#layernorm">[^<]*F-3[^<]*LayerNorm[^<]*<\/a>/);
-  assert.equal((recap.match(/f-3-transformer-block\.html#layernorm/g) || []).length, 1);
 });
 
-test("Pages deployment is gated by focused Node verification rather than browser installation", () => {
-  assert.match(workflow, /^\s*verify:\s*$/m);
-  assert.match(workflow, /node --test learn\/tests\/activation-gates-viz\.test\.mjs/);
+test("Pages deployment verifies the migrated foundations contracts without a browser install", () => {
+  ["activation-gates-viz.test.mjs", "foundations-navigation-integrity.test.mjs", "f-2-25-multi-head-content.test.mjs", "f-2-5-mlp-basics-content.test.mjs", "f-2-5-mlp-basics-math.test.mjs", "f-2-6-activation-content.test.mjs", "f-3-transformer-block-content.test.mjs", "foundations-story-arc.test.mjs"].forEach((testFile) => {
+    assert.ok(workflow.includes(testFile), "workflow does not verify " + testFile);
+  });
   assert.match(workflow, /node --check learn\/assets\/js\/widgets\/activation-gates-viz\.js/);
-  assert.match(workflow, /^\s*needs:\s*verify\s*$/m);
-  assert.doesNotMatch(workflow, /playwright|npx\s+playwright/i);
+  assert.doesNotMatch(workflow, /playwright install/);
 });

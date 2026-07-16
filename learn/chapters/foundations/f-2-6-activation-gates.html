@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ReLU、GELU 与门控从零开始 · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="f-2-6">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part F · Foundations · f-2.6</div>
+        <h1>ReLU、GELU 与门控从零开始</h1>
+        <p class="lede">F-2.5 已经让一条 hidden state 走完了 Linear 1 → GELU → Linear 2。这里再回到中间那一小步：Linear 刚输出的 z 到底是什么？为什么 ReLU / GELU 会对正负数不对称？训练又怎样学会把某些输入推向更容易通过的区域？</p>
+
+        <h2 id="start">先放好四个容易混掉的东西</h2>
+        <p>不要说“token 被推成正数”。通常被送进激活函数的是某个中间 feature 的数值：</p>
+        <div class="f26-object-grid" aria-label="激活函数前后的四种对象">
+          <div class="f26-object"><b>token / 字符串</b><span>文本里的离散符号或位置，不是一个实数。</span></div>
+          <div class="f26-object"><b>hidden state x</b><span>该位置当前的一整条向量，来自 embedding 或前面层的更新。</span></div>
+          <div class="f26-object"><b>pre-activation z</b><span>Linear 为某个中间通道算出的一个 affine score。</span></div>
+          <div class="f26-object"><b>activation a</b><span>把 z 送进 ReLU 或 GELU 后得到的数。</span></div>
+        </div>
+        <p>本章的因果链是：<b>人为选一个正负不对称的非线性函数 → 训练根据 Loss 调整 W 和 b → 某个通道逐渐让自己关心的输入落到更容易通过的区域。</b>不是“正数天生有意义，负数天生没有信息”。</p>
+
+        <h2 id="preactivation" data-answers="1,24">先看激活前：z 是什么</h2>
+        <p>F-2.5 用行向量写过 <code>xW+b</code>：一整条输入向量一次算出许多输出 feature。现在若只盯着其中一个输出通道，也可以把那一列权重写成向量 w，得到 <code>w^T x+b</code>。<b>这是同一件事的两种排版约定</b>，不是两个不同模块。</p>
+        <p>因此一个通道的 <b>pre-activation</b> 是 $z=w^Tx+b$。它叫“响应”或 score，只是因为它衡量当前输入在该学习到的方向上的 affine 投影；它不是一个已被证明对应“猫”“宾语”或“有用”的自然语言标签。</p>
+        <p>用冻结算例 <code>CHANNEL_INPUT=[1,1]</code>、<code>CHANNEL_W=[[1,-1,0.5,-2],[1.1,0.3,0.8,-1.2]]</code>、<code>CHANNEL_B=[0,0,0,0]</code>。第一个输出通道的逐项计算是 <code>z_1=1(1)+1(1.1)+0=2.1</code>。四个通道由同样的 affine 规则得到 <code>[2.1,-0.7,1.3,-3.2]</code>。</p>
+        <div class="callout note">
+          <div class="c-h">“response”不是小人真的回应问题</div>
+          <p>它只是“某个可学习函数在当前输入上给出的数值”。一个真实模型通常用分布式表示：一个维度很少能被可靠地命名成人类概念。</p>
+        </div>
+
+        <h2 id="sign-is-not-meaning" data-answers="2,3,4,25,26">正负号不是“有用”与“无用”</h2>
+        <p>z 的正负只表示它位于零点的哪一侧，也就是相对于当前学习到的方向是正投影还是负投影。它不天然表示“正确/错误”“存在/不存在”“好/坏”。换一套 feature 坐标，或让后层一起做匹配变换，解释都可能改变。</p>
+        <p>确实可以把权重方向反过来：把 w 换成 -w 会让投影符号翻转。正半轴被设计成“容易通过”只是约定；训练会适应这条约定，学会把它想让该通道响应的模式映到那一侧。</p>
+
+        <h2 id="relu" data-answers="5,6,7,8">ReLU：一条明确的硬门</h2>
+        <p>$ReLU(z)=max(0,z)$。当 z 严格为负时，输出为 0；当 z 为正时，输出就是 z；在 z=0 处函数连续但不可微，实现会选择一个 subgradient。它不是发现了“负数没有价值”，而是人为规定<b>输入空间的两边采用不同规则</b>。</p>
+        <p>这个设计有三个可分开的作用：</p>
+        <ol>
+          <li><b>非线性</b>：两层 Linear 不再能普遍合并成一层。</li>
+          <li><b>门控</b>：某些通道在当前输入上完全关掉，另一些通过。</li>
+          <li><b>稀疏性</b>：一批输入中一部分输出恰为 0；这可能有用，也可能让单元长期不激活而形成 dead ReLU。</li>
+        </ol>
+        <p>也可以设计“保留负数、抑制正数”的镜像门。对前一层配合改变权重方向后，它与普通 ReLU 可以表达等价的函数族。重点在不对称的非线性，不在正号本身有特殊道德地位。</p>
+
+        <h2 id="bias-threshold" data-answers="16,17,18">bias 怎样移动实际门槛</h2>
+        <p>ReLU 的函数拐点固定在 z=0，但 z 本身是 $wx+b$。所以 bias 可以把输入空间中的实际门槛移动到别处。最简单的一维例子是 $ReLU(x-3)$：x 为 2、3、4 时，输出依次是 0、0、1。</p>
+        <table class="f26-mobile-stack agv-threshold-table">
+          <thead><tr><th>x</th><th>ReLU(x-3)</th></tr></thead>
+          <tbody>
+            <tr><td data-label="x">2</td><td data-label="ReLU(x-3)">0</td></tr>
+            <tr><td data-label="x">3</td><td data-label="ReLU(x-3)">0</td></tr>
+            <tr><td data-label="x">4</td><td data-label="ReLU(x-3)">1</td></tr>
+          </tbody>
+        </table>
+        <p>高维时边界是 $w^Tx+b=0$。w 决定边界朝向，b 决定位置。w=0 时，z 完全由 b 决定；负 w 会反转一维不等式的方向。这些都是“门在哪儿”的几何问题，不是给一个 token 安装阈值属性。</p>
+
+        <h2 id="gelu" data-answers="9,22">GELU：不是硬砍，而是平滑的软门</h2>
+        <p>GELU 也总体偏向让较大的正输入通过、压低较大的负输入，但不像 ReLU 那样一刀切成 0。先看数值：</p>
+        <div class="f26-gelu-static">
+          <table class="f26-mobile-stack f26-gelu-values">
+            <thead><tr><th>输入 x</th><th>ReLU(x)</th><th>GELU(x)</th></tr></thead>
+            <tbody>
+              <tr data-gelu-input="-2" data-relu-value="0.000" data-gelu-value="-0.046"><td data-label="输入 x">-2</td><td data-label="ReLU(x)">0.000</td><td data-label="GELU(x)">-0.046</td></tr>
+              <tr data-gelu-input="-1" data-relu-value="0.000" data-gelu-value="-0.159"><td data-label="输入 x">-1</td><td data-label="ReLU(x)">0.000</td><td data-label="GELU(x)">-0.159</td></tr>
+              <tr data-gelu-input="0" data-relu-value="0.000" data-gelu-value="0.000"><td data-label="输入 x">0</td><td data-label="ReLU(x)">0.000</td><td data-label="GELU(x)">0.000</td></tr>
+              <tr data-gelu-input="1" data-relu-value="1.000" data-gelu-value="0.841"><td data-label="输入 x">1</td><td data-label="ReLU(x)">1.000</td><td data-label="GELU(x)">0.841</td></tr>
+              <tr data-gelu-input="2" data-relu-value="2.000" data-gelu-value="1.954"><td data-label="输入 x">2</td><td data-label="ReLU(x)">2.000</td><td data-label="GELU(x)">1.954</td></tr>
+            </tbody>
+          </table>
+          <figure class="f26-gelu-figure">
+            <svg viewBox="0 0 500 220" role="img" aria-labelledby="f26-gelu-curve-title f26-gelu-curve-desc">
+              <title id="f26-gelu-curve-title">GELU 从负三到三的静态曲线</title>
+              <desc id="f26-gelu-curve-desc">曲线在负输入区略低于零，经过原点后随正输入平滑上升。</desc>
+              <line x1="40" y1="120" x2="470" y2="120"></line>
+              <line x1="250" y1="20" x2="250" y2="185"></line>
+              <polyline points="40,120 110,121.4 180,124.8 250,120 320,94.8 390,61.4 460,30.1" fill="none"></polyline>
+              <g><circle cx="110" cy="121.4" r="4"></circle><circle cx="180" cy="124.8" r="4"></circle><circle cx="250" cy="120" r="4"></circle><circle cx="320" cy="94.8" r="4"></circle><circle cx="390" cy="61.4" r="4"></circle></g>
+            </svg>
+            <figcaption>横轴是输入，纵轴是 GELU 输出；表中五个点落在这条平滑曲线上。</figcaption>
+          </figure>
+        </div>
+        <p>直觉上，它把 ReLU 的硬门换成软门：边界附近也保留一点连续变化和连续梯度。GELU 仍是逐元素函数，没有可学习矩阵，也不在 token 之间通信；它可以给出负输出，输出也不被限制在 [0,1]。</p>
+        <div class="callout note">
+          <div class="c-h">optional 数学补充：概率式写法</div>
+          <p>精确定义是 $GELU(x)=x\Phi(x)$，其中 $\Phi$ 是标准正态分布的累积分布函数。若以概率 $\Phi(x)$ 保留 x，期望输出就是 $x\Phi(x)$。这是解释公式的随机门期望，不表示运行时真的为每个 feature 抽样 Bernoulli。</p>
+          <p>常见实现会用 tanh 近似；它近似的是同一个 GELU。较大负输入被压向 0，但不会像 ReLU 一样严格清零。</p>
+        </div>
+
+        <h2 id="negative-information" data-answers="19,20,21,23">负数信息不等于被永久删除</h2>
+        <p>ReLU 的确把<b>这个通道</b>的负 z 变成 0，但网络可以安排别的通道编码相反方向。令 $z=w^Tx+b$；相反分支用 -w 和 -b，得到 -z。下游再把两条 ReLU 输出相减，就有：</p>
+        <div class="math-block">$$ReLU(z)-ReLU(-z)=z$$</div>
+        <p>这不是说每个真实网络都会严格配对，只说明“一个 ReLU 把负半轴清零”不能推出“相反方向的信息在整个网络里不可表达”。</p>
+        <p>GELU 更直接：$GELU(-1)\approx-0.159$。它若再乘后层的负权重 -2，会给后续和带来正贡献约 0.318。负激活和负权重的组合不等于删除信息。至于 Transformer Block 怎样通过 residual 传递原表示，留给 <a href="f-3-transformer-block.html#residual-ln">F-3 的 Residual</a>。</p>
+        <p class="agv-pair-reconstruction">ReLU(z)-ReLU(-z)=z；z=-2.500 时为 0.000-2.500=-2.500。</p>
+
+        <h2 id="training-gates" data-answers="10,11,12,13,14,15">训练怎样利用这条不对称规则</h2>
+        <p>可以这样理解：激活函数先规定“较正的 z 比较容易通过”；训练再根据最终任务的 Loss 调整 W 和 b，让某个通道在<b>有助于任务</b>的输入上更可能落到该区域，在不相关输入上较少强响应。“有助于”由数据、任务头和 Loss 间接决定，不是人手给某个通道贴“猫”或“宾语”的标签。</p>
+        <p>下面是 scalar regression toy：输入 x=1，令 $a=GELU(z)$、$Loss=\frac12(a-target)^2$，学习率为 0.5。target 是这个 toy 想要的输出，Loss 衡量当前输出离它多远。优化器按 <code>w_new=w-η dL/dw</code>、<code>b_new=b-η dL/db</code> 更新参数。</p>
+        <p><b>相关样本，target=1</b>：初始 z=-0.400，第一次更新后变为 -0.176；继续更新会跨过 0，再到 0.213、0.797、1.177。这里说明“这个样本想要更大输出”时，梯度可把 z 往更容易通过的区域移动。</p>
+        <table class="f26-mobile-stack" data-training-trace="relevant">
+          <thead><tr><th>step</th><th>z</th><th>GELU</th><th>dL/dz</th><th>dL/dw</th><th>dL/db</th><th>next z</th></tr></thead>
+          <tbody>
+            <tr><td data-label="step">0</td><td data-label="z">-0.400</td><td data-label="GELU">-0.138</td><td data-label="dL/dz">-0.224</td><td data-label="dL/dw">-0.224</td><td data-label="dL/db">-0.224</td><td data-label="next z">-0.176</td></tr>
+            <tr><td data-label="step">1</td><td data-label="z">-0.176</td><td data-label="GELU">-0.076</td><td data-label="dL/dz">-0.389</td><td data-label="dL/dw">-0.389</td><td data-label="dL/db">-0.389</td><td data-label="next z">0.213</td></tr>
+            <tr><td data-label="step">2</td><td data-label="z">0.213</td><td data-label="GELU">0.125</td><td data-label="dL/dz">-0.584</td><td data-label="dL/dw">-0.584</td><td data-label="dL/db">-0.584</td><td data-label="next z">0.797</td></tr>
+            <tr><td data-label="step">3</td><td data-label="z">0.797</td><td data-label="GELU">0.628</td><td data-label="dL/dz">-0.379</td><td data-label="dL/dw">-0.379</td><td data-label="dL/db">-0.379</td><td data-label="next z">1.177</td></tr>
+            <tr><td data-label="step">4</td><td data-label="z">1.177</td><td data-label="GELU">1.036</td><td data-label="dL/dz">0.040</td><td data-label="dL/dw">0.040</td><td data-label="dL/db">0.040</td><td data-label="next z">1.137</td></tr>
+          </tbody>
+        </table>
+        <p><b>无关样本，target=0</b>：初始 z=0.800，更新会让它逐渐落到更低响应区域。</p>
+        <table class="f26-mobile-stack" data-training-trace="irrelevant">
+          <thead><tr><th>step</th><th>z</th><th>GELU</th><th>dL/dz</th><th>dL/dw</th><th>dL/db</th><th>next z</th></tr></thead>
+          <tbody>
+            <tr><td data-label="step">0</td><td data-label="z">0.800</td><td data-label="GELU">0.631</td><td data-label="dL/dz">0.643</td><td data-label="dL/dw">0.643</td><td data-label="dL/db">0.643</td><td data-label="next z">0.157</td></tr>
+            <tr><td data-label="step">1</td><td data-label="z">0.157</td><td data-label="GELU">0.088</td><td data-label="dL/dz">0.055</td><td data-label="dL/dw">0.055</td><td data-label="dL/db">0.055</td><td data-label="next z">0.102</td></tr>
+            <tr><td data-label="step">2</td><td data-label="z">0.102</td><td data-label="GELU">0.055</td><td data-label="dL/dz">0.032</td><td data-label="dL/dw">0.032</td><td data-label="dL/db">0.032</td><td data-label="next z">0.070</td></tr>
+            <tr><td data-label="step">3</td><td data-label="z">0.070</td><td data-label="GELU">0.037</td><td data-label="dL/dz">0.020</td><td data-label="dL/dw">0.020</td><td data-label="dL/db">0.020</td><td data-label="next z">0.049</td></tr>
+            <tr><td data-label="step">4</td><td data-label="z">0.049</td><td data-label="GELU">0.026</td><td data-label="dL/dz">0.014</td><td data-label="dL/dw">0.014</td><td data-label="dL/db">0.014</td><td data-label="next z">0.036</td></tr>
+          </tbody>
+        </table>
+        <p>这是 optional 的微积分 toy，不应误读为“target=1 一定让任何 z 上升”。真实网络里的输出、Loss、其它样本和其它参数都会共同决定梯度；GELU 在小段负区间还有非单调边界。它只演示了反向传播如何间接移动一个 pre-activation。</p>
+
+        <div class="lab activation-gates-viz activation-gates-static" data-widget="activation-gates-viz" aria-label="activation gates static trace">
+          <div class="lab-h"><span class="lab-tag">Experiment</span><span class="lab-t">正负响应怎样经过门控</span></div>
+          <div class="lab-body">
+            <p class="agv-static-caption">四个视图复用纯计算，不为通道指定固定的人类语义。先看冻结通道的静态对照，再用控件改变输入。</p>
+            <table class="f26-mobile-stack agv-channel-table"><thead><tr><th scope="col">通道 z</th><th scope="col">ReLU(z)</th><th scope="col">GELU(z)</th></tr></thead><tbody>
+              <tr><td data-label="通道 z">2.100</td><td data-label="ReLU(z)">2.100</td><td data-label="GELU(z)">2.062</td></tr>
+              <tr><td data-label="通道 z">-0.700</td><td data-label="ReLU(z)">0.000</td><td data-label="GELU(z)">-0.169</td></tr>
+              <tr><td data-label="通道 z">1.300</td><td data-label="ReLU(z)">1.300</td><td data-label="GELU(z)">1.174</td></tr>
+              <tr><td data-label="通道 z">-3.200</td><td data-label="ReLU(z)">0.000</td><td data-label="GELU(z)">-0.002</td></tr>
+            </tbody></table>
+          </div>
+        </div>
+
+        <h2 id="checkpoint">检查：把这条因果链说准确</h2>
+        <ol>
+          <li>z 的正负不是天然的“有用/无用”标签，而是相对于学习到的方向位于零点哪侧。</li>
+          <li>ReLU / GELU 的关键是对不同区域使用不同规则，从而提供非线性和门控。</li>
+          <li>正半轴是设计约定；训练会调整 W、b，使某个通道把对任务有帮助的模式映到更容易通过的区域。</li>
+          <li>bias 改变 z=0 在输入空间里的位置，因此能移动实际阈值。</li>
+          <li>ReLU 清零一个通道的负响应，不等于整个网络永久失去相反方向的可表达性。</li>
+          <li>GELU 通常保留少量负值；负值随后乘负权重仍可给后续结果正贡献。</li>
+        </ol>
+
+        <h2 id="recap">带着门控直觉进入 Transformer Block</h2>
+        <p>现在可以把 MLP 中间步骤说清楚：Linear 先产生 pre-activation z；激活函数按预先规定的非线性规则把 z 变成 a；Loss 再经反向传播调整 W、b，让不同通道逐渐在不同输入区域响应。回到 <a href="f-2-5-linear-gelu-mlp.html#mlp-trace">F-2.5 的完整 MLP trace</a> 后，继续读 <a href="f-3-transformer-block.html#full-flow">F-3 的完整 Block 数据流</a>；LayerNorm 会在 <a href="f-3-transformer-block.html#layernorm">F-3 LayerNorm</a> 中单独展开。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/mlp-basics-core.js"></script>
+  <script src="../../assets/js/widgets/activation-gates-viz.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

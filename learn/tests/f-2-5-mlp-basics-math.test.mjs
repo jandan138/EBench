@@ -8,7 +8,8 @@ import vm from "node:vm";
 const require = createRequire(import.meta.url);
 const corePath = new URL("../assets/js/widgets/mlp-basics-core.js", import.meta.url);
 const coreFile = fileURLToPath(corePath);
-const chapterPath = new URL("../chapters/foundations/f-2-5-linear-gelu-mlp.html", import.meta.url);
+const mlpChapterPath = new URL("../chapters/foundations/f-2-5-linear-gelu-mlp.html", import.meta.url);
+const activationChapterPath = new URL("../chapters/foundations/f-2-6-activation-gates.html", import.meta.url);
 
 test("requiring the core in Node does not assign a browser global", () => {
   delete globalThis.EBMLPBasics;
@@ -57,7 +58,7 @@ test("public inputs, parameters, and traces are frozen and shape-safe", () => {
 
 test("static trace data values agree with the executable core", () => {
   const core = require(coreFile);
-  const chapter = readFileSync(chapterPath, "utf8");
+  const chapter = readFileSync(mlpChapterPath, "utf8");
   const values = [...chapter.matchAll(/data-value="([^"]+)"/g)].map((match) => match[1].split(",").map(Number));
   const trace = core.trace(core.inputs[0]);
   assert.equal(values.length, 4);
@@ -69,7 +70,7 @@ test("static trace data values agree with the executable core", () => {
 
 test("static GELU table values agree with the executable core", () => {
   const core = require(coreFile);
-  const chapter = readFileSync(chapterPath, "utf8");
+  const chapter = readFileSync(activationChapterPath, "utf8");
   const rows = [...chapter.matchAll(/data-gelu-input="([^"]+)" data-relu-value="([^"]+)" data-gelu-value="([^"]+)"/g)]
     .map((match) => ({ input: Number(match[1]), relu: match[2], gelu: match[3] }));
   assert.deepEqual(rows.map(({ input }) => input), [-2, -1, 0, 1, 2]);
@@ -125,7 +126,7 @@ test("channel trace derives frozen channel rows from the frozen affine fixture",
 
 test("both complete static training tables agree cell-for-cell with the core", () => {
   const core = require(coreFile);
-  const chapter = readFileSync(chapterPath, "utf8");
+  const chapter = readFileSync(activationChapterPath, "utf8");
   const fixtures = {
     relevant: core.trainingTrace(-0.4, 0, 1, 5),
     irrelevant: core.trainingTrace(0.8, 0, 0, 5),

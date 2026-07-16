@@ -25,104 +25,110 @@
       <article class="article">
         <div class="eyebrow">Part F · Foundations · f-3</div>
         <h1>Transformer Block 从零开始（MLP / Residual / LayerNorm）</h1>
-        <p class="lede">F-2 解释单头 Attention 怎样收集上下文，F-2.25 解释多个 head 怎样 concat 并经 $W_O$ 回到模型宽度，F-2.5 解释一条向量怎样经过 Linear、GELU 与 MLP 继续加工。本节把它们放回一个可堆叠的 Block：通信、逐位置计算、残差传递与归一化共同更新 hidden state。</p>
+        <p class="lede">现在不再把 Attention、MLP、Residual、LayerNorm 当成四张分散的知识卡。我们只跟一条 hidden state 走一次完整 Block：它先与整句通信，再被加回原表示，再做逐位置计算，再被加回一次。走完以后，再回头拆每个部件为什么存在。</p>
 
         <h2 id="block-scene">先回到“她 / 小红”的一条 contextual state</h2>
-        <p>Attention 已经让“小红”的信息来到“她”的位置。现在“她”的 contextual hidden state 不再只是这个字本身，而是一条带着当前上下文的向量；它还要经过逐位置计算，成为下一步可继续传递的状态。</p>
+        <div class="callout note">
+          <div class="c-h">从搜索直接跳进来？先拿这张最小地图</div>
+          <p>一个 Block 的输入是张量 <code>[B,n,d]</code>：B 条序列、每条 n 个 token、每个 token 有 d 个 feature。这里会跟踪“她”这个<b>焦点位置</b>的那一行，但 Attention 每次仍读取<b>整个序列</b>；LayerNorm 和 MLP 才是逐位置处理。每次 <code>+</code> 都是同 shape <code>[B,n,d]</code> 的<b>逐元素相加</b>。</p>
+        </div>
+        <p>假设前一层已经让“她”的 hidden state 混入了一些“小红”的信息。它不是一个固定意思的词向量，而是这个位置此刻的一排数。一个 Block 的任务不是把这排数推翻重写，而是在保留原表示的前提下，先让它再通信一次，再做一次非线性加工。</p>
 
         <h2 id="mainline" data-answers="15">先记住无公式的四个角色</h2>
-        <table>
-          <thead><tr><th>模块</th><th>教学分工</th></tr></thead>
-          <tbody>
-            <tr><td>Attention</td><td>从其他可见位置收集信息。</td></tr>
-            <tr><td>MLP / FFN</td><td>对每个位置的 contextual hidden state 做非线性计算。</td></tr>
-            <tr><td>Residual</td><td>保留 residual stream，并加上分支给出的更新。</td></tr>
-            <tr><td>LayerNorm</td><td>稳定送入计算分支的特征尺度。</td></tr>
-          </tbody>
-        </table>
-        <p>“通信、计算、传递、稳定”是理解分工的捷径，不是绝对能力边界。整个 batch 中有 $B$ 条序列、每条有 $n$ 个位置、每个位置宽度为 $d$；Block 不改变这三个轴。</p>
+        <div class="f3-role-grid" aria-label="Transformer Block 的四个角色">
+          <div class="f3-role"><b>Attention</b><code>通信</code><span>每个位置可从可见的其它位置取回信息；它消费整个序列。</span></div>
+          <div class="f3-role"><b>MLP</b><code>计算</code><span>对每个位置当前向量应用同一个非线性函数；它是逐位置的。</span></div>
+          <div class="f3-role"><b>Residual</b><code>保留 + 更新</code><span>原表示走旁路，分支只需要提供要加上的更新。</span></div>
+          <div class="f3-role"><b>LayerNorm</b><code>稳定</code><span>每个位置沿自己的 feature 维整理进入计算分支的尺度。</span></div>
+        </div>
+        <p>把它们连成一句话：<b>先规范化 → Attention 通信 → 加回原表示 → 再规范化 → MLP 计算 → 再加回。</b>下面先走完这一趟，不在半路停下来讲 Jacobian 或每个矩阵。</p>
 
-        <h2 id="attention-params" data-answers="1">Attention 的短回顾：W_O 回到宽度 d</h2>
-        <p><a href="f-2-25-multi-head-attention.html#output-projection">F-2.25</a> 已经推导了完整的 multi-head Attention：各 head 的结果先 <code>concat</code>，再经过 $W_O$ 线性混合并<b>回到模型宽度 d</b>，因此可以和 residual stream 相加。这里不重做 Q/K/V 或多头推导。</p>
+        <h2 id="full-flow" data-answers="12,15">一条 hidden state 怎样穿过完整 pre-norm Block</h2>
+        <p>先定义符号，避免公式突然冒出陌生字母：$H^\ell$ 是第 ℓ 层输入的整个 <code>[B,n,d]</code> 张量；$A^\ell$ 是第一次 residual 相加后的临时张量；$LN_1,LN_2$ 是两套独立参数的 LayerNorm；$Attn$ 和 $MLP$ 都输出同样的 <code>[B,n,d]</code> shape。</p>
+        <div class="math-block">$$U^\ell=LN_1(H^\ell)$$</div>
+        <div class="math-block">$$A^\ell=H^\ell+Attn(U^\ell)$$</div>
+        <div class="math-block">$$V^\ell=LN_2(A^\ell),\qquad H^{\ell+1}=A^\ell+MLP(V^\ell)$$</div>
+        <p>这就是现代常见的 pre-norm 写法。两个加号都合法，是因为 multi-head Attention 经 W<sub>O</sub> 已回到 d，MLP 经 Linear 2 也回到 d。每一个 <code>+</code> 都沿 B、n、d 对应元素相加，不是把 token 接到序列末尾。</p>
+        <div class="code" data-lang="text"><div class="code-h"><span class="fn">读公式时只跟焦点位置 i</span><button class="cp">复制</button></div><pre><code>整句 H^ell
+  → LN_1
+  → Attention(整句)
+  → 取回第 i 行 Delta_A
+  → H_i^ell + Delta_A
+  → LN_2
+  → MLP(第 i 行)
+  → A_i^ell + Delta_M
+  → H_i^(ell+1)</code></pre></div>
 
-        <a id="shared-mlp" aria-hidden="true" style="display:block;height:0;overflow:hidden;scroll-margin-top:5rem"></a>
-        <a id="mlp-expressivity" aria-hidden="true" style="display:block;height:0;overflow:hidden;scroll-margin-top:5rem"></a>
-        <h2 id="mlp" data-answers="1,2,3,4">MLP 的短回顾：三步后回到 d</h2>
-        <p>完整的零基础手算在 <a href="f-2-5-linear-gelu-mlp.html#mlp-trace">F-2.5 的 MLP trace</a>。这里先用 <b>Linear 1</b> 把宽度 $d$ 扩到中间宽度 $d_ff$，再让 <b>GELU</b> 对每个 feature 逐元素提供非线性，最后由 <b>Linear 2</b> 投回 d。</p>
-        <p>同一层对每个位置使用同一个逐位置 MLP；不同 contextual state 可以得到不同结果。不同层通常有不同参数。它是标准 dense Transformer 的简化，MoE 等变体会选择不同专家。</p>
-
-        <h2 id="residual-ln" data-answers="5,6,7">Residual：原表示加上分支更新</h2>
-        <p>对任一子层，写作 $y=x+F(x)$。$F(x)$ 在加法中扮演 Delta，即“这一步给 residual stream 的更新”；它<b>不能保证</b>数值很小，也不能保证人能把它解释成一句话。identity route 提供直接传递路径，但不等于整个 Block 可逆或绝不丢信息。</p>
-        <div class="code" data-lang="text"><div class="code-h"><span class="fn">Residual 的两条前向路径</span><button class="cp">复制</button></div><pre><code>x ───────────────┐
-x ──&gt; F(x) ──────+
-                  │
-                  y
-
-y = x + F(x)</code></pre></div>
-        <p>这条静态旁路图画的是绕过计算分支的路径。它让分支学习“改什么”，同时让旧表示可以直接抵达后续加法。</p>
-
-        <h2 id="residual-gradient" data-answers="8">前向路径和梯度路径不是同一句话</h2>
-        <p>前向时，$x$ 直接加到输出：$y=x+F(x)$。反向时，局部 Jacobian 为：</p>
-        <div class="math-block">$$\frac{\partial y}{\partial x}=I+J_F(x)$$</div>
-        <p>其中 $I$ 是 identity 的梯度贡献，$J_F$ 是分支的 Jacobian。这个加法通常给优化更直接的通路，但<b>不能保证</b>梯度永不消失、彼此不抵消或绝不爆炸；初始化、尺度、优化器和全网络仍然重要。</p>
-
-        <h2 id="layernorm" data-answers="9">LayerNorm：让计算分支少受尺度漂移干扰</h2>
-        <p>层层更新可能让激活尺度漂移：有些特征过大使非线性饱和，有些过小几乎不起作用。训练中可能表现为学习率敏感、loss spike，严重时出现 NaN。LayerNorm 降低这类风险，不承诺任何训练都稳定，也不替代合理的初始化与优化设置。</p>
-        <div class="math-block">$$\operatorname{LN}(x)=\gamma\odot\frac{x-\mu}{\sqrt{\sigma^2+\epsilon}}+\beta$$</div>
-
-        <h2 id="layernorm-axis" data-answers="10">它只沿最后一个 feature 轴归一化</h2>
-        <p>若 $X$ 的 shape 是 $[B,n,d]$，LayerNorm 对每个独立的 $(b,i)$ 行 $X[b,i,:]$ 计算均值和 population variance：<b>不跨 batch</b>，也<b>不跨 token</b>，只沿最后的 $d$ 个 feature。</p>
-        <div class="code" data-lang="text"><div class="code-h"><span class="fn">[B,n,d] 的归一化轴</span><button class="cp">复制</button></div><pre><code>X[b,i,:]
-    │
-    ├─ mean/variance over d
-    │
-    └─&gt; LN(X)[b,i,:]
-
-each (b,i) is independent</code></pre></div>
-        <p>例如 $x=[1,2,3]$，$\mu=2$，population variance 为 $2/3$。忽略 $\epsilon$ 时，标准化结果约为 $[-1.225,0,1.225]$。$\gamma,\beta\in\mathbb{R}^d$ 在 batch 和 position 间共享；有 $\epsilon$ 时方差只近似为 1，且经过 gamma/beta 后均值和方差不要求保持 0/1。</p>
-
-        <h2 id="layernorm-semantics" data-answers="11">LayerNorm 没有把信息原样存回去</h2>
-        <p>LayerNorm 是<b>非可逆</b>的：单独看归一化结果，无法恢复每一行原先的均值和整体尺度。它保留相对 feature pattern，并用可学习的 gamma、beta 调整每个 feature 的缩放和平移；归一化输出也没有 $[-1,1]$ 的固定边界。</p>
-        <p>当一行 feature 完全相同，例如 $[2,2,2]$，分子全为 0；有 $\epsilon$ 时标准化部分为 0，输出由 beta 决定。这是数值定义，不是“这行没有任何语义”的证明。在 pre-norm Block 中，未归一化的 residual stream 仍绕过 LN 直接参与加法，因而 LN 分支移除的均值/尺度不会自动等同于整条 stream 信息消失。</p>
-
-        <h2 id="full-flow" data-answers="12,15">把两条子层组装成 pre-norm Block</h2>
-        <p>现代常见写法把两个独立的 LayerNorm 放在各自计算分支前：</p>
-        <div class="math-block">$$A^\ell = H^\ell + \operatorname{Attn}^\ell\!\left(\operatorname{LN}_1^\ell(H^\ell)\right)$$
-$$H^{\ell+1} = A^\ell + \operatorname{MLP}^\ell\!\left(\operatorname{LN}_2^\ell(A^\ell)\right)$$</div>
-        <p>顺序是 <b>LN_1 -&gt; Attention -&gt; + -&gt; LN_2 -&gt; MLP -&gt; +</b>。两次 LN 不是同一组参数；每层的 Attention、MLP、LN 通常也各不相同。</p>
-
-        <h2 id="block-trace" data-answers="7,12">同一组 hidden state 的六步追踪</h2>
-        <p>下面用“她 / 喜欢 / 苹果”三行 toy hidden states 表示同一层的输入。数值不代表训练出的模型，只用于追踪数据在哪里走。</p>
+        <h2 id="block-trace" data-answers="7,12">现在跟“她”走六步，不把它误当成孤立向量</h2>
         <ol>
-          <li>$H^\ell$：三行保持 shape $[1,3,d]$。</li>
-          <li>$\operatorname{LN}_1(H^\ell)$：每一行各自沿 $d$ 归一化。</li>
-          <li>$\operatorname{Attn}$：每一行从可见位置通信，经过 $W_O$ 后回到 $d$。</li>
-          <li>$A^\ell=H^\ell+\operatorname{Attn}(\cdot)$：旧 stream 和 Attention Delta 相加。</li>
-          <li>$\operatorname{LN}_2(A^\ell)$，再逐行经过 MLP。</li>
-          <li>$H^{\ell+1}=A^\ell+\operatorname{MLP}(\cdot)$：得到同 shape 的下一层状态。</li>
+          <li>输入是整句 H<sup>ℓ</sup>；焦点是“她”的那一行。</li>
+          <li>LN<sub>1</sub> 分别规范化每个 token 的 feature；“她”只沿自己的 d 个 feature 计算均值和方差。</li>
+          <li>Attention 让“她”的 Query 与整句可见位置匹配，形成来自其它位置的更新 Δ<sub>A</sub>。</li>
+          <li>第一次 residual 得到 A<sup>ℓ</sup> = H<sup>ℓ</sup> + Δ<sub>A</sub>；原“她”的状态没有被分支直接替换。</li>
+          <li>LN<sub>2</sub> 后，MLP 只处理“她”这一行，产生另一个更新 Δ<sub>M</sub>。</li>
+          <li>第二次 residual 得到 H<sup>ℓ+1</sup> = A<sup>ℓ</sup> + Δ<sub>M</sub>，作为下一层的输入。</li>
         </ol>
         <div class="lab">
           <div class="lab-h"><span class="lab-tag">interactive</span><span class="lab-t">Transformer Block 四视角追踪</span></div>
           <div class="lab-body transformer-block-viz" data-widget="transformer-block-viz"></div>
-          <div class="lab-cap">四个视图始终追踪同一组三行、四维 toy hidden states。数值只用于辨认数据流、共享范围和归一化轴。</div>
+          <div class="lab-cap">四个视图始终追踪同一组三行、四维 toy hidden states。数值只用于辨认数据流、参数共享范围和 LayerNorm 的轴。</div>
         </div>
+
+        <h2 id="attention-params" data-answers="1">Attention 分支只回顾它如何回到宽度 d</h2>
+        <p><a href="f-2-25-multi-head-attention.html#output-projection">F-2.25</a> 已推导 multi-head Attention：每个 head 完成自己的 Q/K/V 匹配和 Value 聚合，各 head 输出 concat 后再经过 W<sub>O</sub>。W<sub>O</sub> 是普通 Linear，它把 concat 的 feature 混合并投回模型宽度 d，所以 Attention 分支可以产生与 H<sup>ℓ</sup> 相加的 Δ<sub>A</sub>。</p>
+        <p>这一节不重做 Q/K/V。这里唯一需要记住的是：Attention 的输入是整个序列，输出却为每个 token 返回同宽度的一行更新。</p>
+
+        <a id="shared-mlp" aria-hidden="true" style="display:block;height:0;overflow:hidden;scroll-margin-top:5rem"></a>
+        <a id="mlp-expressivity" aria-hidden="true" style="display:block;height:0;overflow:hidden;scroll-margin-top:5rem"></a>
+        <h2 id="mlp" data-answers="1,2,3,4">MLP 分支：每行复用同一个非线性函数</h2>
+        <p><a href="f-2-5-linear-gelu-mlp.html#mlp-trace">F-2.5 的 MLP trace</a> 已把一条向量走完：Linear 1 把 d 扩到 d<sub>ff</sub>，GELU 逐元素加入非线性，Linear 2 再回到 d。这里把它看作产生 Δ<sub>M</sub> 的函数：</p>
+        <div class="math-block">$$MLP(x)=GELU(xW_1+b_1)W_2+b_2$$</div>
+        <p>同层所有 token 使用同一组 W<sub>1</sub>、b<sub>1</sub>、W<sub>2</sub>、b<sub>2</sub>。共享的是函数，不是输出：不同位置输入不同，得到的 Δ<sub>M</sub> 也可不同。GELU 的正负响应、bias 和训练细节请回到 <a href="f-2-6-activation-gates.html#preactivation">F-2.6</a>。</p>
+        <p>Attention 负责通信、MLP 负责逐位置计算是一个有用但不排他的分工。不同层的 MLP 参数不同；不能把某一层的某个维度机械命名为固定语义。</p>
+
+        <h2 id="residual-ln" data-answers="5,6,7">Residual：原表示加上分支更新</h2>
+        <p>抽象写作 $y=x+F(x)$。x 是进入某个子层前的 hidden state，F(x) 是 Attention 或 MLP 分支算出的更新，y 是相加后的结果。把 F(x) 叫 Δ 只是方便：它表示“在当前表示上加什么”，不保证数值一定小。</p>
+        <div class="code" data-lang="text"><div class="code-h"><span class="fn">两条前向路径在加号处汇合</span><button class="cp">复制</button></div><pre><code>x ───────────────┐
+                 + → y = x + F(x)
+x → 子层 F(x) ──┘</code></pre></div>
+        <p>直观上，网络不必每层从头写出一个新表示；它可以先保留已有状态，再学习如何补充或修改。没有 residual 也可以定义网络，但深层堆叠更容易把早先信息完全交给后续变换处理。Residual 提供了一条明确的 identity 项，却<b>不能保证</b>信息永不丢失，也不保证整个 Block 可逆。</p>
+
+        <h2 id="residual-gradient" data-answers="8">optional：为什么又有人说“梯度高速公路”</h2>
+        <p>前向的“原表示旁路”与反向的“梯度旁路”相关，但不是同一句话。对 $y=x+F(x)$ 求导会出现 identity 项：</p>
+        <div class="math-block">$$\frac{\partial y}{\partial x}=I+J_F(x)$$</div>
+        <p>这里 I 是恒等映射，$J_F$ 是 F 的 Jacobian。直觉上，反向信号除了穿过复杂分支外，还看到一条直接的恒等贡献。它通常有利于深网络优化，但<b>不能保证</b>梯度永不消失、爆炸或训练成功；这段是 optional 微积分补充，不是理解 Block 主线的前提。</p>
+
+        <h2 id="layernorm" data-answers="9">LayerNorm：让进入分支的数值更稳定</h2>
+        <p>多层相加和变换会让各 token 向量的数值尺度持续变化。LayerNorm 在送入 Attention 或 MLP 分支前，先把<b>当前 token 自己的 d 个 feature</b>整理到较稳定的尺度，再用可学习参数恢复模型需要的缩放和平移。</p>
+        <div class="math-block">$$LN(x)=\gamma\odot\frac{x-\mu}{\sqrt{\sigma^2+\epsilon}}+\beta$$</div>
+        <p>在这条式子里，μ 是该 token 的 feature 均值，σ<sup>2</sup> 是同一行的 feature 方差，ε 是避免除零的小常数；γ、β 是每个 feature 可学习的缩放与平移。它们都在本 LayerNorm 内部定义，不会跨 token 偷看数据。</p>
+
+        <h2 id="layernorm-axis" data-answers="10">它只沿最后一个 feature 轴归一化</h2>
+        <p>对张量 X<code>[B,n,d]</code>，LayerNorm 分别处理每个 <code>X[b,i,:]</code>。它<b>不跨 batch</b>，也<b>不跨 token</b>；“她”的均值和方差来自“她”自己的 d 个 feature，“苹果”另算一套。</p>
+        <div class="math-block">$$\mu_{b,i}=\frac{1}{d}\sum_{k=1}^{d}X[b,i,k]$$</div>
+        <div class="math-block">$$\sigma^2_{b,i}=\frac{1}{d}\sum_{k=1}^{d}(X[b,i,k]-\mu_{b,i})^2$$</div>
+        <p>这也是为什么 LayerNorm 可以在 batch size 为 1 时照常工作。它和 BatchNorm 按 batch 聚合统计量的思路不同。</p>
+
+        <h2 id="layernorm-semantics" data-answers="11">LayerNorm 改数值，为什么不等于抹掉语义？</h2>
+        <p>它确实会改变一行向量的均值和尺度，因此不能说“原向量被原样存回去”。但它保留了同一行 feature 相对偏离均值的结构，并允许 γ（gamma）、β（beta）学习每个 feature 合适的缩放和平移。后续 Attention、MLP 和 residual 也继续共同决定表达。</p>
+        <p>LayerNorm 通常是<b>非可逆</b>的；不能从归一化结果唯一恢复原始均值和方差。它的目的不是无损压缩，而是让分支接收更稳定的数值分布。</p>
 
         <h2 id="variants">同一个想法有常见变体</h2>
         <table class="f3-mobile-stack">
           <thead><tr><th>变体</th><th>最小区别</th><th>本节怎么读</th></tr></thead>
           <tbody>
-            <tr><td data-label="变体">原始 post-norm</td><td data-label="最小区别">先做子层和残差，再 LayerNorm。</td><td data-label="本节怎么读">与本节主线顺序不同。</td></tr>
+            <tr><td data-label="变体">原始 post-norm</td><td data-label="最小区别">先做子层和 residual，再 LayerNorm。</td><td data-label="本节怎么读">与本节主线顺序不同。</td></tr>
             <tr><td data-label="变体">现代 pre-norm</td><td data-label="最小区别">先 LayerNorm，再做子层并加回。</td><td data-label="本节怎么读">本节公式采用这一种。</td></tr>
             <tr><td data-label="变体">RMSNorm</td><td data-label="最小区别">以 RMS 缩放，常不减均值。</td><td data-label="本节怎么读">仍是稳定分支输入的归一化设计。</td></tr>
             <tr><td data-label="变体">SwiGLU</td><td data-label="最小区别">用门控 MLP 代替简单 GELU MLP。</td><td data-label="本节怎么读">仍是逐位置的非线性计算。</td></tr>
           </tbody>
         </table>
 
-        <h2 id="deep-stack" data-answers="13">深度：反复 refinement，不是固定语义楼层</h2>
-        <p>堆叠 Block 是对 hidden state 的多次 refinement：早一层的通信和更新成为下一层的输入，再由新的参数继续变换。某些分析会观察到局部、句法或任务相关的趋势，但不能给某一层强行指定“这一层一定学人物、下一层一定学动作”的固定语义。</p>
+        <h2 id="deep-stack" data-answers="13">为什么重复几十层？是反复 refinement，不是固定语义楼层</h2>
+        <p>每一层的通信和更新成为下一层输入，再由一套新参数继续处理。层数增加，模型有机会把局部关系、长程关系和任务相关特征反复组合；但不能强行规定“第 3 层一定是语法、第 12 层一定是语义”。不同模型、数据和任务会改变这种趋势。</p>
 
-        <h2 id="training-heads" data-answers="14">任务头怎样参与训练</h2>
-        <p>最后的 hidden state 会被任务头读出，loss 反向传播会联合塑造所有可训练参数。冻结 backbone、只训练 adapter/LoRA，或使用不同输出头时，实际更新范围会不同。</p>
+        <h2 id="training-heads" data-answers="14">最后的 hidden state 怎样用于不同任务</h2>
+        <p>整个模型训练的核心，是让每层更新后的 hidden states 越来越适合最终任务头读取。Loss 通过任务头和所有 Block 反向传播；冻结 backbone、只训练 adapter/LoRA，或换用不同任务头时，实际更新范围会不同。</p>
         <table class="f3-mobile-stack">
           <thead><tr><th>系统</th><th>任务头常读什么</th><th>输出例子</th></tr></thead>
           <tbody>
@@ -135,15 +141,16 @@ $$H^{\ell+1} = A^\ell + \operatorname{MLP}^\ell\!\left(\operatorname{LN}_2^\ell(
 
         <h2 id="checkpoint" data-answers="1,4,5,6,8,10,11,14">检查：把常见误解改写准确</h2>
         <ol>
-          <li>“没有 MLP 就不能预测。”不准确：Attention 后可以直接接头；MLP 是增加逐位置非线性能力的设计。</li>
-          <li>“共享 MLP 必然输出相同。”不准确：共享的是函数，相同输入才在确定性条件下得到相同输出。</li>
-          <li>“Residual 让信息绝不丢失、梯度绝不出问题。”不准确：它提供 identity 项，不能保证可逆或完全避免优化困难。</li>
-          <li>“LayerNorm 在全 batch 或全序列上算均值。”不准确：它对每个 $X[b,i,:]$ 独立沿 $d$ 计算。</li>
+          <li>“Attention 后直接预测就够了，所以 MLP 多余。”不准确：可以直接接头，但 MLP 为每个位置增加了逐位置非线性计算能力。</li>
+          <li>“Residual 会原样保存所有信息。”不准确：它提供 identity 项和直接路径，不能保证可逆或绝不丢失信息。</li>
+          <li>“LayerNorm 在全 batch 或全句子上算均值。”不准确：它对每个 X[b,i,:] 独立沿 d 计算。</li>
+          <li>“跟踪一条 token 就代表 Attention 只处理这条 token。”不准确：我们只跟踪焦点输出；Attention 仍读取整个可见序列。</li>
+          <li>“层越深就有固定、可命名的语义职责。”不准确：深层是反复 refinement，趋势不等于硬规则。</li>
         </ol>
 
-        <h2 id="recap" data-answers="15">带走这条可复述的链路</h2>
-        <p>Attention 负责通信；MLP 负责每个位置的非线性计算；Residual 传递原表示并叠加更新；LayerNorm 稳定进入分支的数值。多个 Block 保持 $[B,n,d]$，反复更新 hidden state，任务头再把它读成 GPT、BERT、VLM 或 VLA 所需的输出。</p>
-        <p>想复习细节，可先回到 <a href="f-2-25-multi-head-attention.html#output-projection">F-2.25 的 concat 与 $W_O$</a>，再看 <a href="f-2-5-linear-gelu-mlp.html#preactivation">F-2.5 pre-activation</a>、<a href="f-2-5-linear-gelu-mlp.html#shared-mlp">F-2.5 shared MLP</a> 或 <a href="f-2-5-linear-gelu-mlp.html#why-nonlinearity">F-2.5 非线性解释</a>。</p>
+        <h2 id="recap" data-answers="15">带走这一条连续主线</h2>
+        <p>Attention 负责通信，MLP 负责逐位置计算，Residual 保留并传递当前表示再叠加更新，LayerNorm 稳定进入分支的数值。一个 Block 用两次“规范化 → 分支 → 加回”把 <code>[B,n,d]</code> 更新成新的同 shape hidden states；堆叠多个 Block 后，任务头再把它读成 GPT、BERT、VLM 或 VLA 所需的输出。</p>
+        <p>想复习细节，可回到 <a href="f-2-25-multi-head-attention.html#output-projection">F-2.25 的 concat 与 W<sub>O</sub></a>、<a href="f-2-5-linear-gelu-mlp.html#mlp-trace">F-2.5 的完整 MLP trace</a>，或 <a href="f-2-6-activation-gates.html#preactivation">F-2.6 的 pre-activation 与门控</a>。</p>
         <div class="callout note">
           <div class="c-h">五篇一手资料</div>
           <ul>
