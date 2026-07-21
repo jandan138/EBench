@@ -56,32 +56,52 @@
       return EBW.el("div", { class: "tbv-arrow", "aria-hidden": "true" }, `<span>→</span><small>${label || ""}</small>`);
     }
 
+    /* Widget 懒加载晚于 book.js 首次 KaTeX；每次插入公式后对本节点再渲染一次。 */
+    function typeset(el) {
+      if (!window.renderMathInElement) return el;
+      window.renderMathInElement(el, {
+        delimiters: [
+          { left: "$$", right: "$$", display: true },
+          { left: "$", right: "$", display: false },
+        ],
+        throwOnError: false,
+      });
+      return el;
+    }
+
+    function formula(tex) {
+      return typeset(EBW.el("p", { class: "tbv-formula" }, tex));
+    }
+
     function renderBlock() {
       const view = EBW.el("div", { class: "tbv-view" });
       view.appendChild(EBW.el("div", { class: "tbv-view-head" },
         "<b>两次顺序更新，同一条 residual stream</b><span>每一步都保持 [B,n,d] = [1,3,4]</span>"));
-      view.appendChild(tensor("H^ell · 输入"));
+      view.appendChild(tensor("H<sup>ℓ</sup> · 输入"));
 
       const stages = EBW.el("div", { class: "tbv-stages" });
-      stages.appendChild(op("LN_1", "逐行沿 d 归一化", "norm"));
+      stages.appendChild(op("LN<sub>1</sub>", "逐行沿 d 归一化", "norm"));
       stages.appendChild(arrow());
-      stages.appendChild(op("Attention", "跨位置通信，含 W_O", "branch"));
-      stages.appendChild(arrow("Delta_A"));
-      stages.appendChild(op("+ H^ell", "第一次 residual 相加", "add"));
+      stages.appendChild(op("Attention", "跨位置通信，含 W<sub>O</sub>", "branch"));
+      stages.appendChild(arrow("Δ<sub>A</sub>"));
+      stages.appendChild(op("+ H<sup>ℓ</sup>", "第一次 residual 相加", "add"));
       stages.appendChild(arrow());
-      stages.appendChild(op("LN_2", "逐行沿 d 归一化", "norm"));
+      stages.appendChild(op("LN<sub>2</sub>", "逐行沿 d 归一化", "norm"));
       stages.appendChild(arrow());
       stages.appendChild(op("MLP", "每行使用同一函数", "branch"));
-      stages.appendChild(arrow("Delta_M"));
-      stages.appendChild(op("+ A^ell", "第二次 residual 相加", "add"));
+      stages.appendChild(arrow("Δ<sub>M</sub>"));
+      stages.appendChild(op("+ A<sup>ℓ</sup>", "第二次 residual 相加", "add"));
       view.appendChild(stages);
 
       const bypasses = EBW.el("div", { class: "tbv-bypasses" });
-      bypasses.appendChild(EBW.el("div", { class: "tbv-bypass" }, "<b>旁路 1</b><span>H^ell 绕过 LN_1 与 Attention，直接到第一次 +</span>"));
-      bypasses.appendChild(EBW.el("div", { class: "tbv-bypass" }, "<b>旁路 2</b><span>A^ell 绕过 LN_2 与 MLP，直接到第二次 +</span>"));
+      bypasses.appendChild(EBW.el("div", { class: "tbv-bypass" }, "<b>旁路 1</b><span>H<sup>ℓ</sup> 绕过 LN<sub>1</sub> 与 Attention，直接到第一次 +</span>"));
+      bypasses.appendChild(EBW.el("div", { class: "tbv-bypass" }, "<b>旁路 2</b><span>A<sup>ℓ</sup> 绕过 LN<sub>2</sub> 与 MLP，直接到第二次 +</span>"));
       view.appendChild(bypasses);
-      view.appendChild(EBW.el("p", { class: "tbv-formula" },
-        "A^ell = H^ell + Attn(LN_1(H^ell))    ·    H^(ell+1) = A^ell + MLP(LN_2(A^ell))"));
+      view.appendChild(formula(
+        "$A^{\\ell} = H^{\\ell} + \\mathrm{Attn}(\\mathrm{LN}_1(H^{\\ell}))$"
+        + " · "
+        + "$H^{\\ell+1} = A^{\\ell} + \\mathrm{MLP}(\\mathrm{LN}_2(A^{\\ell}))$"
+      ));
       return view;
     }
 
@@ -97,11 +117,11 @@
         item.appendChild(arrow());
         item.appendChild(op("同一个 MLP", "Linear → GELU → Linear", "branch"));
         item.appendChild(arrow());
-        item.appendChild(EBW.el("div", { class: "tbv-row-output" }, `<b>Delta ${index + 1}</b><span>由本行输入决定</span>`));
+        item.appendChild(EBW.el("div", { class: "tbv-row-output" }, `<b>Δ<sub>${index + 1}</sub></b><span>由本行输入决定</span>`));
         mlpRows.appendChild(item);
       });
       view.appendChild(mlpRows);
-      view.appendChild(EBW.el("p", { class: "tbv-note" }, "同层的三个位置使用同一组 W_1、b_1、W_2、b_2；不同输入可以得到不同更新。"));
+      view.appendChild(EBW.el("p", { class: "tbv-note" }, "同层的三个位置使用同一组 W<sub>1</sub>、b<sub>1</sub>、W<sub>2</sub>、b<sub>2</sub>；不同输入可以得到不同更新。"));
       return view;
     }
 
@@ -114,7 +134,7 @@
       routes.appendChild(EBW.el("div", { class: "tbv-route tbv-route-bypass" },
         "<b>Identity bypass</b><span>x ──────────────────────────────┐</span><small>原 hidden state 直接传到加法</small>"));
       routes.appendChild(EBW.el("div", { class: "tbv-route tbv-route-branch" },
-        "<b>计算分支 F(x)</b><span>x → LayerNorm → Attention 或 MLP ─┤</span><small>分支产生 Delta；Delta 不保证很小</small>"));
+        "<b>计算分支 F(x)</b><span>x → LayerNorm → Attention 或 MLP ─┤</span><small>分支产生 Δ；Δ 不保证很小</small>"));
       routes.appendChild(EBW.el("div", { class: "tbv-route tbv-route-sum" },
         "<b>相加</b><span>└→ y = x + F(x)</span><small>两条路径在逐元素加法处汇合</small>"));
       view.appendChild(routes);
@@ -136,9 +156,10 @@
         normRows.appendChild(item);
       });
       view.appendChild(normRows);
-      view.appendChild(EBW.el("p", { class: "tbv-formula" },
-        "LN(X)[b,i,:] = gamma * (X[b,i,:] - mean_i) / sqrt(var_i + epsilon) + beta"));
-      view.appendChild(EBW.el("p", { class: "tbv-note" }, "上方标准化数值省略 gamma/beta；实际 LayerNorm 会再做可学习的逐 feature 缩放和平移。"));
+      view.appendChild(formula(
+        "$\\mathrm{LN}(X)[b,i,:] = \\gamma \\odot \\dfrac{X[b,i,:]-\\mu_i}{\\sqrt{\\sigma_i^2+\\epsilon}}+\\beta$"
+      ));
+      view.appendChild(EBW.el("p", { class: "tbv-note" }, "上方标准化数值省略 γ/β；实际 LayerNorm 会再做可学习的逐 feature 缩放和平移。"));
       return view;
     }
 

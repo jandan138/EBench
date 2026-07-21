@@ -102,7 +102,13 @@ test("F-3 metadata and widget contracts remain available", () => {
   });
   assert.match(widget, /aria-pressed/);
   assert.match(widget, /aria-live/);
+  assert.match(widget, /renderMathInElement/, "widget must re-typeset KaTeX after lazy mount");
+  assert.match(widget, /A\^\{\\\\ell\}/, "block formula should use KaTeX ell superscript");
+  assert.doesNotMatch(widget, /A\^ell\s*=/, "ASCII A^ell formula must not remain");
+  assert.doesNotMatch(widget, /H\^\(ell\+1\)/, "ASCII H^(ell+1) formula must not remain");
+  assert.match(widget, /H<sup>ℓ<\/sup>/, "stage labels should use Unicode ℓ superscript");
   assert.match(css, /\.transformer-block-viz/);
+  assert.match(css, /\.transformer-block-viz \.tbv-formula \.katex/);
 });
 
 test("F-3 keeps the block trace and static tables readable on mobile", () => {

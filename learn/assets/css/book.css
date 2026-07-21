@@ -266,7 +266,8 @@ input[type="range"]::-moz-range-thumb { width: 15px; height: 15px; border-radius
 .transformer-block-viz .tbv-bypasses { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .transformer-block-viz .tbv-bypass { display: flex; gap: 8px; border-left: 4px double var(--accent); padding: 6px 8px; background: var(--accent-soft); font-size: .75rem; }
 .transformer-block-viz .tbv-bypass span { color: var(--ink-soft); }
-.transformer-block-viz .tbv-formula { max-width: 100%; margin: 0; overflow-x: auto; padding: 8px 10px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; color: var(--ink-soft); font: .72rem/1.5 var(--mono); white-space: nowrap; }
+.transformer-block-viz .tbv-formula { max-width: 100%; margin: 0; overflow-x: auto; padding: 8px 10px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; color: var(--ink-soft); font: .78rem/1.55 var(--sans); white-space: nowrap; }
+.transformer-block-viz .tbv-formula .katex { font-size: 1em; }
 .transformer-block-viz .tbv-mlp-rows, .transformer-block-viz .tbv-norm-rows { display: grid; gap: 7px; }
 .transformer-block-viz .tbv-mlp-row { display: grid; grid-template-columns: minmax(125px, 1fr) 22px minmax(135px, 1fr) 22px minmax(100px, .75fr); align-items: stretch; gap: 5px; }
 .transformer-block-viz .tbv-row-input, .transformer-block-viz .tbv-row-output { display: flex; min-width: 0; flex-direction: column; justify-content: center; border: 1px solid var(--border); border-radius: 6px; padding: 7px 9px; }
