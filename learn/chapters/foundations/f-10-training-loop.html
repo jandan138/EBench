@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>一次训练更新了什么：参数清单与 backprop 全程 · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="f-10">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part F · Foundations · f-10</div>
+        <h1>一次训练更新了什么：参数清单与 backprop 全程</h1>
+        <p class="lede">前面所有章节讲的都是 forward：数据怎么从 token 变成 hidden state。这一节讲它的倒影——训练。主线一句话：<b>训练就是「先猜 → 量差距 → 沿一条叫梯度的回头路，把责任分摊给每一个可学参数」</b>；而 residual 与 LayerNorm，正是让这条回头路在一百层之后仍然走得通的设计。</p>
+        <div class="callout note">
+          <div class="c-h">前置</div>
+          <p>需要 <a href="f-3-transformer-block.html#full-flow">F-3 的 Block 主线</a>。loss 本身（MSE / Cross Entropy）在 <a href="f-5-regression-mse.html">F-5</a>、<a href="f-6-cross-entropy.html">F-6</a>；这一节不重复推导，只把它们当作「量差距的尺子」来用。</p>
+        </div>
+
+        <h2 id="param-inventory">先点名：谁是可学参数，谁是固定公式</h2>
+        <p>「训练更新了什么」的第一步，是分清模型里哪些东西能被更新。规则很简单：<b>带数值的表都是参数，做运算的式子都是固定的</b>。</p>
+        <table>
+          <thead><tr><th>部件</th><th>可学参数</th><th>固定公式（无参数）</th></tr></thead>
+          <tbody>
+            <tr><td data-label="部件">Embedding</td><td data-label="可学参数">整张 embedding 表（每个 token 一行）</td><td data-label="固定公式">查表动作本身</td></tr>
+            <tr><td data-label="部件">Attention</td><td data-label="可学参数">W<sub>Q</sub>、W<sub>K</sub>、W<sub>V</sub>、W<sub>O</sub>（及 bias）</td><td data-label="固定公式">点积、缩放、softmax、mask 规则</td></tr>
+            <tr><td data-label="部件">MLP</td><td data-label="可学参数">W<sub>1</sub>、b<sub>1</sub>、W<sub>2</sub>、b<sub>2</sub></td><td data-label="固定公式">GELU 函数形状</td></tr>
+            <tr><td data-label="部件">LayerNorm</td><td data-label="可学参数">每套 LN 各自的 γ、β</td><td data-label="固定公式">均值、方差、归一化计算</td></tr>
+            <tr><td data-label="部件">Residual</td><td data-label="可学参数">无——加法没有参数</td><td data-label="固定公式">逐元素相加</td></tr>
+            <tr><td data-label="部件">Task head</td><td data-label="可学参数">头的权重（如 LM head 矩阵）</td><td data-label="固定公式">argmax / 采样规则</td></tr>
+          </tbody>
+        </table>
+        <p>注意三个容易猜错的：Embedding 表<b>是</b>参数（它随训练一起被改）；每套 LayerNorm 都有自己的 γ、β（见 <a href="#why-two-ln">下文</a>）；residual 只是一条加法旁路，没有任何可学的东西。一次训练 step，更新的就是这张表右列以外的全部数值。</p>
+
+        <h2 id="what-is-gradient">梯度是什么：给每个参数指一条「降 loss 的方向」</h2>
+        <p>把 loss 想成一座山的高度，所有参数是你在山上的坐标。某个参数的<b>梯度</b>，就是「把这个参数调大一点点，loss 会变多少」——正梯度意味着调大 loss 会上升，该往反方向走；负梯度相反。训练做的事，就是沿负梯度方向给每个参数走一小步。</p>
+        <p>参数有几亿个，loss 却只有一个数，怎么把责任分回去？靠<b>链式法则</b>：计算图里每个节点把「上游传下来的梯度」乘上「自己输出对输入的局部导数」，再传给下游。于是梯度像水流一样，从 loss 倒着流回每一个参数——这就是 <span class="term">backpropagation</span>（反向传播）。</p>
+        <p>现在能看到隐患了：每一层都要做一次「乘以局部导数」。如果某类层的局部导数总是 0.1 量级，100 层之后梯度变成 $0.1^{100}$——一个实际上是零的数。<b>梯度消失</b>意味着：离 loss 远的层收不到任何更新信号，无论怎么训都不动。这不是理论担忧，而是早期深层网络真实的失败模式。</p>
+        <div class="bridge rl">
+          <div class="c-h"><span class="tag">从 RL 看</span> 信用分配的同款难题</div>
+          <p>梯度穿 100 层，和「100 步之前的 action 对最终 reward 负责多少」是同一类信用分配问题。RL 用 discount、target network 稳住回传信号；Transformer 用 residual 与 LayerNorm。semi-gradient TD 里「target 不回传梯度」的直觉，后面 <a href="f-12-adapter-lora.html#gradient-path">f-12</a> 和 5b-5 还会以 stop-gradient 的形式再见。</p>
+        </div>
+
+        <h2 id="one-step">一次训练 step 的五步走</h2>
+        <p>把零件装进时间轴，一个训练 step 长这样：</p>
+        <ol>
+          <li><b>Forward</b>：token 进，穿过所有 Block 与任务头，得到预测（下一个词的分布、或一段动作）。</li>
+          <li><b>Loss</b>：拿尺子量预测与监督的差距——语言用 <a href="f-6-cross-entropy.html">Cross Entropy</a>，连续动作用 <a href="f-5-regression-mse.html">MSE</a> 或 flow matching 损失。</li>
+          <li><b>Backward</b>：从 loss 出发，沿计算图把梯度传回每个可学参数。</li>
+          <li><b>Update</b>：optimizer（如 Adam）按梯度给每个参数走一步：$\theta \leftarrow \theta - \eta\,\partial L/\partial\theta$。</li>
+          <li><b>重复</b>：换下一批数据，几百万次之后，hidden state 被塑造成了任务需要的形状。</li>
+        </ol>
+        <p>关键认知：第 4 步更新的是<b>整张参数清单</b>——Embedding 表、每层的 W<sub>Q</sub>/W<sub>K</sub>/W<sub>V</sub>/W<sub>O</sub>、每个 MLP 的 W<sub>1</sub>/W<sub>2</sub>、每套 LN 的 γ/β、任务头——一个不落，全都收到属于自己的那份梯度。所谓「Transformer 学会了语言/视觉/控制」，微观上就是这张清单被同步挪动了几十万次。</p>
+
+        <h2 id="highway">Residual：回头路上的「高速公路」</h2>
+        <p><a href="f-3-transformer-block.html#residual-gradient">F-3 的 optional 小节</a>给过结论：对 $y=x+F(x)$ 求导得到 $I+J_F$，多出一项恒等映射。现在把它和上一节的梯度消失接起来——没有 residual 时，梯度必须连乘 100 个 $J_F$，只要它们普遍小于 1，信号就指数衰减；有了 residual，连乘的每一项变成 $(I+J_F)$：<b>无论分支 $J_F$ 多小，恒等项 $I$ 都保证至少有一条无损的通道把梯度直送底层</b>。这条通道就是「梯度高速公路」。</p>
+        <p>前向的对应画面同样重要：网络不必每层从零重写表示，分支只提供「在现有表示上加什么修改量」。保留为主、增量为辅，既让信息有直通路，也让梯度有直通路——前向与反向是同一设计的两面。诚实标注照旧：高速公路不保证梯度永不爆炸、不保证信息永不丢失，它只是把「必死」换成了「好走」。</p>
+        <div class="bridge g103">
+          <div class="c-h"><span class="tag">从 GAMES103 看</span> 像一条贯穿全程的参考轨迹</div>
+          <p>做反向动力学或伴随法（adjoint）反传时，信号也要沿整条仿真轨迹倒着走，任何一段「断层」都会让末端梯度传不回初始条件。residual 的 $+x$ 相当于在每一段都保留一条未经扰动的参考通道：扰动（分支）可以任意复杂，主干始终可微地贯通。</p>
+        </div>
+
+        <h2 id="why-ln">没有 LayerNorm 会怎样</h2>
+        <p>梯度消失是「信号传不动」，还有一对孪生问题发生在前向：<b>数值尺度失控</b>。几十层的矩阵乘与相加会不断放大或缩小各行向量的尺度——某些特征维涨到几千、某些缩到千分之一。后果有两个：softmax 与 GELU 被推到饱和区（局部导数接近零，梯度再次传不动）；不同 token、不同层的数值范围越差越远，优化器很难用统一的学习率照顾所有参数。</p>
+        <p>LayerNorm 的对策是<b>在每个分支入口把当前行的尺度拉回正常范围</b>（沿哪个轴、怎么算，见 <a href="f-3-transformer-block.html#layernorm-axis">F-3</a>，这里不重复）。归一化之后再用可学的 γ、β 恢复模型需要的缩放与平移——所以它不是把信息抹平，而是把「尺度问题」从「语义问题」里剥离出去，让训练只管后者。</p>
+
+        <h2 id="why-two-ln">为什么一个 Block 里要两套独立的 LayerNorm</h2>
+        <p>因为 Block 里有<b>两个</b>分支入口，而且它们面对的分布不一样。Attention 跑完、residual 加回之后，hidden state 的分布已经被改写了一次；MLP 入口面对的是 Attention 之后的新分布，不是当初进 Attention 的那个。如果两个入口共用一套 γ、β，等于强迫两种不同分布用同一组缩放平移——既然 LN 的职责是「针对当前分布做整理」，那就该各配一套。这就是为什么 pre-norm Block 写成 LN<sub>1</sub>(H)→Attention、LN<sub>2</sub>(A)→MLP，两套参数<b>独立</b>训练。</p>
+
+        <h2 id="pre-vs-post-norm">为什么现代深层模型把 LN 放在分支之前</h2>
+        <p>原版 Transformer 用 <span class="term">post-norm</span>：先 $x+F(x)$，再 LN——也就是 LayerNorm 压在残差主干上。问题在于，上一节说的高速公路是 $+x$ 这条直通路；每过一层都被 LN 拦路改写一次，直通路就不再直通，前向的信息与反向的梯度都要反复穿过归一化，深层时优化明显变难（原始论文靠精心设计的学习率 warmup 才训得动）。</p>
+        <p><span class="term">pre-norm</span> 把 LN 挪进分支内部：$y = x + F(LN(x))$。效果立竿见影——从输入到输出的残差主干一路上只做加法，LN 只整理「进分支的那一份拷贝」。高速公路从第一层贯通到最后一层，所以几十上百层的模型几乎不用特殊技巧就能稳定训练。这也是为什么 GPT、PaliGemma、π0 这一代模型全都是 pre-norm（RMSNorm 是它的省算力变体，思路相同）。</p>
+
+        <h2 id="checkpoint">检查：把这条回头路说准确</h2>
+        <ol>
+          <li>「训练只更新 Attention 的大矩阵。」不准确：整张清单都被更新——Embedding、Attention、MLP、LN 的 γ/β、任务头。</li>
+          <li>「梯度是 loss 的值。」不准确：梯度是 loss 对某个参数的变化率；backprop 用链式法则把它分回去。</li>
+          <li>「residual 只是前向技巧。」不准确：同一项 $+x$ 同时是前向的信息旁路与反向的梯度旁路。</li>
+          <li>「两套 LN 是复制粘贴冗余。」不准确：两个入口面对两种分布，各自需要自己的 γ、β。</li>
+          <li>「pre-norm 只是排版偏好。」不准确：它保住了残差主干的直通性，是深层模型可训练的关键之一。</li>
+        </ol>
+
+        <h2 id="recap">这一节你需要带走的</h2>
+        <p>训练 = forward 猜测 → loss 量差距 → backprop 分摊责任 → optimizer 更新整张参数清单。梯度的天敌是连乘衰减，residual 用 $I+J_F$ 里的恒等项修了高速公路，LayerNorm 用入口归一化稳住数值与优化；pre-norm 让高速公路贯通到底。至此「模型怎么被训出来」闭环了。下一节 <a href="f-11-vla-reads-hidden.html#h-context-matrix">f-11</a> 回到 VLA：训好的多模态 hidden state，action head 到底怎么读。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

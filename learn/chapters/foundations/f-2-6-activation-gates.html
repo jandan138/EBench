@@ -151,6 +151,10 @@
           </div>
         </div>
 
+        <h2 id="silu-swiglu">addendum：SiLU 与 SwiGLU 为什么出现</h2>
+        <p>ReLU 与 GELU 都是「一条规则管一个数」的逐元素门。后来者们只做了一点变化：<span class="term">SiLU</span>（又叫 Swish）是 $x\cdot\operatorname{sigmoid}(x)$——用 x 自己当门控信号，形状与 GELU 很接近，同样平滑、保留少量负值，但计算更简单。既然激活函数的选择标准是「非线性 + 平滑门 + 好优化」，而不是某个唯一正确形状，工程上就会在这族近亲里挑顺手的一个。</p>
+        <p><span class="term">SwiGLU</span> 走得更远一步：它不再逐元素，而是把 MLP 的第一层 Linear 拆成两支，一支过 SiLU 当「阀门」，另一支不过激活当「内容」，两支逐元素相乘后再进 Linear 2。直觉：原来「门」的形状是激活函数固定的，现在门本身也带可学参数——网络可以自己学出对每个 feature「放多少过去」。代价是多一组权重，收益是表达力与训练的稳定提升，所以 LLaMA、Qwen 这一代模型普遍用它替换 GELU MLP（<a href="f-3-transformer-block.html#variants">F-3 的变体表</a>里那一行，说的就是这件事）。</p>
+
         <h2 id="checkpoint">检查：把这条因果链说准确</h2>
         <ol>
           <li>z 的正负不是天然的“有用/无用”标签，而是相对于学习到的方向位于零点哪侧。</li>

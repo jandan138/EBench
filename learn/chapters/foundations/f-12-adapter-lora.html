@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Adapter 与 LoRA：冻结 backbone 时梯度怎么走 · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="f-12">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part F · Foundations · f-12</div>
+        <h1>Adapter 与 LoRA：冻结 backbone 时梯度怎么走</h1>
+        <p class="lede">这一节是进阶可选的一课：它回答「backbone 已经是别人训好的，能不能只训一小部分参数就让它输出动作」。主线一句话：<b>冻结不是断路——前向照走、梯度照穿，只是 optimizer 不更新被冻的参数</b>；Adapter 和 LoRA，就是在 frozen 主干旁开的两条「可学旁路」。读完它，你再看 5b-5 的 KI 和 6-2 的 X-VLA soft prompt，会有「原来都是一家人」的感觉。</p>
+        <div class="callout note">
+          <div class="c-h">前置与定位</div>
+          <p>需要 <a href="f-10-training-loop.html#what-is-gradient">f-10 的梯度与参数清单</a>。本书的 baseline 并没有直接使用 Adapter/LoRA（π0.5 用 KI、X-VLA 用 soft prompt），本节是理解它们的旁路视角。</p>
+        </div>
+
+        <h2 id="why-freeze">为什么要冻结：三笔账</h2>
+        <p>全量微调一个 3B 模型意味着：所有参数都要存梯度、存 optimizer 状态（Adam 还要再存两份动量），显存翻好几倍；更重要的是第二笔账——<b>灾难性遗忘</b>：为机器人数据改动全部参数，会把预训练时学到的语言与视觉知识一起冲掉（5b-5 把这叫「污染」）。第三笔账是复用：一份主干服务一百个任务/机器人，总不能存一百份完整模型。于是思路很自然：<b>主干冻结，只在旁边加少量可学参数</b>，每个任务只保存自己那一小份。这就是 <span class="term">PEFT</span>（parameter-efficient fine-tuning）。</p>
+
+        <h2 id="adapter">Adapter：插在层间的瓶颈小网络</h2>
+        <p><span class="term">Adapter</span> 的结构一句话说完：<b>降维 → 激活 → 升维</b>。在 Transformer 子层之后插一个小 MLP：先把 d 维压到很窄（如 64 维，这道窄口叫 <span class="term">bottleneck</span>），过一次非线性，再升回 d 维，作为修改量加回去：</p>
+        <div class="math-block">$$\text{output} = F(x) + \text{Adapter}(x),\qquad \text{Adapter}(x)=\sigma(xW_{\text{down}})\,W_{\text{up}}$$</div>
+        <p>冻结主干后，每个 Block 里只有这对小矩阵可学——参数量常常不到主干的 1%。直觉：主干已经把表示加工得八九不离十，Adapter 只需学「针对这个新任务，往哪个方向轻轻推一把」。瓶颈保证它只能学低成本的修改，没法另起炉灶。</p>
+
+        <h2 id="lora">LoRA：并在线性层旁的低秩修改</h2>
+        <p><span class="term">LoRA</span> 的思路更巧妙：不新增模块，而是给已有的线性层加一个<b>并联修改量</b>。冻结原始权重 W，学一个低秩矩阵 $\Delta W = BA$（B 是 d×r，A 是 r×d，秩 r 常取 8~64），前向变成：</p>
+        <div class="math-block">$$y = (W + \Delta W)\,x = Wx + BAx$$</div>
+        <p>为什么低秩就够？经验事实：把一个通用模型适配到具体任务，权重的有效修改量往往远低于全秩——任务不需要重写 W，只需要在某些方向上做有限调整。r 就是容量旋钮：r 越小越省、越不容易过拟合，越大越接近全量微调的表达力。部署时还能把 BA 合并进 W，推理零额外开销。可以把它想成：Adapter 是「在流水线中间加一道小工序」，LoRA 是「给机床本身贴一张可换的校准片」。</p>
+
+        <h2 id="gradient-path">冻结时，loss 的梯度到底怎么走</h2>
+        <p>最常见的误解是「冻结 = 这部分被切出计算图」。不对。<b>冻结层前向照常参与计算，反向时梯度照常穿过它</b>——只有穿过它，梯度才能到达更上游的 LoRA/Adapter 参数；区别只在最后一步：optimizer 更新参数时，跳过所有被标记为 frozen 的参数。所以完整路径是：</p>
+        <div class="code" data-lang="text"><div class="code-h"><span class="fn">冻结主干时的一步训练</span><button class="cp">复制</button></div><pre><code>前向：x → frozen backbone → 可学旁路/head → loss
+反向：loss 的梯度穿过 head → 穿过 backbone（照穿，不更新）
+      → 抵达 LoRA 的 B、A / Adapter 的两个 W / head 的权重
+更新：只有这些可学参数被 optimizer 改动</code></pre></div>
+        <p>还要和另一种机制分清：<b>冻结是「梯度穿透但不更新」，<span class="term">stop-gradient</span>（截断）是「梯度根本过不去」</b>。VLA 里的 knowledge insulation 属于后者——它故意把 flow matching loss 的梯度挡在 backbone 门外，同时让别的 loss（CE）照常更新 backbone。一张对照表见 <a href="../05b-vla-systems/5b-5-ki-gradient.html#not-freezing">5b-5 的「KI ≠ 冻结」</a>：两者一个是「不更新」，一个是「不让传」，别混。</p>
+        <div class="lab">
+          <div class="lab-h"><span class="lab-tag">interactive</span><span class="lab-t">三种更新制度：谁亮谁冻</span></div>
+          <div class="lab-body" data-widget="peft-gradient"></div>
+          <div class="lab-cap">切换 全量微调 / Adapter / LoRA：亮起的模块会被 optimizer 更新；灰色模块前向照走、梯度照穿，只是不被更新。</div>
+        </div>
+        <div class="bridge rl">
+          <div class="c-h"><span class="tag">从 RL 看</span> 冻结主干 ≈ 固定特征，只训 head</div>
+          <p>RL 里「固定 pretrained 特征提取器、只训 actor/critic 头」的做法和 PEFT 同宗；stop-gradient 则是 target network 思想的另一种形态——都是「让某些梯度别乱传，稳住表示」。差别只在粒度：PEFT 在主干<b>内部</b>埋可学旁路，比「只训头」表达力高一个档。</p>
+        </div>
+
+        <h2 id="landscape">把地图拼起来：全量 / PEFT / KI</h2>
+        <p>现在可以给「怎么改别人的模型」画一张三分地图：</p>
+        <ul>
+          <li><b>全量微调</b>：全部参数可学。表达力最高，最贵，遗忘风险最大。</li>
+          <li><b>PEFT（冻结主干 + 可学旁路）</b>：Adapter（层间瓶颈）、LoRA（层旁低秩）、soft prompt（输入端可学 token，<a href="../06-baselines/6-2-xvla.html#two-stage">6-2 的 X-VLA</a> 用它，~9M 参数接一个新机器人）。梯度穿透主干但不更新它——「硬冻结」。</li>
+          <li><b>KI（stop-gradient）</b>：主干不冻结，仍被 CE 类 loss 更新；只是连续动作 loss 的梯度被截断——「软隔离」。详见 <a href="../05b-vla-systems/5b-5-ki-gradient.html#two-graphs">5b-5</a>。</li>
+        </ul>
+        <p>最后把 f-9 的主线图补全成<b>训练版</b>，作为 Part F 的收束：</p>
+        <div class="code" data-lang="text"><div class="code-h"><span class="fn">全链主线（训练版）</span><button class="cp">复制</button></div><pre><code>Image + Language + State → Embedding → Transformer Blocks → H [B,n,d]
+  → 任务头按读法取行（f-9 / f-11）→ 预测 → loss（f-5 / f-6）
+  → backprop 沿高速公路回传（f-10）
+  → 更新：全量 / 只更新旁路与头（Adapter · LoRA · soft prompt）
+     / 或截断特定 loss（KI）</code></pre></div>
+
+        <h2 id="checkpoint">检查：把这几句话说准确</h2>
+        <ol>
+          <li>「冻结的层不参与计算。」不准确：前向照走、梯度照穿，只是 optimizer 不更新它。</li>
+          <li>「Adapter 输出替换原层输出。」不准确：它是加在原输出上的修改量（降维→激活→升维的小网络）。</li>
+          <li>「LoRA 让模型变小。」不准确：前向是 (W+BA)x；部署可合并，训练时省的是可学参数与 optimizer 状态。</li>
+          <li>「KI 是一种特殊的冻结。」不准确：KI 用 stop-gradient 截断特定 loss 的梯度，主干仍被别的 loss 更新。</li>
+        </ol>
+
+        <h2 id="recap">这一节你需要带走的</h2>
+        <p>冻结的动机是显存、遗忘与复用；Adapter 是层间瓶颈小网络，LoRA 是层旁低秩 ΔW=BA；冻结时梯度穿透主干、只更新旁路与头，stop-gradient 则直接截断。至此 Part F 的 12 节闭环：从 token 到 hidden state（f-1~f-4）、从 loss 到训练回路（f-5~f-10）、从读取到微调（f-11~f-12）。带着这张地图进入 <a href="../00-orientation/0-1-why-ebench.html">Part 0</a>，后面每个概念都有地方落脚。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/widgets/peft-gradient.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

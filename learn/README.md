@@ -25,7 +25,7 @@ cd learn && python3 -m http.server 8000
 - `assets/css/book.css` —— 设计系统（主题、三栏布局、组件）
 - `assets/js/book.js` —— 运行时（导航、主题、进度、搜索、代码高亮、KaTeX、widget 自动挂载）
 - `assets/js/widgets/` —— 18+ 个交互部件 + 注册表（`data-widget` 自动发现，包括基础部件）
-- `chapters/` —— Part F（基础补完） + 10 个 Part + Appendix，共 63 节（Part F 可跳读，Part 5.5 为 VLA 训练系统专题）
+- `chapters/` —— Part F（基础补完） + 10 个 Part + Appendix，共 68 节（Part F 可跳读，Part 5.5 为 VLA 训练系统专题）
 - `DESIGN.md` —— 设计文档；`_AGENT_BRIEF.md` —— 写作时用的事实库与风格规范；`_template.html` —— 新章节样板
 
 ## 加新章节

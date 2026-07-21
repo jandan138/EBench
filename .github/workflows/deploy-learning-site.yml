@@ -34,9 +34,11 @@ jobs:
 
       - name: Verify Foundations source contracts
         run: |
-          node --test learn/tests/activation-gates-viz.test.mjs learn/tests/foundations-navigation-integrity.test.mjs learn/tests/f-2-25-multi-head-content.test.mjs learn/tests/f-2-5-mlp-basics-content.test.mjs learn/tests/f-2-5-mlp-basics-math.test.mjs learn/tests/f-2-6-activation-content.test.mjs learn/tests/f-3-transformer-block-content.test.mjs learn/tests/foundations-story-arc.test.mjs learn/tests/f-4-to-f-8-continuity.test.mjs
+          node --test learn/tests/activation-gates-viz.test.mjs learn/tests/foundations-navigation-integrity.test.mjs learn/tests/f-2-25-multi-head-content.test.mjs learn/tests/f-2-5-mlp-basics-content.test.mjs learn/tests/f-2-5-mlp-basics-math.test.mjs learn/tests/f-2-6-activation-content.test.mjs learn/tests/f-3-transformer-block-content.test.mjs learn/tests/foundations-story-arc.test.mjs learn/tests/f-4-to-f-8-continuity.test.mjs learn/tests/f-9-to-f-12-content.test.mjs learn/tests/f-9-f-12-widgets.test.mjs
           node --check learn/assets/js/widgets/activation-gates-viz.js
           node --check learn/assets/js/widgets/multimodal-distribution.js
+          node --check learn/assets/js/widgets/task-head-switcher.js
+          node --check learn/assets/js/widgets/peft-gradient.js
 
   deploy:
     runs-on: ubuntu-latest

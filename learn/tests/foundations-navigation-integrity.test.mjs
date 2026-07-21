@@ -24,7 +24,7 @@ const isLocal = (reference) => !/^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(reference);
 const chapter = (file) => readFileSync(resolve(learnRoot, file), "utf8");
 
 test("formal navigation registers the continuous F-2 -> F-2.25 -> F-2.5 -> F-2.6 -> F-3 path", () => {
-  assert.equal(flat.length, 64);
+  assert.equal(flat.length, 68);
   assert.equal(new Set(flat.map((section) => section.id)).size, flat.length);
   assert.equal(new Set(flat.map((section) => section.file)).size, flat.length);
   flat.forEach((section) => assert.ok(existsSync(resolve(learnRoot, section.file)), "missing registered file " + section.file));

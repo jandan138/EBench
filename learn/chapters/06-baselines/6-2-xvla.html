@@ -47,7 +47,7 @@
           <li><b>预训练</b>：在 0.9B 帧 / 290K episodes / 7 个平台的混合数据上训共享骨干 + 各 domain 的 soft prompt。</li>
           <li><b>迁移到新机器人</b>：<i>不</i>重训骨干。加一套新的 soft prompt，冻结骨干，只 <span class="term">PEFT</span>（parameter-efficient fine-tuning）那一小撮参数——论文报告仅 ~9M（约 1%）可训练参数就能逼近 SOTA。</li>
         </ul>
-        <p>对照 π0.5 的 knowledge insulation（<a href="../05-theory/5-8-discrete-continuous.html">5.8</a>）：两者都在回答"怎么不破坏预训练知识地学新东西"，但答案相反——π0.5 用 stop-gradient 隔离 action expert 的梯度，X-VLA 干脆<b>冻结整个骨干</b>，只动 prompt。一个软隔离，一个硬冻结。</p>
+        <p>对照 π0.5 的 knowledge insulation（<a href="../05-theory/5-8-discrete-continuous.html">5.8</a>）：两者都在回答"怎么不破坏预训练知识地学新东西"，但答案相反——π0.5 用 stop-gradient 隔离 action expert 的梯度，X-VLA 干脆<b>冻结整个骨干</b>，只动 prompt。一个软隔离，一个硬冻结。「冻结时梯度怎么走、Adapter/LoRA 与 soft prompt 是什么关系」的通用机制，见 <a href="../foundations/f-12-adapter-lora.html#landscape">F-12</a>。</p>
 
         <h2 id="load">代码层：AutoModel + inference_api</h2>
         <p>现在打开 <span class="term">baselines/X-VLA/run.py</span>。第一个和 π0 截然不同的地方是<b>模型加载方式</b>：X-VLA 没有独立 model server，模型<b>直接加载进 eval client 进程</b>，用 HuggingFace 的 <span class="term">trust_remote_code</span> 机制：</p>

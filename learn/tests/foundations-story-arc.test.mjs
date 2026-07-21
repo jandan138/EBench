@@ -91,7 +91,7 @@ test("navigation makes activation a first-class bridge without breaking old F-2.
   const sandbox = { window: {} };
   vm.runInNewContext(contentSource, sandbox);
   const flat = sandbox.window.EBOOK.flat;
-  assert.equal(flat.length, 64);
+  assert.equal(flat.length, 68);
   const ids = ["f-2", "f-2-25", "f-2-5", "f-2-6", "f-3"];
   const indexes = ids.map((id) => flat.findIndex((entry) => entry.id === id));
   assert.deepEqual(indexes, [indexes[0], indexes[0] + 1, indexes[0] + 2, indexes[0] + 3, indexes[0] + 4]);

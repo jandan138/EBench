@@ -92,6 +92,7 @@
         <h2 id="whats-next">这一节你需要带走的</h2>
         <p>三点：(1) <b>Transfusion</b> = 一个 transformer 混合两种目标，离散 token 走交叉熵、连续动作 token 走 flow-matching loss；(2) <b>action expert</b> = 给 state/action token 一套独立权重（约 300M，类两元 MoE），与图文的 PaliGemma(3B) 权重<b>共享一次 attention、各用各的 MLP</b>，π0 合计 3.3B；(3) action token 用 <b>full bidirectional</b> mask，因为整段 chunk 是一次积出的、内部无生成顺序。</p>
         <p>到这里，π0 的「单层」结构已经讲透。但真正的开放世界（进一个全新的家做饭、铺床）还需要更多：分层推理、离散与连续表示的取舍、以及一个保护 web 知识的关键技巧。下一节进入 <span class="term">π0.5</span>、<span class="term">FAST</span> 与 <span class="term">knowledge insulation</span>。</p>
+        <p>想先复习「任务头到底怎么从 hidden state 矩阵里读信息、action query 行在这套分类学里的位置」，可以回看 <a href="../foundations/f-11-vla-reads-hidden.html#read-strategies">F-11：读取策略分类学</a>。</p>
       </article>
     </main>
     <aside class="rail" id="rail"></aside>

@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VLA 怎么读 hidden state：从最后 token 到 Action Expert · EBench 教程</title>
+  <link rel="stylesheet" href="../../assets/css/book.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+<body data-root="../../" data-section="f-11">
+  <header class="topbar">
+    <button class="iconbtn menu-toggle" aria-label="menu">☰</button>
+    <a class="brand" href="../../index.html"><b>EBench</b> · 教程</a>
+    <span class="spacer"></span>
+    <button id="search-btn">🔍 <kbd>/</kbd></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="theme">☾</button>
+    <div class="progress"></div>
+  </header>
+  <div class="scrim"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main>
+      <article class="article">
+        <div class="eyebrow">Part F · Foundations · f-11</div>
+        <h1>VLA 怎么读 hidden state：从最后 token 到 Action Expert</h1>
+        <p class="lede">f-9 说「任务的区别在于读哪几行」。这一节把它落到 VLA 上，主线一句话：<b>GPT 的答案浓缩在一个位置，机器人的答案散落在整个场景里</b>——所以 VLA 不能只读最后一个 token，它发展出了一整套「读多行」的策略，π0 的 action expert 是其中一种。</p>
+        <div class="callout note">
+          <div class="c-h">前置</div>
+          <p>需要 <a href="f-9-hidden-state-product.html#four-heads">f-9 的四种读法</a>与 <a href="f-4-everything-is-token.html#vla-input-bridge">F-4 的 token 来源</a>。本节讲通用机制；π0 action expert 的具体结构与 mask 细节在 <a href="../05-theory/5-7-action-expert.html#action-expert">5-7</a> 深入。</p>
+        </div>
+
+        <h2 id="h-context-matrix">H_context 是一个矩阵，不是一个向量</h2>
+        <p>VLA 的输入序列是拼接起来的多模态 token：几百个图像 patch、十几个语言 token、一两个 state token（π0 系还会追加 action token）。经过 backbone 之后，每个位置各有一行最终 hidden state——所以所谓 <span class="term">H_context</span> 是形状 <code>[B,n,d]</code> 的<b>矩阵</b>：n 行，每行 d 维。它不是一个被压扁的总向量；「上下文」住在这 n 行里，而不是某一行里。</p>
+
+        <h2 id="what-fusion-means">「融合」到底是什么意思</h2>
+        <p>文档里常说 H_context 是「融合后的表示」，这个词有精确含义：这些 token 在<b>同一个 attention</b> 里互相可见。图像行拿 Query 去匹配语言行，「杯子」这个词的信息被写进了对应那片图像 patch 的行里；state 行也能读到视觉与语言。于是矩阵里的每一行都不再是纯视觉或纯文本，而是带着跨模态内容的行。融合发生在 Block 内部（每层都在做），不是最后才做的一次拼接。</p>
+
+        <h2 id="read-strategies">读取策略分类学：四种读法</h2>
+        <p>任务头怎么从 n 行里取信息，主流做法可以归成四类：</p>
+        <table>
+          <thead><tr><th>策略</th><th>做法</th><th>谁在用</th></tr></thead>
+          <tbody>
+            <tr><td data-label="策略">读最后一行</td><td data-label="做法">因果 mask 把信息一路向右搬，最后位置看全整句</td><td data-label="谁在用">GPT 类自回归 LM</td></tr>
+            <tr><td data-label="策略">读专用槽位</td><td data-label="做法">预留 [CLS] 之类特殊 token，只它被读取</td><td data-label="谁在用">BERT 类理解模型</td></tr>
+            <tr><td data-label="策略">读全部再压缩</td><td data-label="做法">pooling（平均/加权）或 cross-attention：让新 query 对全部行做注意力</td><td data-label="谁在用">部分 VLM、RT 系列、diffusion policy 的条件读取</td></tr>
+            <tr><td data-label="策略">加 action query 行</td><td data-label="做法">追加专门的 action token，它们与上下文共享 attention，最后只读这几行</td><td data-label="谁在用">π0 / π0.5 的 action expert（每行对应 chunk 的一个时间步）</td></tr>
+          </tbody>
+        </table>
+        <p>第四种值得多说一句，因为它就是 π0.5 的接法（答「action expert 接在哪」）：image/text token 走 backbone 权重，state/action token 走 action expert 的独立权重，但两批 token <b>共享同一次 attention</b>——action 行能直接看到图像与语言行；expert 输出的 action 行再接 flow matching 头，回归出连续动作 chunk。结构、mask 与参数账的细节请继续读 <a href="../05-theory/5-7-action-expert.html#shared-attention">5-7 的共享 attention</a>。</p>
+        <div class="bridge rl">
+          <div class="c-h"><span class="tag">从 RL 看</span> 读取策略 = 策略网络的信息瓶颈设计</div>
+          <p>读最后一行、读 [CLS]、pooling、action query，本质都是给「从观测到动作」选瓶颈宽度。RL 里你也做过同样选择：用全特征图、global pooling 还是 attention 汇聚。瓶颈太窄（只读一行）会丢掉空间细节，太宽则参数与算力都贵——VLA 的几种读法正是在这个权衡上的不同落点。</p>
+        </div>
+
+        <h2 id="why-not-last-token">为什么机器人不能只读最后一个 token</h2>
+        <p>GPT 可以，是因为它的答案——「下一个词」——是<b>汇总的</b>：句子的全部相关信息被 causal mask 一路压缩到最后位置。机器人的答案是<b>散布的</b>：杯子在画面左上角还是右下角（分散在几百个视觉 patch 行里）、左臂还是右臂够得着（state 行）、指令说的是杯子不是碗（文本行）。这些信息天然按空间与模态分布在很多行上，没有哪种 mask 会把它们自动汇总到某一行。</p>
+        <p>硬要只读最后一行，等于强迫模型把整张桌子的几何关系全塞进一个 d 维向量——能装下的只是模糊摘要，丢掉的是「杯柄朝哪边」这种决定抓取成败的空间细节。所以 VLA 的共同选择是：保留矩阵形态，用上面的读法之一去访问多行。这也是 action expert 要让 action token 与全部上下文共享 attention 的原因——让每一行 action query 自己去取它需要的空间信息。</p>
+
+        <h2 id="checkpoint">检查：把这几句话说准确</h2>
+        <ol>
+          <li>「H_context 是模型压出来的一个总向量。」不准确：它是 <code>[B,n,d]</code> 矩阵，n 行各对应一个 token。</li>
+          <li>「融合是最后把图文向量拼起来。」不准确：融合逐层发生在共享 attention 里，每行都已带跨模态内容。</li>
+          <li>「action expert 接在最后一个 token 后面。」不准确：π0 系是追加 action token 行、与上下文共享 attention，再读这些行。</li>
+          <li>「只读最后一行省事且等价。」不准确：空间细节分布在很多视觉行上，单点读取会丢掉几何精度。</li>
+        </ol>
+
+        <h2 id="recap">这一节你需要带走的</h2>
+        <p>H_context 是矩阵；「融合」= 所有模态在同一 attention 里互相可见；读取策略有读最后行、读专用槽位、压缩全部行、加 action query 行四类；机器人必须用后两类，因为动作所需的证据散布在整个场景里。下一节 <a href="f-12-adapter-lora.html#why-freeze">f-12</a> 换一个角度：当 backbone 已经是别人训好的，我们怎样只训一小部分参数就让它输出动作——Adapter 与 LoRA。</p>
+      </article>
+    </main>
+    <aside class="rail" id="rail"></aside>
+  </div>
+
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-box">
+      <input id="search-input" placeholder="搜索小节标题、术语…（↑↓ 选择，Enter 跳转，Esc 关闭）" />
+      <div class="search-results" id="search-results"></div>
+    </div>
+  </div>
+
+  <script src="../../content.js"></script>
+  <script src="../../assets/js/widgets/registry.js"></script>
+  <script src="../../assets/js/book.js"></script>
+</body>
+</html>

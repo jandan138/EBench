@@ -74,6 +74,7 @@
         <h2 id="recap">这一节你需要带走的 · 下一节</h2>
         <p>(1) 计算图有两副面孔：<b>前向决定谁读谁，反向决定谁改谁</b>，stop-gradient 让两者不对称；(2) KI 三条规则——expert 前向可读 hidden states；CE 类梯度照常更新 backbone；flow 梯度只更新 expert / projection，回 backbone 的路被截断；(3) <b>KI ≠ 冻结</b>——backbone 仍被干净监督更新；它和 semi-gradient TD / target network 是同一种手术。</p>
         <p>至此，「一个 VLA 怎么被训练出来」的机制部分全部讲完。接下来两节换到<b>生态视角</b>：训练数据从哪个系统里造出来？benchmark 和数据引擎是什么关系？RoboGenesis、LabUtopia、AutoBio、EBench 这些名字各自站在生态的哪一层？</p>
+        <p>如果想先弄清「冻结（梯度穿透但不更新）」与这里的 stop-gradient 有何不同、Adapter/LoRA/soft prompt 这些可学旁路长什么样，可回看 <a href="../foundations/f-12-adapter-lora.html#gradient-path">F-12：Adapter 与 LoRA</a>。</p>
       </article>
     </main>
     <aside class="rail" id="rail"></aside>

@@ -151,6 +151,7 @@ O = weights @ V
 concat: [B,n,h*d_head]
 Y = concat @ W_O</code></pre></div>
         <p>reshape 和 transpose 只是组织同一批数以方便大矩阵运算；它们不会让 head 变成 token 或 Transformer 层。</p>
+        <p>两种写法在数值上<b>完全等价</b>：把大矩阵 <code>W_Q</code> 按输出列切开，第 r 段就是 <code>W_Q^(r)</code>——<code>X @ W_Q</code> 的第 r 段结果，与 <code>X @ W_Q^(r)</code> 逐位相同（矩阵乘法按列块分配）。所以「每个 head 有独立参数」与「工程上拼成一张大矩阵」不矛盾：独立的是参数与各自的 QKᵀ/softmax 计算，打包的只是乘法。multi-head 真正的差异不在矩阵怎么摆，而在每个 head 分开算分数、分开 softmax、分开取回 Value。</p>
 
         <h3 id="mask-boundary">mask 仍在每个 head 的 softmax 前</h3>
         <p>因果 mask、padding mask 或模态 mask 都应加在 score 上、<b>softmax 前</b>。对每个 head 的每一行 Query 来说，被遮住的 key 得到极小分数，softmax 后权重接近 0，因此它的 Value 不会被取回。</p>

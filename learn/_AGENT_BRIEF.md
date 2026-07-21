@@ -5,7 +5,7 @@
 - 骨架模板：`_template.html`
 - 导航源（含所有章节 id/title/file/上下页顺序）：`content.js`
 
-**重要**：现在教程新增了 **Part F · Foundations**（8 节），位于最前面。写任何涉及 Transformer、Attention、Token、回归、CE、Gym、概率分布的内容时，都要考虑是否需要加上“如果你对基础还不熟悉，建议先看 Part F 的 F-X”的提示。原则是**只加不减**，让读者可以根据需要来回学习。
+**重要**：现在教程新增了 **Part F · Foundations**（12 节），位于最前面。写任何涉及 Transformer、Attention、Token、回归、CE、Gym、概率分布的内容时，都要考虑是否需要加上“如果你对基础还不熟悉，建议先看 Part F 的 F-X”的提示。原则是**只加不减**，让读者可以根据需要来回学习。
 
 ## 受众与语气
 - 读者有 **强化学习 (RL) 数学基础 + GAMES103（物理仿真）基础**，是 VLA 领域新人。
@@ -57,6 +57,8 @@
 - `training-ledger` —— π0.5 / LabVLA 训练账本：点阶段看输入/监督/loss/更新谁。用于 **5b-3**。
 - `data-loss-map` —— 数据源 → loss → 更新模块的通路高亮图。用于 **5b-4**。
 - `ki-gradient` —— knowledge insulation 计算图：开关 stop-gradient 看梯度回流路径变化。用于 **5b-5**。
+- `task-head-switcher` —— 同一份 hidden state 矩阵切换 GPT/BERT/VLM/VLA，看各任务头读哪些行。用于 **f-9**。
+- `peft-gradient` —— 同一 backbone 上全量微调 / Adapter / LoRA 三种参数更新制度，看冻结与梯度路径。用于 **f-12**。
 每个部件**全书只在最相关的那一节用一次**（capability-radar 在 0-1 已用，3.1 可再用一次但换角度）。不要滥用。
 注意：Part 8 之后的章节（含 Part 5.5）底部 script 块只加载 registry.js + 本页实际用到的 widget 脚本（参照 8-2 的做法），不必带全量清单。
 

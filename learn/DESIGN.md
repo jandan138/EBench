@@ -27,7 +27,7 @@
 
 ## 2. 信息架构（章节）
 
-Part F（基础补完） + 10 个 Part + Appendix，共 63 节。详见 `content.js`（导航单一真相源）。
+Part F（基础补完） + 10 个 Part + Appendix，共 68 节。详见 `content.js`（导航单一真相源）。
 
 - **Part F 基础**：Transformer、Attention、Token、回归、CE、Gym、概率分布等核心直觉与数学（可跳读，为后续 Part 提供共同语言）
 - **Part 0 序章**：why EBench / repo constellation / 怎么读这本书
@@ -106,6 +106,8 @@ learn/
 13. **training-ledger**：π0.5 / LabVLA 训练账本——点阶段看输入/监督/loss/更新谁。
 14. **data-loss-map**：数据源→表示→loss→更新模块通路高亮；无动作标签的数据点不亮 expert。
 15. **ki-gradient**：knowledge insulation 计算图，开关 stop-gradient 对比梯度回流路径。
+16. **task-head-switcher**：同一份 hidden state 矩阵切换 GPT/BERT/VLM/VLA 四种任务头读法（f-9）。
+17. **peft-gradient**：同一 backbone 上全量微调 / Adapter / LoRA 三种参数更新制度对比（f-12）。
 
 ## 5. 构建顺序
 

@@ -123,7 +123,7 @@
 
         <h2 id="recap">这一节你需要带走的</h2>
         <p>真实机器人动作常常应该被看成条件分布 $p(A_t\mid o_t)$，而不是唯一向量。连续情形里，密度描述局部热度，区域下的积分才是概率；多峰表示同一观测下有多个合理动作区域。MSE 交一个点，单高斯交一座单峰密度山，生成式方法则可以从噪声产生不同的合理样本。</p>
-        <p>到这里，Part F 的地基铺完了：Transformer 负责表示和融合，MSE/CE/生成模型对应不同动作学习路线。下一步可以从 <a href="../00-orientation/0-1-why-ebench.html">Part 0：为什么需要 EBench</a> 进入完整系统；之后遇到 QKV、action chunk、FAST、flow matching、EvalClient，都应该有可以落脚的直觉。</p>
+        <p>生成式与分布的地基到这里铺完了。不过 Part F 还有最后四节，把前面所有零件拼成系统：<a href="f-9-hidden-state-product.html">F-9：Transformer 到底在优化什么（hidden state 与任务头）</a> → <a href="f-10-training-loop.html">F-10：一次训练更新了什么（参数与反向传播）</a> → <a href="f-11-vla-reads-hidden.html">F-11：VLA 怎么读 hidden state</a> → <a href="f-12-adapter-lora.html">F-12：Adapter 与 LoRA</a>。读完它们再进入 <a href="../00-orientation/0-1-why-ebench.html">Part 0</a>，之后遇到 QKV、action chunk、FAST、flow matching、EvalClient，都会有可以落脚的直觉。</p>
       </article>
     </main>
     <aside class="rail" id="rail"></aside>

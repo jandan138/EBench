@@ -96,10 +96,10 @@ x → 子层 F(x) ──┘</code></pre></div>
         <h2 id="residual-gradient" data-answers="8">optional：为什么又有人说“梯度高速公路”</h2>
         <p>前向的“原表示旁路”与反向的“梯度旁路”相关，但不是同一句话。对 $y=x+F(x)$ 求导会出现 identity 项：</p>
         <div class="math-block">$$\frac{\partial y}{\partial x}=I+J_F(x)$$</div>
-        <p>这里 I 是恒等映射，$J_F$ 是 F 的 Jacobian。直觉上，反向信号除了穿过复杂分支外，还看到一条直接的恒等贡献。它通常有利于深网络优化，但<b>不能保证</b>梯度永不消失、爆炸或训练成功；这段是 optional 微积分补充，不是理解 Block 主线的前提。</p>
+        <p>这里 I 是恒等映射，$J_F$ 是 F 的 Jacobian。直觉上，反向信号除了穿过复杂分支外，还看到一条直接的恒等贡献。它通常有利于深网络优化，但<b>不能保证</b>梯度永不消失、爆炸或训练成功；这段是 optional 微积分补充，不是理解 Block 主线的前提。想把“梯度为什么会消失、这条高速公路怎么修”讲透，见 <a href="f-10-training-loop.html#highway">F-10 的高速公路小节</a>。</p>
 
         <h2 id="layernorm" data-answers="9">LayerNorm：让进入分支的数值更稳定</h2>
-        <p>多层相加和变换会让各 token 向量的数值尺度持续变化。LayerNorm 在送入 Attention 或 MLP 分支前，先把<b>当前 token 自己的 d 个 feature</b>整理到较稳定的尺度，再用可学习参数恢复模型需要的缩放和平移。</p>
+        <p>多层相加和变换会让各 token 向量的数值尺度持续变化。LayerNorm 在送入 Attention 或 MLP 分支前，先把<b>当前 token 自己的 d 个 feature</b>整理到较稳定的尺度，再用可学习参数恢复模型需要的缩放和平移。为什么一个 Block 里要两套独立参数、为什么放在分支之前更好训练，见 <a href="f-10-training-loop.html#why-two-ln">F-10 的训练视角</a>。</p>
         <div class="math-block">$$LN(x)=\gamma\odot\frac{x-\mu}{\sqrt{\sigma^2+\epsilon}}+\beta$$</div>
         <p>在这条式子里，μ 是该 token 的 feature 均值，σ<sup>2</sup> 是同一行的 feature 方差，ε 是避免除零的小常数；γ、β 是每个 feature 可学习的缩放与平移。它们都在本 LayerNorm 内部定义，不会跨 token 偷看数据。</p>
 
@@ -138,6 +138,7 @@ x → 子层 F(x) ──┘</code></pre></div>
             <tr><td data-label="系统">VLA</td><td data-label="任务头常读什么">视觉、语言、状态融合后的表示</td><td data-label="输出例子">动作 token、连续 action 或 action chunk。</td></tr>
           </tbody>
         </table>
+        <p>这张表是速览；「为什么每种任务恰好读那个位置、为什么同一骨干能服务四种任务」在 <a href="f-9-hidden-state-product.html#four-heads">F-9</a> 逐个拆开讲。</p>
 
         <h2 id="checkpoint" data-answers="1,4,5,6,8,10,11,14">检查：把常见误解改写准确</h2>
         <ol>
